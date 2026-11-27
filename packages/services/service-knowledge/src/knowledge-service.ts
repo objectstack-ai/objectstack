@@ -1581,17 +1581,21 @@ export class KnowledgeService implements IKnowledgeService {
    * latest {@link RECONCILE_MAX_WAIT_MS} after the first one it gathers. A
    * reconcile that comes due while a build of the source is running waits one
    * more quiet period, so the walk it starts begins after the write. Answers
-   * the sources asked for and those over the object that cannot be reconciled;
-   * a source an external indexer owns is in neither.
+   * the sources asked for and those over the object no reconcile can repair
+   * (no `listDocuments`, or no data engine); a source an external indexer
+   * owns is in neither.
    */
   requestReconcile(object: string): KnowledgeReconcileRequest {
-    const request: KnowledgeReconcileRequest = { scheduled: [], unlisted: [] };
+    const request: KnowledgeReconcileRequest = { scheduled: [], unreconcilable: [] };
     if (this.buildsStopped) return request;
     for (const entry of this.registry.entries()) {
       if (entry.handed.source.object !== object) continue;
       const why = this.reconcileExclusion(entry);
-      if (why?.unlisted) request.unlisted.push(entry.face);
-      if (why !== undefined) continue;
+      if (why !== undefined) {
+        // An external indexer's index is not this service's to call stale.
+        if (why.unlisted || !this.options.dataEngine) request.unreconcilable.push(entry.face);
+        continue;
+      }
       this.armReconcile(entry.key, Date.now());
       request.scheduled.push(entry.face);
     }

@@ -746,7 +746,7 @@ export class KnowledgeServicePlugin implements Plugin {
       return;
     }
     const request = service.requestReconcile(object);
-    if (request.scheduled.length === 0 && request.unlisted.length === 0) {
+    if (request.scheduled.length === 0 && request.unreconcilable.length === 0) {
       ctx.logger.debug?.(`KnowledgeServicePlugin: '${object}' had a predicate write (${type}); no source the service keeps indexes it.`);
       return;
     }
@@ -763,10 +763,10 @@ export class KnowledgeServicePlugin implements Plugin {
         { object, type, matched, reconcile: request.scheduled },
       );
     }
-    if (request.unlisted.length > 0) {
+    if (request.unreconcilable.length > 0) {
       ctx.logger.warn?.(
-        unrepaired(`of source(s) ${request.unlisted.join(', ')} (an adapter that does not list its documents, so no reconcile can repair it) `),
-        { object, type, matched, unlisted: request.unlisted },
+        unrepaired(`of source(s) ${request.unreconcilable.join(', ')} (no reconcile can repair it: its adapter does not list its documents, or no data engine is bound) `),
+        { object, type, matched, unreconcilable: request.unreconcilable },
       );
     }
   }
@@ -812,24 +812,24 @@ export class KnowledgeServicePlugin implements Plugin {
       return;
     }
     const cron = option?.cron ?? RECONCILE_DEFAULT_CRON;
-    const timezone = option?.timezone;
+    const timezone = option?.timezone ?? 'UTC';
     try {
       await jobs.schedule(
         RECONCILE_JOB,
-        { type: 'cron', expression: cron, ...(timezone === undefined ? {} : { timezone }) },
+        { type: 'cron', expression: cron, timezone },
         async (): Promise<JobRunOutcome> => reconcileJobOutcome(await service.reconcileSources()),
       );
     } catch (err) {
       ctx.logger.warn?.(
-        `KnowledgeServicePlugin: the reconcile job was not scheduled: the job service refused '${cron}'` +
-          `${timezone === undefined ? '' : ` in ${timezone}`} (${err instanceof Error ? err.message : String(err)}). ` +
+        `KnowledgeServicePlugin: the reconcile job was not scheduled: the job service refused '${cron}' ` +
+          `in ${timezone} (${err instanceof Error ? err.message : String(err)}). ` +
           'Correct the plugin\'s reconcile option; until then nothing reconciles the indexes on a schedule.',
       );
       return;
     }
     this.jobs = jobs;
     ctx.logger.info?.(
-      `KnowledgeServicePlugin: reconcile scheduled ('${cron}'${timezone === undefined ? ' UTC' : ` ${timezone}`}, job '${RECONCILE_JOB}'): ` +
+      `KnowledgeServicePlugin: reconcile scheduled ('${cron}' ${timezone}, job '${RECONCILE_JOB}'): ` +
         'each source whose store lists its documents is walked completely, unchanged documents are not embedded again.',
     );
   }

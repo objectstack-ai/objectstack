@@ -215,14 +215,18 @@ export interface KnowledgeReconcileReport {
 /**
  * What a predicate write asked of the reconcile
  * (`KnowledgeService.requestReconcile`): the sources over the object that
- * will be reconciled once the quiet period passes, and those that cannot be,
- * each named by its face.
+ * will be reconciled once the quiet period passes, and those no reconcile can
+ * repair, each named by its face.
  */
 export interface KnowledgeReconcileRequest {
   /** Sources whose reconcile is pending: it starts once no predicate write on the object arrived for {@link RECONCILE_QUIET_MS}. */
   scheduled: string[];
-  /** Sources over the object whose store lists no documents: a walk could neither skip nor purge, so none is asked for. */
-  unlisted: string[];
+  /**
+   * Sources over the object no reconcile can repair, so none is asked for:
+   * their store lists no documents (a walk could neither skip nor purge), or
+   * no data engine is bound (nothing can be walked).
+   */
+  unreconcilable: string[];
 }
 
 /** A lease on the cluster lock, as the build uses it (`LockHandle`, `@objectstack/spec/contracts`). */
