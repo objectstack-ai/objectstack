@@ -2481,10 +2481,15 @@ export class KnowledgeService implements IKnowledgeService {
       );
       return 'not-synced';
     }
-    // An adapter not registered (yet) throws its refusal, so the message is
-    // retried: a store that registers late is met by a later attempt, and one
-    // that never does leaves a dead letter naming the source and the record.
-    const adapter = this.getAdapter(source.adapter);
+    // The source's adapter is resolved now ({@link adapterFor}): the one it
+    // names, else the deployment's store, else the only one registered. Where
+    // none can be resolved it throws its coded refusal — the named adapter is
+    // not mounted, no adapter is mounted (`503 SERVICE_UNAVAILABLE`), or
+    // several are and none is the deployment's (`400 VALIDATION_ERROR`) — so
+    // the message is retried: a store that registers late is met by a later
+    // attempt, and one that never does leaves a dead letter naming the source
+    // and the record.
+    const adapter = this.adapterFor(source);
     await chainAfter(this.recordSyncTails, documentIdFor(source.name, message.recordId), () =>
       this.syncRow(source, adapter, message.object, message.recordId, engine),
     );

@@ -161,7 +161,12 @@ function makeRealtime() {
  * Registers the SQL driver, the test object and, when asked, a realtime
  * service, in init(); the knowledge adapter in start(), as a store plugin does.
  */
-function hostPlugin(file: string, realtime: IRealtimeService | undefined, adapter: IKnowledgeAdapter): Plugin {
+function hostPlugin(
+  file: string,
+  realtime: IRealtimeService | undefined,
+  adapter: IKnowledgeAdapter,
+  others: Record<string, IKnowledgeAdapter> = {},
+): Plugin {
   return {
     name: 'test.knowledge-queue-host',
     version: '1.0.0',
@@ -175,7 +180,9 @@ function hostPlugin(file: string, realtime: IRealtimeService | undefined, adapte
       if (realtime) ctx.registerService('realtime', realtime);
     },
     async start(ctx: PluginContext) {
-      ctx.getService<KnowledgeService>('knowledge').registerAdapter('memory', adapter);
+      const service = ctx.getService<KnowledgeService>('knowledge');
+      service.registerAdapter('memory', adapter);
+      for (const [id, other] of Object.entries(others)) service.registerAdapter(id, other);
     },
   } as unknown as Plugin;
 }
@@ -221,6 +228,8 @@ interface BootOptions {
   realtime?: boolean;
   queue?: boolean;
   knowledge?: KnowledgeServicePluginOptions;
+  /** Further stores, registered beside `memory`. */
+  adapters?: Record<string, IKnowledgeAdapter>;
 }
 
 async function boot(opts: BootOptions = {}) {
@@ -231,7 +240,7 @@ async function boot(opts: BootOptions = {}) {
   const kernel = new ObjectKernel({ logger: { level: 'fatal' }, gracefulShutdown: false } as never);
   kernels.push(kernel);
   await kernel.use(new ObjectQLPlugin());
-  await kernel.use(hostPlugin(file, realtime, memory.adapter));
+  await kernel.use(hostPlugin(file, realtime, memory.adapter, opts.adapters));
   if (opts.queue !== false) {
     await kernel.use(new QueueServicePlugin({ adapter: 'db', db: { pollIntervalMs: 10, maxIdleIntervalMs: 20 } }));
   }
@@ -437,6 +446,24 @@ describe.each(TRIGGERS)('record sync through the queue — %s', (_label, realtim
     t.queue.start();
     await t.drained(2);
     expect(t.docs.size).toBe(0);
+  });
+
+  it("a source that names no adapter syncs through the queue to the deployment's store", async () => {
+    const { adapter: _named, ...unplaced } = source();
+    const decoy = makeAdapter();
+    const t = await boot({
+      realtime,
+      adapters: { decoy: decoy.adapter },
+      knowledge: { sources: [unplaced as KnowledgeSource], deploymentAdapter: 'memory' },
+    });
+    expect(t.service.recordSyncQueued).toBe(true);
+    const row = await t.insert({ title: 'Leave policy', body: 'Twenty days of paid leave', status: 'published' });
+    await t.drained();
+    const rows = await t.queueRows();
+    expect(rows.map((r) => r.status)).toEqual(['completed']);
+    expect(t.docs.size).toBe(1);
+    expect(decoy.docs.size).toBe(0);
+    expect(await t.found('paid leave')).toEqual([String(row.id)]);
   });
 
   it('a source unregistered before its message is processed: completed, no write, no retry', async () => {
