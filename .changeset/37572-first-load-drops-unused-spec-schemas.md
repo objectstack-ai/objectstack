@@ -4,7 +4,7 @@
 '@object-ui/app-shell': patch
 ---
 
-perf(console): the first load no longer downloads spec schemas nobody reads, nor the form package for the record page
+perf(console): the first load no longer downloads spec schemas the Console never reads, nor the whole form package
 
 Clause-②: no
 Metadata-protocol: none
