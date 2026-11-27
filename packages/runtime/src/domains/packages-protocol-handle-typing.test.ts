@@ -57,6 +57,8 @@
  * bought with a behaviour change.
  */
 import { describe, expect, it } from 'vitest';
+// [#37811] Paid at collection: the dispatcher's reach loads `@objectstack/metadata` (check:test-source-alias).
+import '@objectstack/metadata';
 import { BUILTIN_OPERATION_MESSAGES } from '@objectstack/spec/system';
 import { HttpDispatcher } from '../http-dispatcher.js';
 import type { PackagesDomainProtocol } from './packages.js';
