@@ -337,9 +337,10 @@ export function ChatDockConversation({
             label: paneConversationId ? headerLabel : undefined,
             labelPending,
             startNew,
+            agent: activeAgentRoute,
           },
     );
-  }, [onActionsChange, inert, conversationId, paneConversationId, headerLabel, labelPending, startNew]);
+  }, [onActionsChange, inert, conversationId, paneConversationId, headerLabel, labelPending, startNew, activeAgentRoute]);
 
   // OSS / no AI seat → the whole dock body is inert (the robot is gated too).
   if (inert) return null;

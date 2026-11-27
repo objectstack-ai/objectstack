@@ -3665,6 +3665,7 @@ const ru = {
     recent: "Недавние",
     starred: "Отмеченные",
     removeFromFavorites: "Убрать {{name}} из избранного",
+    conversationUnavailable: "Этот диалог больше недоступен",
     allReports: "Все отчёты",
     collapse: 'Свернуть боковую панель',
     expand: 'Развернуть боковую панель',
