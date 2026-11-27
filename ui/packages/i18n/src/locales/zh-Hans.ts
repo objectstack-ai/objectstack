@@ -4805,6 +4805,18 @@ const zh = {
     recordCitations: {
       title: '引自记录',
     },
+    questionCard: {
+      aiAsks: 'AI 问：',
+      progress: '第 {{current}}/{{total}} 题',
+      typeYourOwn: '自己输入…',
+      recommended: '推荐',
+      skip: '跳过',
+      back: '上一题',
+      next: '下一题',
+      send: '发送',
+      pending: '有一个问题待回答',
+      answerLine: '{{header}}：{{answer}}',
+    },
     tool: {
       aggregate_data: '汇总相关数据',
       get_record: '读取这条记录',

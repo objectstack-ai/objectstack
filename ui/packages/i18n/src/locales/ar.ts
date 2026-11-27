@@ -4925,6 +4925,18 @@ const ar = {
     recordCitations: {
       title: 'مقتبس من السجلات',
     },
+    questionCard: {
+      aiAsks: 'يسأل الذكاء الاصطناعي:',
+      progress: 'السؤال {{current}} من {{total}}',
+      typeYourOwn: 'اكتب شيئًا آخر…',
+      recommended: 'موصى به',
+      skip: 'تخطٍّ',
+      back: 'السابق',
+      next: 'التالي',
+      send: 'إرسال',
+      pending: 'هناك سؤال بانتظار إجابتك',
+      answerLine: '{{header}}: {{answer}}',
+    },
     tool: {
       aggregate_data: "تجميع البيانات ذات الصلة",
       get_record: "قراءة هذا السجل",

@@ -4553,6 +4553,18 @@ const ja = {
     recordCitations: {
       title: 'レコードからの引用',
     },
+    questionCard: {
+      aiAsks: 'AI からの質問：',
+      progress: '質問 {{current}}/{{total}}',
+      typeYourOwn: 'その他（自分で入力）…',
+      recommended: 'おすすめ',
+      skip: 'スキップ',
+      back: '前へ',
+      next: '次へ',
+      send: '送信',
+      pending: '回答待ちの質問があります',
+      answerLine: '{{header}}：{{answer}}',
+    },
     tool: {
       aggregate_data: "関連データを集計する",
       get_record: "このレコードを読み込む",

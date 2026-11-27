@@ -4641,6 +4641,18 @@ const fr = {
     recordCitations: {
       title: 'Cité depuis les enregistrements',
     },
+    questionCard: {
+      aiAsks: 'L’IA demande :',
+      progress: 'Question {{current}} sur {{total}}',
+      typeYourOwn: 'Saisir autre chose…',
+      recommended: 'Recommandé',
+      skip: 'Passer',
+      back: 'Précédent',
+      next: 'Suivant',
+      send: 'Envoyer',
+      pending: 'Une question attend votre réponse',
+      answerLine: '{{header}} : {{answer}}',
+    },
     tool: {
       aggregate_data: "Synthétiser les données",
       get_record: "Lire l’enregistrement",

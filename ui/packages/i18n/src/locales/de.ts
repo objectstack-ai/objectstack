@@ -4551,6 +4551,18 @@ const de = {
     recordCitations: {
       title: 'Zitiert aus Datensätzen',
     },
+    questionCard: {
+      aiAsks: 'KI fragt:',
+      progress: 'Frage {{current}} von {{total}}',
+      typeYourOwn: 'Etwas anderes eingeben…',
+      recommended: 'Empfohlen',
+      skip: 'Überspringen',
+      back: 'Zurück',
+      next: 'Weiter',
+      send: 'Senden',
+      pending: 'Eine Frage wartet auf Ihre Antwort',
+      answerLine: '{{header}}: {{answer}}',
+    },
     tool: {
       aggregate_data: "Die Daten zusammenfassen",
       get_record: "Den Datensatz lesen",

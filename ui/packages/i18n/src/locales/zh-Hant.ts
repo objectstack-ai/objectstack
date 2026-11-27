@@ -4805,6 +4805,18 @@ const zhHant = {
     recordCitations: {
       title: '引自記錄',
     },
+    questionCard: {
+      aiAsks: 'AI 問：',
+      progress: '第 {{current}}/{{total}} 題',
+      typeYourOwn: '自己輸入…',
+      recommended: '推薦',
+      skip: '跳過',
+      back: '上一題',
+      next: '下一題',
+      send: '傳送',
+      pending: '有一個問題待回答',
+      answerLine: '{{header}}：{{answer}}',
+    },
     tool: {
       aggregate_data: '彙總相關資料',
       get_record: '讀取這條記錄',

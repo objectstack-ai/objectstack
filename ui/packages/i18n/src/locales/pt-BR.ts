@@ -4640,6 +4640,18 @@ const pt = {
     recordCitations: {
       title: 'Citado de registros',
     },
+    questionCard: {
+      aiAsks: 'A IA pergunta:',
+      progress: 'Pergunta {{current}} de {{total}}',
+      typeYourOwn: 'Digitar outra coisa…',
+      recommended: 'Recomendado',
+      skip: 'Pular',
+      back: 'Anterior',
+      next: 'Próxima',
+      send: 'Enviar',
+      pending: 'Há uma pergunta aguardando sua resposta',
+      answerLine: '{{header}}: {{answer}}',
+    },
     tool: {
       aggregate_data: "Resumir os dados",
       get_record: "Ler o registro",
