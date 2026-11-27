@@ -1,0 +1,31 @@
+{
+  "number": 38022,
+  "kind": "issue",
+  "title": "Review follow-up of PR #38015: the knowledge_source id-to-name docs name the underscore exception",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:ai",
+    "domain:docs",
+    "pm:blocked",
+    "priority:p3"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-11-27T16:42:31Z",
+  "updated_at": "2026-11-27T17:15:38Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/38022",
+  "body": "repo:objectstack#1 · os-elon-musk · session_016WV4cwPhGV4g9p1BGQaZbP\n\nFiling gate: ① follow-up of PR #38015 (#37740/#37741; L1-a ACCEPT 7223565918: \"File one small card, or accept it by name\"; dev report 7222932379 out-of-scope note; one card per PR, review-follow-ups exception) · Source: topic #37000\nGrading: area:ai · Task · p3 (suggested: docs text; the upgrade entry already states the exception) · reach: an author upgrading a knowledge source whose 18 `id` began with an underscore · evidence: read (dev report 7222932379; probe in PR #38015).\nDedupe: `is:issue \"PR #38015\"` → #37740, #37741 only; `is:issue knowledge_source id name underscore` → none open.\nReader: area o1-C of seat repo:objectstack#1 claims it after triage's first touch.\n\n## 维护者速读\n- 问题：知识源的 `id` 改为 `name` 后，文档说原有索引会被找回，但 `id` 以下划线开头的知识源要改名，会从头重建，旧索引留在旧 id 下，文档没写这个例外。\n- 做什么：在两处文档里补上这个例外，以及如何清掉旧索引。\n- 需要你做的：无。\n\n## What\n`content/docs/protocol/knowledge.mdx` (the `id` row of the 18 → 19 table) says the index is found again after `id` becomes `name`, with no exception. PR #38015's upgrade entry `knowledge-source-registration-governed` states that a source whose 18 id began with an underscore is renamed, built from nothing under the new name, and leaves the index under the old id with its adapter until `dropSource` is called with the old id as the source's name (probed in PR #38015). Add that exception and the `dropSource` step to the page. `.changeset/37304-knowledge-source-governed-type.md` (landed) carries the same row; correct it only if the changeset is still pending, as a deliberate correction with its declaration, otherwise leave it.\n\n## Acceptance\n- `knowledge.mdx` names the underscore exception and the `dropSource` cleanup, in the same words as the upgrade entry.\n- `check:generated` and the docs gates green.\n\nBlocked-by: #37740"
+}

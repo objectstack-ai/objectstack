@@ -1,0 +1,31 @@
+{
+  "number": 38024,
+  "kind": "issue",
+  "title": "ci: publish examples/app-starter (com.example.starter) to the staging and production cloud marketplaces as the first-party starter",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:package",
+    "domain:devx",
+    "pm:queue",
+    "priority:p1"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-11-27T16:46:31Z",
+  "updated_at": "2026-11-27T17:15:41Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/38024",
+  "body": "repo:cloud#5 · hotlong · session_01Q4EjjNNAszFFRkpjA3zLbb\n\nFiling gate: ③ maintainer-directed. Source: maintainer. Jack (hotlong) picked this option on a decision card in the cloud#4957 project thread, 2026-11-27 16:41Z: 「另立卡交 objectstack 座位 — 在框架仓立卡,加一条把 examples/app-starter 以第一方起步模版发布到各平面的流程,改工作流的 PR 留给你手动合并。」 (file a card on the framework repo for the objectstack seat: add a flow that publishes examples/app-starter as the first-party starter template to each plane; the workflow PR is left for him to merge by hand).\n\nGrading: area:package · Task · p1 (inherits blocked objectstack-ai/cloud#4957, p1) · reach: n/a (no publish exists) · evidence: read.\n\nDedupe: searched `is:issue` for `app-starter publish marketplace` (11), `is_starter publish` (8), `com.example.starter` (1), `publish examples marketplace workflow` (76): no open card covers it; #36944 (closed) built the app, its report A3 says this repo has no flow that publishes `examples/*`.\n\nReader: the `repo:objectstack#3` seat (area:package p1) dispatches it; the workflow PR is a governed surface (`.github/workflows/**`), so Jack merges it by hand.\n\n## 维护者速读\n\n- 做什么:在框架仓加一条 CI 流程,把起步应用(公司、联系人、任务、备忘)发布到 cloud staging 和生产的应用市场,作为第一方起步模版。\n- 为什么:cloud#5149 已合并,新工作区的第一个环境会自动装起步应用,但它只认市场里这一行第一方起步包;没发布就什么都不做。\n- 需要你做的:PR 改了 `.github/workflows`,由你手动合并;生产那一步是否手动触发,在 PR 里写明请你定。\n\n## Why\n\nobjectstack-ai/cloud#5149 (cloud#4957, merged 2026-11-27) makes a new workspace's first environment install the platform starter on first open. It only counts ONE row: a `sys_package` with manifest `com.example.starter`, `is_starter: true`, `owner_org_id` NULL (first-party), `visibility: marketplace`, with an approved version. No such row exists on staging or production, because nothing publishes `examples/app-starter`, so the cloud change is inert until this lands.\n\n## What\n\n1. A workflow (or a pair, staging + production) in `.github/workflows/` that builds `examples/app-starter` and publishes it to the cloud marketplace:\n   - staging `https://cloud.objectos.app`, production `https://cloud.objectos.ai` (the URLs HotCRM's publish workflows hard-code);\n   - credentials: platform-admin bearer keys as repo/org secrets (HotCRM uses org secrets `OS_CLOUD_API_KEY_STAGING` / `OS_CLOUD_API_KEY_PRODUCTION`; confirm they reach this repo, or name the secret the maintainer must add);\n   - service-mode publish (Authorization: Bearer), NO `owner_org_id`, `visibility: marketplace`, `is_starter: true`, version created with `auto_approve: true` (cloud `packages/service-cloud/src/routes/package-publish.ts`: service mode with no owner and marketplace visibility mints the first-party row; `auto_approve` needs the platform-admin key);\n   - idempotent re-runs (package upsert by manifest id; an existing version answers 409 and is not an error).\n2. Trigger: staging on a release/tag of the framework (or `workflow_dispatch`); production `workflow_dispatch` only, unless the maintainer says otherwise in the PR. A `dry_run` input that prints payloads without HTTP.\n3. Prior art to reuse rather than reinvent: HotCRM `.github/workflows/publish-staging.yml`, `publish-production.yml` and `scripts/publish-marketplace.mjs`. Note `os package publish` deliberately does not send `is_starter` (the platform decides the flag), so the starter flag must be sent by this flow's own payload, as HotCRM's script does for its keys.\n\n## Acceptance\n\n- A dry run prints the package + version payloads with `is_starter: true`, `visibility: marketplace`, no `owner_org_id`, `auto_approve: true`.\n- After the maintainer merges and runs it on staging: `GET /api/v1/cloud/packages` on staging lists `com.example.starter` with `is_starter: true`, owner null, an approved version; a new workspace's first environment then installs it on first open (cloud#5149 path).\n- Production run is the maintainer's call.\n\nRelated: #36941 (starter epic), #36944 (report A3), objectstack-ai/cloud#4957, objectstack-ai/cloud#5149."
+}

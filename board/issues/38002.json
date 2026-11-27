@@ -1,0 +1,31 @@
+{
+  "number": 38002,
+  "kind": "issue",
+  "title": "Review follow-up of PR #37963: chunk-level title freshness, so a write between complete builds under another title field is not served past the field gate",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:ai",
+    "pm:blocked",
+    "priority:p3",
+    "security"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-11-27T14:58:50Z",
+  "updated_at": "2026-11-27T17:44:45Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/38002",
+  "body": "repo:objectstack#1 · os-elon-musk · session_016WV4cwPhGV4g9p1BGQaZbP\n\nFiling gate: ① follow-up of PR #37963 (contract review 7221441058, S1; L1-a REWORK 7221453845 accepts \"state it as the proof's limit and file a follow-up card\"; one card per PR, review-follow-ups exception) · Source: topic #37000\nGrading: area:ai · Task · p3 (suggested: narrow path, needs a runtime display-field change and change-back between complete builds, or a rolling deploy with pre-#37301 code) · reach: a non-system caller who may not query an object's `title` field, on a source that indexes the object without serving `title` · evidence: read (contract review 7221441058, S1).\nDedupe: `is:issue \"PR #37963\"` → #37467 only; `is:issue knowledge recipe hash freshness` → #37000 only.\nReader: area o1-C of seat repo:objectstack#1 claims it after triage's first touch.\n\n## 维护者速读\n- 问题：知识检索在两次完整重建之间，记录变更同步写入的文档用的是写入当时的标题字段；如果对象的显示字段在运行中改成 `title` 又改回来，中间那段时间写入的文档会带着 `title` 字段的值，而索引的配方哈希仍显示「最新」，于是无权读取 `title` 的用户可能在片段里看到它。\n- 做什么：让「是否为当前规则写入」按文档（或分片）判断，而不只看最后一次完整重建记录的哈希。\n- 谁受益：字段级权限更严格的用户。范围很窄。\n- 需要你做的：无。\n\n## What\nPR #37963 retires the field gate's `title` arm and serves a qualifying source only when `indexStatus` reports the current fingerprint and recipe hash. The recipe hash names what the last complete build walked under, not what later writes were made under: `writeSynced` and `repairStale` write through `recordToDocument` with the schema as it reads at that moment, into the active generation, and no adapter records or compares the recipe hash on `upsert`. An object definition changing at runtime starts no rebuild (`buildReloadedSource` runs only for a `knowledge_source` item). PR #37963 states this as the proof's limit (module jsdoc and `content/docs/protocol/knowledge.mdx`).\n\nPath (from the review): display field `name`, index built, hash R recorded; `nameField` set to `title`, records synced in that window carry `title` values as their document title; `nameField` set back to `name` before any boot; `planIndex` computes R again, `indexStatus` reports R, the source reads proven, and those documents are served at chunk granularity to a caller who may not query `title`. The same shape is reachable by a node still running pre-#37301 code beside an upgraded one during a rolling deploy.\n\nOptions to measure (the dev picks and states): record the recipe hash (or the title field name) per document on `upsert` and drop a hit whose stored recipe differs from the current one; or start a rebuild (or mark the source unproven) when a qualifying object's display field changes at runtime.\n\n## Acceptance\n- The review's path is pinned: after the change and change-back, a caller who may not query `title` is never served a stored `title` value.\n- No adapter-contract member is added without its reader (ADR-0161 K10); if one is needed, the PR says so and declares it.\n\nBlocked-by: #37467"
+}

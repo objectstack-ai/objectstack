@@ -13,18 +13,20 @@
   "labels": [
     "area:ai",
     "domain:skills",
-    "pm:queue",
+    "pm:dispatched",
     "priority:p2"
   ],
-  "assignees": [],
+  "assignees": [
+    "os-sales"
+  ],
   "milestone": null,
   "type": "Task",
   "created_at": "2026-11-27T04:32:02Z",
-  "updated_at": "2026-11-27T05:24:04Z",
+  "updated_at": "2026-11-27T17:29:32Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 1,
+  "comments": 2,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/37814",
   "body": "repo:objectstack#6 · hotlong · session_01Q4EjjQkY5yXZrN9BEA3rEK\n\nFiling gate: ③ follow-up of a delivery in review. PR #37807 (card #35143, Seeds and actions family) adds the error `action-body-write-capability-undeclared`: an action body that calls a `ctx.api` write without `api.write` in its `body.capabilities` is refused by `os validate` / `os lint` / `os build` and at publish. Card #35143's Scope says: \"When a family lands, the matching trap leaves the published skills where it is taught as prose.\"\n\n- `skills/objectstack-ui/rules/actions.md:15-16` teaches the grant as prose (\"without it the sandbox throws on a write\"). Once #37807 merges, rewrite it to point at the rule (the check now catches it; name the rule id and its fix) instead of teaching the trap.\n- Also check the same skill for the seed-key and object-binding traps (`seed-record-unknown-field`, `object-reference-unknown` at seeds, flow CRUD/screen nodes and actions).\n\nPrerequisite: PR #37807 merged. `skills/**` may be a governed path; the PR follows whatever review that path needs.\nSuggested-grade: p3 · prose follow-up of a landed check.\nDedupe: `api.write actions.md`, `write capability skill` found only #35143 and PR #37807. Precedent: #37529 (the Data model family's skills follow-up)."

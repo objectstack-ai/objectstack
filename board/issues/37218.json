@@ -15,17 +15,17 @@
     "domain:server",
     "enhancement",
     "pm:queue",
-    "priority:p3"
+    "priority:p2"
   ],
   "assignees": [],
   "milestone": null,
-  "type": "Feature",
+  "type": "Bug",
   "created_at": "2026-11-25T04:12:01Z",
-  "updated_at": "2026-11-25T04:16:51Z",
+  "updated_at": "2026-11-27T19:15:17Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 1,
+  "comments": 2,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/37218",
   "body": "repo:objectstack#3 · os-support-ai · session_01WGufzeiHatzB4rRx1t4Php\n\nFiling gate: ① the nit rule (accepted deviations on a landing PR each owe a card) · Source: fleet, PR #37148 (#35863) L2 7152581110 nits N6, N7 and N2, carried on L1 ACCEPT 7152601812. ⛔ Not a claim.\n\n## What happens\n\nPR #37148 lets a decided approval request's step line say where the approval went next (`flow_route.outcome` on `ApprovalRequestRow`, `packages/spec/src/contracts/approval-service.ts`). `ended: true` (\"The approval ended here\") is served only when the run is provably a root run that ran the armed flow body with no `subflow` / `map` node. \"Ran the armed body\" is proven by `ranArmedBody` (`packages/plugins/plugin-approvals/src/approval-service.ts`): the armed body is the newest `getFlowVersionHistory` entry and was registered before the run's `startedAt`.\n\n- **N6 (the main row).** That history is in process memory. Every process restart and every re-registration of the flow (an edit, a package reload, a rollback) makes the proof fail for all of that flow's earlier runs, so their decided requests lose `ended` and the panel stops saying the approval ended. Nothing is shown wrong; the line is omitted. In practice the card's own pin (\"a request decided at the last step shows that the approval ended\") holds only until the next boot or edit. The engine already keeps a durable content identity for the body a run runs (the run's flow checksum, #28405, `packages/services/service-automation/src/flow-version-pinning*.ts`, `sys-automation-run.object.ts`); a witness built on it would survive restarts.\n- **N7.** Two narrow cases still answer `ended: true` for a body the run did not run. Both need the edit to remove every `subflow` and `map` node. (a) A rollback made before the run started and undone after it: the newest entry is armed again without a new registration (`rollbackFlow` has no caller outside the engine in this tree). (b) Multi-replica: the reading process registered an edit before the run started on a process that had not received it yet. The contract sentence \"rolled back … since the run started\" is not exact for (a).\n- **N2 (closure row, no reach).** `routeOutcome` measures \"later\" as `created_at` after this request's `created_at`, not after its decision, so a sibling request of the same run opened while this one was pending would read as \"went on to\". The `parallel` node refuses a durable pause inside a branch, so no reachable case was found. Kept here so the next change to `routeOutcome` sees it.\n\n## Done when\n\n- `ended` is judged against the run's durable flow identity (#28405 checksum or equivalent), so it survives restart and re-registration; pin: a run, then a restart (or re-registration of an identical body), then the read still serves `ended: true`.\n- N7 (a) and (b) answer no `ended` (falls out of the durable witness if the checksum is the run's own); the contract sentence is exact.\n- N2: either a pin shows the sibling case is unreachable, or \"later\" is measured from the decision.\n\nBusiness reason: approvers and requesters reading a record's approval panel lose \"The approval ended here\" for every historical request after any deploy, so the feature #35863 shipped quietly stops working on the requests people look back at.\nReader: the seat holding area:workflow approvals, once triage grades it.\nGrading: area:workflow · Enhancement · minor (a line omitted, never wrong; N7 corners need a flow edit that removes every child-run node) · reach: every decided request of a flow after a restart → p3 suggested. Triage confirms area, type, grade and domain.\nDedupe: `flow_route outcome ended` → #35863 only; `ranArmedBody` → none; `flow checksum approval` → #28405 (closed, the checksum's origin), no open card."

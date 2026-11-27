@@ -1,0 +1,37 @@
+{
+  "number": 38031,
+  "kind": "pull_request",
+  "title": "docs(spec,ai): agent.zod.ts stops saying the absorbed topics-to-sources conversion is in the chain; agents page names the excess-property tsc error",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "protocol:ai",
+    "size/s",
+    "tooling"
+  ],
+  "assignees": [
+    "os-elon-musk"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-27T17:51:34Z",
+  "updated_at": "2026-11-27T18:57:39Z",
+  "closed_at": "2026-11-27T18:57:36Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-11-27T18:57:36Z",
+  "comments": 6,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/38031",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-elon-musk\"} -->\n_Requested by **Elon** · [project thread](https://claude.ai/code/project/chan_01WedDzV26nniwxv7jC88B9D?thread=cmsg_01WedDzV26nniwxv7jC88B9DLCo5F2y7fgbM8tstGoyyUn)_\n\nFixes #38012\n\nClause-②: no\nMetadata-protocol: none\n\n## 维护者速读\n- 用户能看到什么变化：读规格源码和对外文档的作者看到的说法与实际一致；运行行为无任何变化。\n- 为什么做：智能体规格清理的收尾，修正上一轮审核记下的两处小说法（源码注释里一个早已并入删除的转换被说成「仍在链上」，文档补半句编译期报错说明）。\n- 出错会怎样：只改一段注释和文档表格两格，出错也只是措辞不准，可随时直接撤回。\n- 要你做什么：无。\n\n## What changes\n- **`packages/spec/src/ai/agent.zod.ts`, the note where `AIKnowledgeSchema` used to live.** It said the protocol-17 `agent-knowledge-topics-to-sources` conversion \"remains in the chain\". It does not: the rename was absorbed before release into the removal of the whole `agent.knowledge` block (the ABSORBED note at `conversions/entries/17/sharing-rule-access-level-full-to-edit.ts:17`), no registry or entry module carries the id, and `retired-after.census.json` has no row for it. The sentence now says exactly that. Comment only: no schema, type or export changes.\n- **`content/docs/ai/agents.mdx`, the `tools` and `knowledge` rows.** Each gains a half-clause: a `defineAgent({ … })` literal that sets the removed key fails `tsc` as an excess property (TS2353), beside the existing parse refusal. `defineAgent` takes `z.input` of the strict `AgentSchema`, a closed object type. The old by-name `never` refusal is not claimed.\n- **One changeset**, `@objectstack/spec` patch (spec publishes `src/**/*.zod.ts`), carrying both declaration lines.\n\n## Tests\nAll readings at head `c5a5d51901`, worktree from `origin/main` `8b47659e8e`.\n\n<details><summary>Type check of the new docs claim (throwaway probe against the rebuilt spec dist)</summary>\n\nA scratch file outside the repo, compiled with tsc 6.0.3 (`--ignoreConfig --noEmit --strict --module nodenext --moduleResolution nodenext --skipLibCheck`) against `packages/spec/dist/index.js` after `pnpm --filter @objectstack/spec build` (VERDICT command-exit 0):\n\n- control `defineAgent({ name, label, role, instructions })`: no diagnostic;\n- the same literal plus `tools: [...]`: `error TS2353: Object literal may only specify known properties, and 'tools' does not exist in type ...`;\n- the same literal plus `knowledge: { topics: [...] }`: `error TS2353: ... and 'knowledge' does not exist in type ...`.\n\nNo existing type test pins this. The probe file was not committed.\n</details>\n\n<details><summary>Spec tests and typecheck (under the verify lock)</summary>\n\n- `pnpm --filter @objectstack/spec exec vitest run --maxWorkers=2` over `src/ai/agent.test.ts`, `agent-lifecycle-retirement.test.ts`, `agent-memory-store-retirement.test.ts`, `agent-model-provider-retirement.test.ts`, `src/conversions/retired-after.census.test.ts`: Test Files 5 passed (5), Tests 122 passed (122); VERDICT command-exit 0.\n- `pnpm --filter @objectstack/spec typecheck`: VERDICT command-exit 0.\n</details>\n\n<details><summary>Derived gates (dispatch-gates --commands, 105 commands)</summary>\n\n- 99 exit 0 on the first pass, including `check:docs`, `check:doc-authoring`, `check:doc-anchors`, `check:issue-citations`, `check:nul-bytes` and `check-affected-docs`.\n- 3 exited 3 (PREREQUISITE NOT MET, unbuilt workspace packages) and are green after building `@objectstack/lint` and `@objectstack/formula` with their dependencies: `check:doc-formula-expressions`, `check:doc-security-posture`, `check:docs-transcript-drift`.\n- 3 NOT MEASURED locally (they need the whole workspace built), left to CI: `check:skill-examples` (client SDK dist), `check:dual-build-cjs-loads`, `check:lean-entry-closure`.\n- `--ran` reconciliation: 105 derived, 105 run, 0 UNRUN.\n</details>\n\n## Acceptance notes\n- No ablation: no tested behaviour changed (a comment, two docs cells and a changeset).\n- Not a narrowing and no `!` in the title, so the full dogfood battery is not owed.\n\n## Verification\nRead first (by risk): `content/docs/ai/agents.mdx` (the two table rows: the only claim a reader acts on), then `packages/spec/src/ai/agent.zod.ts` (the rewritten note).\n\nTwo-minute check: `git grep -n \"agent-knowledge-topics-to-sources\" -- packages/spec/src` shows three hits, all comments (the ABSORBED note, the protocol-18 note that cites it, and this note), and no `id:` line, which is what the rewritten sentence says.\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_016WV4cxBECSPtHxQMZDHSie)_"
+}

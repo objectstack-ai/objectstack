@@ -1,0 +1,31 @@
+{
+  "number": 38041,
+  "kind": "issue",
+  "title": "lint: validate-knowledge-source refuses an absent known platform name under a stated closure too, and its tenant-write wording drops the stack and manifest remedy",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:ai",
+    "domain:server",
+    "pm:blocked",
+    "priority:p3"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-27T19:34:42Z",
+  "updated_at": "2026-11-27T20:15:10Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/38041",
+  "body": "repo:objectstack#1 · os-elon-musk · session_016WV4cwPhGV4g9p1BGQaZbP\n\nFiling gate: ① follow-up of PR #38038 (#38019; contract review 7226609684 nits N1, N2 and N6, folded into one card as the review asks) · Source: topic #37000\nGrading: area:ai · Feature · p3 (suggested: a leniency and wording on one rung; no wrong accept on the whole-collection door) · reach: a packaged `knowledge_source` published under a stated package closure that names an absent `sys_` object; a tenant author at a write that names no package · evidence: read of PR #38038 at 80a26dfbc5 by the contract review (no live run).\nDedupe: `is:issue knowledge-source-object-unknown closure` → checked at filing; open: #38019 (the parent follow-up), #37307 (the base card) only.\nReader: area o1-C of seat repo:objectstack#1 claims it after triage's first touch.\n\n## 维护者速读\n- 问题：#38038 让发布时找不到的平台对象(如 `sys_` 开头)直接报错，但只覆盖\"整个已发布集合\"这条路径；按包发布(常见路径)时同样的情况仍只是跳过。另外，给租户作者的报错说\"本应用未定义\"\"在 manifest 的 dependencies 里声明\"，而租户作者既没有应用也没有 manifest。\n- 做什么：按包发布时对 `sys_` 名字同样报错；把租户写入时的报错改成租户能照做的说法；顺带修两处说明文字。\n- 谁受益：写知识源的应用作者和租户管理员(报错更早、更准，能照着改)。\n- 需要你做的：无。\n\n## What\n1. N1: under a stated closure an absent known platform name is still skipped. The closure keeps every system object unconditionally (runtime-gate.ts, limb 1), so for a `sys_` name the snapshot is as final there as under the whole collection. Make that absent name a `knowledge-source-object-unknown` error under a closure as well. State in the PR whether `cloud_` and `ai_` names (which limb 1 may not keep) belong to the same arm, with the reading that decides it.\n2. N2: the rule header says the two platform arms apply \"both on the CLI and under a closure\"; under a closure only the first does. `os explain`'s text places the not-judged arm \"on the command line\" only, though it also holds under a closure. Correct both to what the code does after item 1.\n3. N6: at a write that names no package, the refusal says \"which this stack does not define\" and the hint offers \"declare that package in the manifest's `dependencies`\". A tenant author has no stack and no manifest. Word that arm for its reader (install the package, or name an object the organization has).\n\n## Acceptance\n- Under a stated closure, a source naming an absent `sys_` object is refused with `knowledge-source-object-unknown`; a present one passes (control). Pinned, with an ablation.\n- The `cloud_` / `ai_` reading is stated and pinned.\n- The rule header and `os explain` text match the arms.\n- The no-package write's refusal names neither a stack nor a manifest.\n\nBlocked-by: #38019"
+}

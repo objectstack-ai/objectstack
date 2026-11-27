@@ -2,8 +2,8 @@
   "number": 37741,
   "kind": "issue",
   "title": "knowledge_source tombstones: say what a code-door (registerSource) author does, and that an underscore-led 18 id keeps its old index key",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -13,7 +13,6 @@
   "labels": [
     "area:ai",
     "domain:spec",
-    "pm:dispatched",
     "priority:p3"
   ],
   "assignees": [
@@ -22,11 +21,15 @@
   "milestone": null,
   "type": "Task",
   "created_at": "2026-11-27T00:52:28Z",
-  "updated_at": "2026-11-27T12:57:07Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-27T17:23:09Z",
+  "closed_at": "2026-11-27T17:18:07Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
   "merged_at": null,
-  "comments": 2,
+  "comments": 3,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/37741",
   "body": "repo:objectstack#5 · os-bill · session_01Utp6Cb4BAjgQ43tqy1DvVJ\n\nFiling gate: ② follow-up out of #37304 (PR #37676, contract record 7206413701 nit N5, seat REWORK 7206423476), filed by the owning zone ai-37000 under #37304 at the seat's direction, per the maintainer's standing permission for areas to file their own follow-up cards. Handed to repo:objectstack#1 with the #37000 ledger (7206523866).\nGrading: area:ai · domain:spec · Task · p3 (seat-directed) · reach: authors upgrading a code-registered knowledge source from 18 · evidence: read.\n\n## 维护者速读\n\n- 做什么：旧写法的报错提示让作者去跑迁移命令，但在代码里注册的知识源没东西可迁；提示要改成告诉他们直接改代码，并说明旧 id 带下划线的源改名后会留下旧索引。\n- 谁受益：升级的开发者照提示就能改对。\n- 不做会怎样：提示指向一个没用的命令；功能不受影响。\n- 需要你做的：无。\n\n## What\n\nEach retired-key tombstone for `knowledge_source` ends by sending the author to `os migrate meta --from 18`. The only 18 instance is a registration in code (`registerSource`), which that command cannot walk. The ADR-0087 D3 entry says the compiler and the parse carry it; the tombstone does not. The entry also does not say that a source whose 18 `id` began with an underscore keeps an index under the old key once it is renamed.\n\n## Acceptance\n\n- The tombstone text names the code-door fix (edit the registration) beside the migrate command, and the D3 entry states the underscore-led id's stale index and how it is dropped (rebuild / `dropSource`).\n- Pins on the tombstone text updated; no shape change.\n\nBlocked-by: #37304"

@@ -2,8 +2,8 @@
   "number": 37972,
   "kind": "issue",
   "title": "test(plugin-list): ListView.inlineFlsNoop-6723 UNAUTHORED case reads the inline-data headers before the object schema loads, and reds the required Test UI (13/16) shard",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -14,20 +14,23 @@
     "area:ux",
     "bug",
     "domain:ui",
-    "pm:dispatched",
     "priority:p1"
   ],
   "assignees": [
     "os-tesla"
   ],
   "milestone": null,
-  "type": null,
+  "type": "Bug",
   "created_at": "2026-11-27T13:41:23Z",
-  "updated_at": "2026-11-27T14:15:56Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-27T14:57:00Z",
+  "closed_at": "2026-11-27T14:55:53Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 2,
+  "comments": 3,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/37972",
   "body": "repo:objectstack#3 · os-tesla · session_01L9qibyUSf2nKJWW6qBemSU\n\n## Why this matters\n\n`Test UI (13/16)` is a required check. A test that fails on timing alone keeps PRs that never touch `ui/` out of the merge queue. PR #37948 (a `packages/metadata-protocol` fix) failed it twice in a row, on the first run (job 140512339260) and on the one re-run (job 140529997984), so it cannot land until the test is fixed or a re-run happens to pass.\n\n## What fails\n\n`ui/packages/plugin-list/src/__tests__/ListView.inlineFlsNoop-6723.test.tsx`, case `UNAUTHORED: the grid takes the OBJECT-SCHEMA path …`:\n\n```\nexpected [ 'Id', 'Opportunity Name' ] to not include 'Id'\n```\n\n## Evidence that it is timing, not a regression\n\n- The same file is green in `Test UI (13/16)` of the `main` push run 46001713224 (`bc173343`), and main CI is green on `21ad7c54`.\n- No `ui/` commit lands between the failing run's CI base `39fafc0d` and `bc173343`.\n- Locally the file passes 3 of 3 (`pnpm exec vitest run packages/plugin-list/src/__tests__/ListView.inlineFlsNoop-6723.test.tsx` from `ui/`).\n- The headers it read carry `Id` and leave out `Amount`. That is the inline-data path with its FLS gate, read before the object-schema path took over. The case takes the first non-empty header set (`waitFor(() => expect(h.length).toBeGreaterThan(0))`), so a slow runner can read the render before the schema loads. `3eb778d8` (#37883, a list page draws its rows once before they paint) is on the CI base and moved that timing.\n\nFull write-up: PR comment https://github.com/objectstack-ai/objectstack/pull/37948#issuecomment-7219770629.\n\n## Acceptance\n\n- The UNAUTHORED case waits for the object-schema header set (for example `waitFor` until the headers equal `['Opportunity Name']`) before it asserts the mechanism, so it cannot pass or fail on the inline-data render.\n- The case still fails if the grid takes the inline-data path (keep the pin's teeth: an ablation that forces the inline path reds it).\n- No other assertion in the file is loosened.\n\n## Out of scope\n\n`StudioRoute.metadataArea-28561.test.tsx` also red `Test UI (13/16)` once on PR #37962 (`expected [ '/studio/~all' ] to deeply equal [ '/studio/~all', …(1) ]`). It is a different test; it is noted here only so a second occurrence can be linked, not fixed under this card."

@@ -2,8 +2,8 @@
   "number": 37944,
   "kind": "issue",
   "title": "runtime: export an in-process entry to the light authoring door, so the cloud ask admin skill can call the 5 tools as the signed-in user (no OAuth grant)",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -13,7 +13,6 @@
   "labels": [
     "area:ai",
     "enhancement",
-    "pm:dispatched",
     "pm:epic",
     "priority:p1",
     "size/m"
@@ -24,11 +23,15 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-27T12:30:27Z",
-  "updated_at": "2026-11-27T13:27:46Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-27T15:51:28Z",
+  "closed_at": "2026-11-27T15:50:16Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 3,
+  "comments": 5,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/37944",
   "body": "epic:#5027#1 · hotlong · session_01Q4EjjMUfmNYTem26rXLFUf\n\nFiling gate: ④ topic child (cross-repo prerequisite). Source: epic objectstack-ai/cloud#5027, M2 row 1 = cloud#5077 (plan v2 approved by the maintainer 2026-11-27 01:02Z 「同意，开工」; ruling: the admin skill calls \"the framework light door's 5 tools, in process, as the current user\"). cloud#5077's premise check (2026-11-27 12:29Z) found the door is not reachable in process from cloud. Business reason: without this, cloud would need a second copy of the door (~700 lines) that drifts from the framework's.\nOwner: **repo:objectstack#3** (maintainer 2026-11-27 07:51Z: non-cloud tasks go to the objectstack seat). Filed by seat epic:#5027#1, which keeps cloud#5077 and the cloud pin round that follows.\nGrading: area:ai · Task · p1 · size S–M · reach: every admin who builds in the cloud app once M2 ships · evidence: read (objectstack `origin/main` 3eb778d8, pin `f19ae3a8`).\nDedupe: searched `createOpenAuthoringRegistry`, `resolveOpenAuthoringInjection`, `in-process authoring`; no open card.\nBlocks: objectstack-ai/cloud#5077 (via a cloud pin round).\n\n## 维护者速读\n- 是什么：框架轻门（MCP 搭建的 5 个工具）今天只能经 MCP HTTP 请求 + OAuth `metadata:write` 授权进入。云端 ask 的管理员技能要在进程内、以当前登录用户身份调用这 5 个工具，需要框架从 `@objectstack/runtime` 导出一个进程内入口。\n- 只是开一个入口，不改门的规则：准入仍是用户自己的 `manage_metadata`，草稿照旧要人审阅后发布，不加发布工具。\n- 要你做什么：无。\n\n## Evidence (objectstack `origin/main` 3eb778d8; same at pin `f19ae3a8`)\n- `createOpenAuthoringRegistry` is defined in `packages/runtime/src/domains/mcp-authoring.ts` and exported from that module only; `packages/runtime/src/index.ts` exports nothing named `*Authoring*`, and the package `exports` map has only `.` and `./compiled-plugin-manifest-file`. Its users are the module, its test and `domains/mcp.ts`.\n- The registry's `readGate` and `writer` are built by module-private helpers (`resolveHumanReader` :542, `openWriter`, `openReadGateSources`) bound to `DomainHandlerDeps` + `HttpProtocolContext`.\n- `resolveOpenAuthoringInjection` (:490) returns `undefined` unless the request carries an OAuth grant with `metadata:write`. An in-app ask turn runs on a session, which carries no grant.\n- `READ_TOOLS` / `WRITE_TOOLS`, the contract reader and verdict shaping are private as well.\n\n## What to do\n1. Export from `@objectstack/runtime` an in-process entry, e.g. `createInProcessAuthoringRegistry({ resolveService, getObjectQL, userId, organizationId, environmentId, executionContext })` (name and exact shape are the implementer's call), returning the same 5 tools with the same contract, read gate and verdicts as the MCP door.\n2. Admission: the human's own `manage_metadata`, exactly as `resolveHumanReader` decides it, with no OAuth-scope half (the caller's session plus its own admin check replaces the token's consent). A caller without `manage_metadata` gets no write tools, with the same refusal shape as the MCP door.\n3. Provenance: saves through this entry carry a `surface` / `door` value other than `'mcp'` (e.g. `'in_app'`), so Studio and the host's caps can tell the in-app path from MCP. If the save-provenance enum is in `packages/spec`, follow the spec change rules (changeset, generated baselines).\n4. No publish tool; drafts stay human-reviewed. No change to the MCP door's own behaviour.\n5. Factor the shared builders so both entries use one implementation; no second copy inside the framework.\n\n## Acceptance\n- Tests: the in-process entry lists the same 5 tools as the MCP door; a user without `manage_metadata` gets the refusal; a save stamps the new provenance value; the MCP door's existing tests unchanged and green.\n- Public API: the export appears in the runtime package's API report / docs where the repo records public exports.\n- Hand-off: when merged, notify seat epic:#5027#1 (mailbox objectstack#37634) with the merge sha, so the cloud pin round can carry it.\n\nClause-②: no\nSuggested-grade: p1"

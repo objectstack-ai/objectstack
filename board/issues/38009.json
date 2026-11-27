@@ -1,0 +1,37 @@
+{
+  "number": 38009,
+  "kind": "pull_request",
+  "title": "fix(scenarios): travel_expense's verified build edits its lines inline again, and each build's provenance names the scorer it passed",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/s",
+    "skip-changeset",
+    "tests"
+  ],
+  "assignees": [
+    "os-sales"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-27T15:27:50Z",
+  "updated_at": "2026-11-27T16:25:03Z",
+  "closed_at": "2026-11-27T16:25:01Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-11-27T16:25:01Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/38009",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-sales\"} -->\n_Requested by **Sales** · [project thread](https://claude.ai/code/project/chan_01D5bWFY3rFzgJcytD5gD4Uu?thread=cmsg_01D5bWFY3rFzgJcytD5gD4Uu4ADf6K3c79Bin3C2m4JZ5C)_\n\nFixes #37917\n\n## What changes\n\n- `docs/qa/scenarios/builds/travel_expense.json`: one field group added to `demotravel_expense_claim.fieldGroups`, between `claim` and `status`: `{ \"key\": \"lines\", \"label\": \"Expense Lines\", \"collapse\": \"none\", \"relatedList\": \"demotravel_claim_line\" }`. Nothing else in the build moves; `demotravel_claim_line.claim` keeps `inlineEdit: \"grid\"` and `inlineTitle`.\n- `travel_expense.provenance.json`: `sha256` moved, with an `amended` entry (`from` = the old sha256) saying what changed and why; a new top-level `scored` = `{ \"runner\": \"30a8047b\", \"on\": \"2026-11-27\", \"build\": \"141/141\" }`.\n- `order_to_cash.provenance.json`: the same `scored` key (`174/174` at `30a8047b`); the build is untouched.\n- `packages/qa/scenarios/test/verified-builds.test.ts`: per build, one more test. It scores the build against the namespaced card with this tree's scorer (`scoreCardArtifact` + `rollupSourceCharges`, the runner's `scoreInto`) and requires every measured Build check to pass with no roll-up charge, and the provenance's `scored` to name a runner sha, a date and an all-pass reading. A scorer change that refuses a committed build now fails in the PR that makes it, and the message says what to do.\n- `docs/qa/scenarios/README.md` (Verified builds): `scored` described, and what a scorer change that fails a verified build does (re-score in the same PR; amend when the platform moved under the build, else rebuild; move `scored`).\n\n## Why\n\nWhich side is right: **the scorer**. The card asks for the lines \"edited inline on the claim's form\". The build was authored on 2026-11-18, when `inlineEdit` on a master-detail FK inlined the child in the master's form by itself. Since the maintainer's #35889 ruling (ADR-0035, amended 2026-11-20: 「主从子表我认为不应该自动申明放在概览中，除非我通过 fieldGroup 强制指定」) the form inlines a child only where a field group of the MASTER names it, and `inlineEdit` only picks the form factor (`attachInlineSubforms`, `ui/packages/app-shell/src/providers/MetadataProvider.tsx`). The build names no such group, so on today's runtime the claim's form does not edit its lines inline. #37135 moved the check to that same test (`scenario-tags.ts` `records-forms.master-detail-inline-edit`), so its \"0 edited inline\" is a true reading. No card expectation is in question, so no product call is needed.\n\nRe-verify by amendment, not by a new build: Sales paused new eval rounds (11:36Z), and the gap is one key the platform's own ruling moved under the build. That is the same kind of hand edit as the two earlier `amended` entries (#36534, #37229), recorded the same way. `verified` stays the authoring run's reading (135/135 under that day's checks); `scored` is the latest re-score.\n\nSmall calls made in this thread (listed per the small-things rule): the key is named `scored` with `runner` (same 8-hex style as the top-level `runner`), not a per-file scorer hash; the test pins \"all measured checks pass\", not the exact count, so a scorer PR that only adds a passing check does not have to touch provenance; `order_to_cash` gets `scored` too so the test holds for every build.\n\n## Verification\n\n- Re-score at `30a8047b` (namespaced card, `scoreCardArtifact` + `rollupSourceCharges`):\n  - travel_expense, before: Build 140/141, failing only `master-detail-inline-edit` (\"0 edited inline\"), 0 roll-up charges (matches the #34920 thread's reading).\n  - travel_expense, after: Build 141/141, 0 charges.\n  - order_to_cash: Build 174/174, 0 charges.\n- `verified-builds.test.ts`: 13/13 pass. With the old build put back it fails 2 (sha256 pin, and the new re-score test with `reads Build 140/141 … master-detail-inline-edit (0 edited inline)`).\n- `defineStack` on the build before and after reports the same 4 issues (duplicate action keys from the compiled artifact form, present on `main` too); the new field group adds none.\n- `@objectstack/scenarios`: `tsc --noEmit` clean; vitest 1386 passed, 1 failed + 2 files failed, all pre-existing in this container: `test/build/*` need the package's own build, `packages.test.ts` pinned-pnpm fails on `main` here too.\n- No eval round run.\n\nClause-②: no\nMetadata-protocol: none\n\n## Human Minimum\n\n- [x] 1. Schemas start as Zod; `packages/spec` holds no runtime logic. (untouched)\n- [x] 2. Every name I added uses the casing for its kind.\n- [x] 3. No formatter ran; `pnpm lint` passes. (eslint on the changed test file locally; full `pnpm lint` left to CI)\n- [x] 4. One issue, one branch off an up-to-date `main`, one pull request.\n- [x] 5. A change that publishes carries a changeset, and both declaration lines are filled in here and in the changeset. (nothing publishes: test, docs and fixtures only; `skip-changeset`)\n- [x] 6. `packages/spec` touched: its generated artifacts are regenerated and committed. (not touched)\n- [x] 7. No hand edits to `content/docs/references/`, `packages/*/CHANGELOG.md` or `content/docs/releases/`.\n- [x] 8. Title, body and comments are in English.\n- [x] The *Before Submitting* list in CONTRIBUTING.md is done.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01L6bhgTfmRTz7mZ7LViQLam\n"
+}

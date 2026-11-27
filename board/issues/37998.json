@@ -1,0 +1,36 @@
+{
+  "number": 37998,
+  "kind": "pull_request",
+  "title": "docs(scenario-eval): an iteration is kept on pooled rounds that separate, never on one round above the last",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/s",
+    "skip-changeset"
+  ],
+  "assignees": [
+    "os-sales"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-27T14:47:19Z",
+  "updated_at": "2026-11-27T18:01:06Z",
+  "closed_at": "2026-11-27T17:18:03Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-11-27T17:18:03Z",
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/37998",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-sales\"} -->\n_Requested by **Sales** · [project thread](https://claude.ai/code/project/chan_01D5bWFY3rFzgJcytD5gD4Uu?thread=cmsg_01D5bWFY3rFzgJcytD5gD4UuKjvmrofct6ieAGu4mUazx8)_\n\nFixes #37921\n\nClause-②: no\nMetadata-protocol: none\nRule-change: yes\n\n## 维护者速读\n\n- 是什么：用户无感。评测技能里补了一条规则：改了技能文本或工具说明后，要不要保留这次改动，不能再凭「这一轮 5 次比上一轮高」来定；改前改后各至少跑 3 轮共 15 次，合并比较，而且改后最差的一轮要高过改前最好的一轮，才算提升。\n- 为什么：属于「评测可信」专题。问数技能迭代时，同一份内容连跑两轮得分是 64 和 59（满分 65），波动和要判断的改动一样大，原规则下保留还是丢弃基本靠运气。\n- 出错会怎样：只影响内部评测怎么下结论；规则偏严会让一次迭代多跑两三轮（每轮约半小时），可直接撤回。\n- 要你做的：这是评测车队的规则改动，需要你批准后合并。\n\n## What changes\n\n`.claude/skills/scenario-eval/SKILL.md` §3 (重复与噪声) gains two bullets, 12 lines; nothing else in the file moves. A round here is one command of 5 repeats, and \"the same tree\" is read off the records: the same skill sha256 (`driver.askSkills`), build sha256 (`template`) and runner sha (`env.framework`).\n\n**How an iteration is kept.** One 5-run round above the last is not a gain. The rule:\n\n- At least 3 rounds and 15 runs on each side (before, after), same config, same cards, same scorer sha; if the scorer changed, the old recordings are replayed first (§4). A before side short of rounds is run now. The pooled reading goes into the newest record's Reading and names every record it pools; §3's \"compare only with the previous record\" keeps governing the single-round trend.\n- Each side is reported pooled (numerator and denominator), with every round's score listed. \"Gain\" is written, and the iteration kept on it, only when the lowest round after is above the highest round before; the reverse is a \"regression\" and drops it.\n- Rounds that overlap read \"the difference is inside the round-to-round spread\", with both pooled numbers and the direction. That set of scores neither keeps nor drops the iteration; whether to add rounds or land the change for a reason other than the score goes to the seat that dispatched the card.\n- A change aimed at one class of question reports that class pooled as well, worded by the same three lines.\n\n**\"N consecutive rounds meet the target\"** on an iterating card is read by the same rule: a tree reaches the target only when every round run on that tree meets it, N rounds or more and 15 runs or more (add rounds when short). Once a round of a tree misses, that tree is not reached on scores and the miss is not re-run away; whether to add rounds or change the tree goes to the dispatching seat. Rounds of an earlier tree do not carry.\n\nWhy \"ranges must separate\" rather than a test on the pooled percentages: it names the spread the change has to exceed in the unit the seat already reports (a round's score), it needs no formula, and with 3 rounds a side and no real difference the two sides separate completely in one direction at most 1 time in 20 (3!·3!/6!, less with ties). The pooled number is still reported, so a reader sees the size.\n\nRead against the rounds that prompted the card (haiku / medium, travel_expense, 65 ask points): before 61 (2 rounds pooled 119/130 in the card), after 63, 64, 59. The sides overlap (59 is below 61), so the reading is \"inside the spread\", which is what the card thread concluded by hand. Under the scorer fix in the PR for the sibling scorer card the same recordings read 62 before and 64, 65, 59 after: still overlapping.\n\nRule-change: yes, because the text changes what the eval seat may conclude from a round and what it hands to the dispatching seat.\n\n## Tests\n\nProse only; no behaviour a test pins.\n\n<details><summary>runs</summary>\n\nHead 4df1893d. At ec18b573 `node scripts/pm/dispatch-gates.mjs --commands` derived 18: 17 exit 0; after the review fix the four prose gates were re-run at 4df1893d (`check:doc-authoring`, `check:nul-bytes`, `check:skill-frame-sync`, `check:agent-test-spelling`), all exit 0. `check:doc-formula-expressions` exit 3, NOT MEASURED (it needs `@objectstack/formula` and `@objectstack/lint` built); left to CI.\n\n</details>\n\n## Acceptance notes\n\n- Review 7221322040 (PASS): S1 fixed in 4df1893d (a miss on a tree is no longer re-run away), N1 to N3 taken in the same commit.\n- Delta review 7221375312, N4 (nit, not taken in this head): \"the same tree\" does not name the package source (`env.packagesLine`); two rounds on different published versions with one runner commit would share the three named stamps. §1 already pins `--create-version` across a round's configs and repeats.\n- Same review, N5 (nit, not taken): on a set of several cards a round is one command per card (§1), where the new text says a round is one 5-repeat command.\n- The eval seat is not told to run the extra rounds on any open card by this PR. Eval rounds on the ask-skill iteration card stay paused until the maintainer or the seat resumes them.\n- The rule does not change §3's \"5 runs per config\" for choosing a model or an effort.\n\n## Verification\n\nRead first: the two new bullets in §3 of `.claude/skills/scenario-eval/SKILL.md` (the whole diff).\n\nTwo-minute check: `git diff origin/main -- .claude/skills/scenario-eval/SKILL.md` shows 12 added lines and none removed.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01L6bhgUfAUaQHWW3VtMqd7R\n\n<!-- signed: repo:objectstack#2 · os-sales · session_01L6bhgUfAUaQHWW3VtMqd7R -->\n"
+}

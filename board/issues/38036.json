@@ -1,0 +1,35 @@
+{
+  "number": 38036,
+  "kind": "pull_request",
+  "title": "test(app-shell): wait for the Label header to be sortable before clicking it",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "size/xs",
+    "skip-changeset"
+  ],
+  "assignees": [
+    "os-tesla"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-27T18:39:55Z",
+  "updated_at": "2026-11-27T19:24:57Z",
+  "closed_at": "2026-11-27T19:24:55Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-11-27T19:24:55Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/38036",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-tesla\"} -->\n_Requested by **Tesla** · [project thread](https://claude.ai/code/project/chan_01AXsQkLFKRdQCqQ3RTr6Jao?thread=cmsg_01AXsQkLFKRdQCqQ3RTr6JaoGsWTi6K3WbxqLuXzG2HSKA)_\n\nFixes #38020\n\nClause-②: no\nMetadata-protocol: none\n\n## 维护者速读\n\n- 用户无感：只改元数据列表的一条测试，产品代码不动。\n- 为什么做：这条测试偶发红，把不相干的 PR 踢出合并队列；病因是测试在表格读完列类型之前就点了表头，点击被忽略。\n- 出错会怎样：只影响这条测试是否稳定，随时可以直接撤回。\n- 要你做什么：无。\n\n## What changes\n\nOne test case, `a click on the Label header sorts the list by label, in the address, and the detail follows`, now waits for the Label header's sort icon before it clicks the header. The address assertion, the row assertion and the detail assertion are unchanged, and no timeout was raised.\n\n## Why\n\nThe card's premise was corrected before the claim (claim comment 7225057948). The 1000 ms address wait was not the cause. The click itself was dropped:\n\n- `ObjectGrid` reads its column types through the data source's async `getObjectSchema`. Until that read commits, every untyped column is withheld (drawn and handled as masked).\n- `DataTable`'s `handleSort` returns early for a masked column, and the header draws no pointer cursor and no sort icon.\n- `rowNames()` waits only for the table, so the click could land inside that window. The address then never changes, however long the assertion waits. That is the CI signature: after the full wait, the address still reads `...?scope=environment` with no sort.\n\nReproduction on origin/main 3df181b2: `getObjectSchema` delayed 300 ms with a `vi.spyOn`. The click leaves the address unchanged until the 15 s test timeout. Both fixes the card proposed (wait for the sorted rows, or a longer address wait) stay red under that delay. The fix waits on the precondition of the click (the column is sortable), which is an outcome, not a clock.\n\n## Tests\n\n<details><summary>Each reading, at head 7bba08f3</summary>\n\n- Whole file, 10 consecutive runs under the verify lock: `Tests 11 passed (11)` ×10.\n- Fix plus a 300 ms `getObjectSchema` delay (an on-disk test mutation via `scripts/ablation-replace.mjs`, restored to HEAD): `Tests 1 passed`.\n- Fix removed plus the same delay: red at the address assertion, `Expected ...?scope=environment&sort=label`, `Received ...?scope=environment`. This is the CI failure.\n- The card's three ablations, each applied through `ablation-replace.mjs` with `blob == HEAD` restore verified:\n  - `sort` no longer written to the address (`put(LIST_SORT_PARAM, ...)` deleted in `metadataListState.ts`): red at the address assertion.\n  - Rows left unsorted (the list applies `DEFAULT_LIST_SORT` in `ResourceListPage.tsx`): red at the row assertion, `expected [ 'billing', 'translate', ... ] to deeply equal [ 'translate', 'billing', ... ]`.\n  - Detail ‹ › order not following (`useListOrderedNames` ignores the address sort): red at the detail assertion, `expected 'billing,translate,triage,tribute' to be 'translate,billing,triage,tribute'`.\n- `eslint` on the file: exit 0.\n\n</details>\n\n## Acceptance notes\n\n- **The other cases in the file do not share this race.** The search box, the row links and their `href`s are drawn by the page itself (`hostCells`), not gated by the grid's masked-column check. The search and paging cases type into the page's own search input. None of them clicks a grid header, so none was changed.\n- **A user does not notice the window, so no card is filed.** For this list, `getObjectSchema` is the page's in-memory `MetadataListSource`, which answers the declared schema without any network call, even against a real backend. The window is one React commit after first paint. Measured on an idle box: the header was already sortable when `rowNames()` returned, and the explicit wait took 3.5 ms. While the window is open, the header draws no pointer cursor and no sort icon, so it does not offer a sort that then does nothing. This note goes to the seat, which decides whether it needs a card.\n\n## Verification\n\n- Derived gate list (`node scripts/pm/dispatch-gates.mjs --commands`, 27 families): all exit 0 at 7bba08f3. `--ran` reconciliation: 27 derived, 27 run, 0 NOT-MEASURED. `pnpm --dir ui exec vitest run scripts/` exited 1 on its first run (7 tests in 2 files, while other gates ran beside it on the shared box). It then passed on rerun at the same head with no change: `Test Files 172 passed | 2 skipped`, `Tests 5142 passed | 2 skipped`.\n- Two-minute check: `pnpm --dir ui exec vitest run packages/app-shell/src/views/metadata-admin/ResourceListPage.listStateInUrl-36896.test.tsx` → `Tests 11 passed (11)`.\n- Changeset: none. `@object-ui/app-shell` is private and the test file is outside its `files[]`, so the PR carries `skip-changeset`.\n\n## Human Minimum\n\n- [x] 1. Schemas start as Zod; `packages/spec` holds no runtime logic.\n- [x] 2. Every name I added uses the casing for its kind.\n- [x] 3. No formatter ran; `pnpm lint` passes.\n- [x] 4. One issue, one branch off an up-to-date `main`, one pull request.\n- [x] 5. A change that publishes carries a changeset, and both declaration lines are filled in here and in the changeset.\n- [x] 6. `packages/spec` touched: its generated artifacts are regenerated and committed.\n- [x] 7. No hand edits to `content/docs/references/`, `packages/*/CHANGELOG.md` or `content/docs/releases/`.\n- [x] 8. Title, body and comments are in English.\n- [x] The *Before Submitting* list in CONTRIBUTING.md is done.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01L9qibxMA5XSd2Tz2wC4bGd\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01L9qibxMA5XSd2Tz2wC4bGd)_\n"
+}

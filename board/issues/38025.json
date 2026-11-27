@@ -1,0 +1,37 @@
+{
+  "number": 38025,
+  "kind": "pull_request",
+  "title": "fix(console): the profile password card shows a password refusal in the session's language",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-27T17:01:02Z",
+  "updated_at": "2026-11-27T17:57:04Z",
+  "closed_at": "2026-11-27T17:57:01Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-11-27T17:57:01Z",
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/38025",
+  "body": "Fixes #37973\n\nClause-②: no\nMetadata-protocol: none\n\n## 维护者速读\n\n- 个人资料页「设置本地密码 / 修改密码」被托管环境拒绝时,用户看到的提示从服务器英文原句改为当前语言的说明。\n- 为什么做:登录、忘记密码、重置密码页面已经本地化了同一种拒绝,个人资料页是漏掉的最后一处。\n- 出错会怎样:最坏是又显示回英文原句,不影响密码本身;可直接撤回。\n- 要你做什么:无。\n\n## What changes\n\n- **Profile page password card** (`PasswordCard` in the console's `ProfilePage.tsx`): a rejected set-password or change-password now picks its text by the refusal's `code` through the existing `passwordDoorRefusalMessages` map (app-shell), the same lookup the set-password page makes. A 409 `RESOURCE_CONFLICT` (cloud-managed runtime, SSO-only account, pending SSO person) draws the localized sentence; any other code, or none, keeps the server's message. The lookup is own-key only, so a code that happens to spell an `Object.prototype` member never picks a function.\n- **Auth client** (`@object-ui/auth` `createAuthClient`): `sendVerificationEmail`, `signOut` and `signInWithProvider` now reject through `toAuthError`, so the thrown error carries `code` and `status` from better-auth's flat body or from the ADR-0112 envelope. The `message` is unchanged.\n- No third map: the password-door map is reused as the dispatch asked. Its sentence is true on this card too (no password is set or reset here for this person).\n- `updateUser` stays as it is: it is fenced by open draft PR #37433, and the profile password card does not call it, so this PR closes the card. That method's switch to `toAuthError` belongs to #37433's hunk.\n- One changeset: `@object-ui/auth` and `@object-ui/console`, patch.\n\n## Tests\n\n- `apps/console/src/pages/system/__tests__/ProfilePage.passwordRefusal-37973.test.tsx` (new, 4 cases): renders the real page and the real map. Set-password and change-password with `RESOURCE_CONFLICT` draw the localized sentence and read pack key `auth.login.errors.managedPasswordReset`. CONTROL: `INVALID_PASSWORD` keeps the server's message, and so does a rejection with no code.\n- `packages/auth/src/__tests__/managedRefusalEnvelope-34171.test.ts`: a new top-level `describe` (6 cases) drives the real client over a mocked `fetch` for the three methods. An envelope refusal keeps `RESOURCE_CONFLICT` / 409 / its message. CONTROL: a flat better-auth refusal keeps its own code and message.\n\n<details><summary>Readings at 2d52a41c</summary>\n\nAll at head `2d52a41c`, run from `ui/` under the shared verify lock.\n\n- `pnpm exec vitest run packages/auth/ apps/console/src/pages/system/__tests__/ apps/console/src/pages/auth/__tests__/passwordDoorRefusal-34171.test.tsx`: `Test Files 65 passed (65)`, `Tests 655 passed (655)`, VERDICT command-exit 0.\n- `pnpm --filter @object-ui/auth type-check`: exit 0. `pnpm --filter @object-ui/console type-check`: exit 0, after building the console's dependency closure.\n- Reverse check (fix commit first, both source files restored from the merge base with `git restore --source`, test files kept): `Tests 8 failed | 10 passed (18)`. The 8 failures are the 6 new client cases and the 2 profile `RESOURCE_CONFLICT` cases. The 2 profile CONTROLs pass on the base, as they should. Restored with `git checkout HEAD`, and `git diff HEAD` is empty afterwards.\n- Derived gate families (`dispatch-gates.mjs --commands`): 37 of 39 exit 0, including `pnpm --dir ui exec vitest run scripts/` (`Tests 5138 passed | 2 skipped`). `check:query-options-erasure` and `check:type-check-debt` were killed by a 300s local timeout on a shared box, so they are NOT MEASURED locally and CI runs both.\n\n</details>\n\n## Acceptance notes\n\n- On the profile card the sentence's second half (\"Sign in with the identity provider's button on the sign-in page\") is written for a sign-in page, and this reader is already signed in. It is still true, and the dispatch said to reuse the map rather than add a third. A card-specific sentence would mean a new pack key in every locale. Noted here, not filed.\n- On `main` today the cloud-managed refusal closes `set-initial-password` and leaves `change-password` open (the `cloud-managed.ts` header says changing a password is `/change-password`'s, cloud#4471). The change-password mapping covers any producer that answers that code there, and the change-password test pins the card's behaviour, not a server door.\n\n## Verification\n\nRead first (by risk):\n1. `ui/packages/auth/src/createAuthClient.ts`, the `signOut` hunk: the rejection now carries `code`/`status`. Its `message` is byte-identical, and `TokenStorage.clear()` still runs before the throw.\n2. `ui/apps/console/src/pages/system/ProfilePage.tsx`, the `PasswordCard` `catch`.\n3. The new profile test.\n\nTwo-minute check: from `ui/`, run `pnpm exec vitest run apps/console/src/pages/system/__tests__/ProfilePage.passwordRefusal-37973.test.tsx`. Expect `Tests 4 passed (4)`.\n\n---\n\n_Generated by [Claude Code](https://claude.ai/code/session_01Q4EjjQkY5yXZrN9BEA3rEK)_\n"
+}

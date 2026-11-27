@@ -2,8 +2,8 @@
   "number": 37980,
   "kind": "issue",
   "title": "skill-evals CLI: a --case filter for single-case rounds, and the any-of prose the README and cli.ts header still miss",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -13,18 +13,23 @@
   "labels": [
     "area:ai",
     "domain:devx",
-    "pm:queue",
     "priority:p3"
   ],
-  "assignees": [],
+  "assignees": [
+    "os-elon-musk"
+  ],
   "milestone": null,
-  "type": null,
+  "type": "Task",
   "created_at": "2026-11-27T14:02:10Z",
-  "updated_at": "2026-11-27T14:15:23Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-27T16:20:46Z",
+  "closed_at": "2026-11-27T16:19:54Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 1,
+  "comments": 4,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/37980",
   "body": "repo:objectstack#1 · os-elon-musk · session_016WV4cxBECSPtHxQMZDHSie\n\nFiling gate: ② follow-up out of #37928. The source is the contract record 7220167777 on PR #37969 (nits N3 and N4) and L1-a's ACCEPT 7220192629 on the same head. The owning area files it under the source card.\nGrading: area:ai · Task · p3 · reach: whoever runs a skill-eval acceptance round on one case (every eval-acceptance card since #37419) · evidence: read on `main` and in PR #37969's recordings.\n\n## 维护者速读\n- 做什么：技能评测命令行只能按整个技能包跑，不能只跑一道题；#37928 验收只测第 6 题，只好用一段未提交的临时脚本。这张卡给命令行加一个只跑指定题目的选项，并顺手改正两处说明文字。\n- 谁受益：以后单题验收用仓库里正式的命令跑，审核能从头到尾复核，也省下整包 240 次调用的额度。\n- 不做会怎样：每次单题验收都靠临时脚本，审核只能看结果文件，看不到驱动代码。\n- 需要你做的：无。\n\n## What\n1. **N3, a case filter.** `packages/qa/scenarios/src/skill-evals/cli.ts` selects bundles (`--skills`, `--skills-from`, `--triggers-only`), never a case, so a single-case round (#37928's acceptance, 10 draws per arm) needed an uncommitted driver calling `preflight` / `planRound` / `executeRound` / `summariseRound`. Add a flag (e.g. `--case BUNDLE:ID[,…]`, the author's choice of spelling, stated in the PR) that plans only the named cases on both arms; refuse an unknown id, refuse it beside `--regrade` or `--self-test` the way `--triggers-only` is refused, and record the selection in `round.json` so a reviewer reads which cases the round covered.\n2. **N4, prose.** The README and the `cli.ts` header comment: the header still names two assertion forms (`must_contain` / `must_not_contain`), and the README shows the summary's unmet-group form as `(none of: a / b)` where the renderer puts each token in a code span. Make both say what the code does.\n\n## Acceptance\n- A self-test row: the flag plans exactly the named cases, both arms; an unknown id refuses with its location; the flag beside `--regrade` refuses.\n- `skill-evals --dry-run --case …` prints a plan holding only those cases.\n- `Clause-②: no`, `Metadata-protocol: none`. No eval file and no skill text change.\n\nBlocked-by: #37928 (PR #37969)\nParent: #37928\nSize: S\nDedupe (objectstack, is:issue): `skill-evals --case flag` 91 (closest #35705 `--triggers-only`, closed, a different selector; no case filter) · `skill-evals per-case filter` 36 (none open on a filter). No duplicate."

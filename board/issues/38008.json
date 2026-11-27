@@ -1,0 +1,36 @@
+{
+  "number": 38008,
+  "kind": "issue",
+  "title": "flaky: DatasetReportRenderer comparePrevious-36645 asserts the compared row before the previous-period rows arrive",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:ux",
+    "domain:ui",
+    "priority:p1"
+  ],
+  "assignees": [
+    "os-tesla"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-11-27T15:20:07Z",
+  "updated_at": "2026-11-27T19:26:02Z",
+  "closed_at": "2026-11-27T19:24:57Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/38008",
+  "body": "repo:objectstack#2 · os-sales · session_01L6bhgV6i8jfWwSXjpWJrjA\n\nFiling gate: ① (a new failure signature in the merge queue, unrelated to the ejected PR) · Source: fleet (merge-group CI run 46019741713, job `Test UI (8/16)`, PR #37989)\n\n## What happens\n\n`ui/packages/plugin-report/src/__tests__/DatasetReportRenderer.comparePrevious-36645.test.tsx:159` failed once in the merge queue:\n\n```\nAssertionError: expected { stage: 'Won', amount: 30 } to match object { amount: 30, amount__compare: 20 }\n```\n\nThe series assertions just above it passed (`amount__compare` with its label and `variant: 'comparison'`), so the chart had the compare series but not yet the previous period's rows. The test reads `chartProps.schema.data` synchronously after that, with no wait. The ejected PR (#37989) touches only a tool-name registry and locale labels.\n\n## Expected\n\n- [ ] The test waits for the compared row (for example `await waitFor(() => expect(won).toMatchObject(...))`), or the renderer is shown to publish series and rows together and the race is elsewhere; say which.\n- [ ] If the renderer can draw a compare series with no compare values for a moment, say whether a user sees an empty comparison flash.\n\nGrade: area:ux · tests · reach: one UI test, merge-queue ejections · evidence: the run above, one occurrence\nSuggested-grade: p3\nSize: XS\nRelated: #36645, PR #37989."
+}

@@ -1,0 +1,37 @@
+{
+  "number": 37989,
+  "kind": "pull_request",
+  "title": "fix(spec,i18n): list the cloud ask_which tool and label it in every locale",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "protocol:system",
+    "size/s",
+    "tooling"
+  ],
+  "assignees": [
+    "os-sales"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-27T14:19:53Z",
+  "updated_at": "2026-11-27T15:46:22Z",
+  "closed_at": "2026-11-27T15:46:19Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-11-27T15:46:19Z",
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/37989",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-sales\"} -->\n_Requested by **Sales** · [project thread](https://claude.ai/code/project/chan_01D5bWFY3rFzgJcytD5gD4Uu?thread=cmsg_01D5bWFY3rFzgJcytD5gD4UuHjL55LgwrUVHD9SjkARUPi)_\n\nFixes #34578\n\nClause-②: no\nMetadata-protocol: none\n\nRelated: #37871 (D5 keeps the name `ask_which`), objectstack-ai/cloud#4773\n\n## 维护者速读\n\n- 是什么：云端问数助手的新工具 `ask_which`（问题有两三种读法时，反问用户再停下）登记进平台工具名单，并在 11 个语言包补上它的步骤标题，例如中文「确认问题含义」、英文 \"Clarify the question\"。\n- 为什么：名单里没有这个名字，聊天里这一步的标题会退回英文原名 \"Ask which\"，中文对话里也一样。\n- 出错会怎样：只多一个名字和一行文字，不改任何行为；可直接撤回。\n- 要你做的：无，座位复核即可。\n\n## What changes\n\n- `packages/spec/src/system/constants/platform-tool-names.ts`: `ask_which` joins `PLATFORM_TOOLS_BY_PACKAGE['service-ai-studio']` (alphabetical, after `apply_edit`); the group's doc comment names it (writes nothing, ends the turn with a question, cloud#4773).\n- `ui/packages/i18n/src/locales/{ar,de,en,es,fr,ja,ko,pt-BR,ru,zh-Hans,zh-Hant}.ts`: `chatbot.tool.ask_which`, beside `apply_edit`.\n- Changeset `34578-ask-which-tool-label.md` (`@objectstack/spec`, `@object-ui/i18n` patch).\n\nCloud follow-up (card item 3): the `AHEAD_OF_REGISTRY` entry for `ask_which` in cloud `platform-tool-names-conformance` is deleted on the pin bump that carries this.\n\n## Gates ran\n\n- `packages/spec`: `platform-tool-names.test.ts` 12/12 passed.\n- `ui`: `plugin-chatbot/.../toolLabels-locale-parity-7481.test.ts` + `i18n/.../all-locales-key-parity.test.ts` 66/66 passed. The rest of `packages/i18n` could not load locally (`@objectstack/formula` unbuilt in this container); CI runs it.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01L6bhgV32siwbaH3NMii884\n"
+}

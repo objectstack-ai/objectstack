@@ -1,0 +1,37 @@
+{
+  "number": 38003,
+  "kind": "pull_request",
+  "title": "docs: retired agent keys are refused as unknown keys, not tombstones (eval case 5 prose, ai/agents page, agent.zod.ts comment)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "protocol:ai",
+    "size/s",
+    "tooling"
+  ],
+  "assignees": [
+    "os-elon-musk"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-27T15:02:56Z",
+  "updated_at": "2026-11-27T17:24:18Z",
+  "closed_at": "2026-11-27T17:23:30Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-11-27T17:23:30Z",
+  "comments": 7,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/38003",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-elon-musk\"} -->\n_Requested by **Elon** · [project thread](https://claude.ai/code/project/chan_01WedDzV26nniwxv7jC88B9D?thread=cmsg_01WedDzV26nniwxv7jC88B9DLCo5F2y7fgbM8tstGoyyUn)_\n\nFixes #37967\n\nClause-②: no\nMetadata-protocol: none\n\n## 维护者速读\n- 用户能看到什么变化：对外文档「智能体」页里两个已下线字段（工具、知识库）的说明，以及一条评测题的期望答案说明、规格源码里的一句注释，改成和现在的真实行为一致：系统把这两个字段当未知字段拒绝，并指向升级指南。\n- 为什么做：属于「技能文档与真实行为对齐」这条线的收尾，替照文档写智能体的作者和 AI 解决「文档说编译时报错，实际是运行时拒绝」的误导。\n- 出错会怎样：只改说明文字，不影响任何判定或评测结果；如有不妥可直接撤回这次合并。\n- 要你做什么：评测文件属于对外发布的技能包，合并需要你批准。\n\n## What changes\nText only, three places. `agent.tools` and `agent.knowledge` were removed in protocol 17 and their tombstones left the shape at protocol 18. Since then the strict `AgentSchema` refuses each as an unknown key, and the refusal names https://objectstack.ai/docs/protocol-upgrade (pinned in `packages/spec/src/ai/agent.test.ts`, the `agent.tools retirement` and `knowledge` blocks).\n\n1. `skills/objectstack-ai/evals/skills-tools-knowledge.json`, case 5, `expected_output` only. \"are protocol-17 tombstones\" becomes \"were removed in protocol 17: the strict schema refuses each as an unknown key, naming\" the guide. The prompt, `files` and `assertions` are unchanged, so the case hash does not move and no eval round is owed. No other case is touched.\n2. `content/docs/ai/agents.mdx`, the `tools` and `knowledge` rows. \"typed `never`, so writing it fails `tsc`, and a value that reaches the runtime is rejected at parse\" becomes \"the key is not on the type, and the strict schema refuses it as an unknown key, naming the upgrade guide\". \"Removed in protocol 17\", each row's why and its replacement stay.\n3. `packages/spec/src/ai/agent.zod.ts`, the comment on the removed `AIKnowledgeSchema`. It said `agent.knowledge` is \"tombstoned below\"; no key below declares it. Comment only. The `longTerm.store` \"tombstoned below\" further down is a live tombstone and is not touched.\n\nOne changeset: `@objectstack/skills` patch and `@objectstack/spec` patch (the spec package ships `src/**/*.zod.ts`, so the comment is published bytes).\n\nRead first, by risk:\n1. `skills/objectstack-ai/evals/skills-tools-knowledge.json`: the one changed line must stay inside case 5's `expected_output`.\n2. `content/docs/ai/agents.mdx`: the two table rows.\n3. `packages/spec/src/ai/agent.zod.ts`: the comment hunk near line 100.\n\nSkills readings (`skills/**` diff): the eval file is 125 lines before and 125 after (13680 bytes before, 13784 after). All `SKILL.md` files together are 4958 lines before and after; no `SKILL.md` is in the diff. The eval file is an eval fixture, which the token ratchet measures and does not ratchet.\n\n## Tests\nAll on head `1c2e51ffc1`.\n\n<details><summary>Spec tests that read agent.zod.ts</summary>\n\n`pnpm --filter @objectstack/spec exec vitest run --maxWorkers=2` on `src/ai/agent.test.ts`, `src/ai/agent-memory-store-retirement.test.ts`, `src/ai/agent-model-provider-retirement.test.ts`, `src/type-alias-convention.pin.test.ts`, `scripts/file-description.test.ts` and `scripts/liveness/tombstoned-row-status.test.ts`: `Test Files 6 passed (6)`, `Tests 214 passed (214)`, lock verdict `VERDICT command-exit 0`.\n\n</details>\n\n<details><summary>Case 5 byte identity</summary>\n\nA key-by-key comparison of all 12 cases against `origin/main` reports one difference: case 5, key `expected_output`. The case hash reads the prompt, the assertions, `should_trigger` and `files`, none of which changed.\n\n</details>\n\n<details><summary>Token ratchet</summary>\n\n`node scripts/check-skills-token-ratchet.mjs` exit 0: `61 authored bundle file(s) within their ceilings; 11 generator-owned file(s) and 42 eval fixture(s) measured, not ratcheted`. Ratcheted authored total `199679 / 199679 (+0)`. No ceiling line is changed.\n\n</details>\n\n<details><summary>Derived gate families (dispatch-gates --commands, 110)</summary>\n\n- 109 of 110 exited 0. Six gates first exited 3 (prerequisite not built) or 1 while their inputs were being built, and exited 0 when rerun after the build: `check:doc-formula-expressions`, `check:doc-security-posture`, `check:skill-examples`, `check:docs-transcript-drift`, `check:dts-closure`, `check:lean-entry-closure`.\n- NOT MEASURED: `pnpm check:dual-build-cjs-loads`, exit 3, `PREREQUISITE NOT MET`: it needs every package built. Not built locally for a comment-only change; CI measures it.\n- `dispatch-gates --ran`: `110 derived, 109 run, 1 NOT-MEASURED, 0 UNRUN`.\n- `node scripts/check-nul-bytes.mjs` exit 0.\n\n</details>\n\n## Acceptance notes\n- The rest of the `ai/agents` page was read for the same stale claim. The code sample's comment on the removed `knowledge` block states only the removal and is true. Nothing else on the page calls either key a tombstone or typed `never`.\n- `test:repo` and the repo-wide lint are left to CI.\n\n## Verification\nTwo minutes: `git grep -n 'typed .never.\\|protocol-17 tombstones' -- content/docs/ai/agents.mdx skills/objectstack-ai/evals/skills-tools-knowledge.json` prints nothing, and `pnpm --filter @objectstack/spec exec vitest run src/ai/agent.test.ts` passes, which is the behaviour the three texts now describe.\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_016WV4cxBECSPtHxQMZDHSie)_\n"
+}

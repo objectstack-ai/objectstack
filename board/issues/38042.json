@@ -1,0 +1,33 @@
+{
+  "number": 38042,
+  "kind": "pull_request",
+  "title": "fix(cli)!: secret rewrap --apply without --yes in a non-interactive shell exits 1",
+  "state": "open",
+  "state_reason": null,
+  "draft": true,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [
+    "os-tesla"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-27T19:57:36Z",
+  "updated_at": "2026-11-27T19:59:31Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/38042",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-tesla\"} -->\n_Requested by **Tesla** · [project thread](https://claude.ai/code/project/chan_01AXsQkLFKRdQCqQ3RTr6Jao?thread=cmsg_01AXsQkLFKRdQCqQ3RTr6JaoE1BtVwhUEVSGpakbjyuiCV)_\n\nFixes #36679\nClause-②: no (narrowing)\nMetadata-protocol: none\nSkills-docs: none — no file under skills/** mentions `os secret rewrap` (grep `rewrap` over skills/: 0 hits); the CLI reference section `content/docs/deployment/cli.mdx` § `os secret rewrap` was re-read and says nothing about the exit status of an unconfirmed run, so nothing it states is falsified\n\n## 维护者速读\n\n- 运维在脚本、CI 或定时任务里运行密钥重新封装命令并要求写入、但没加确认参数时，以前显示「已中止」并返回成功，现在返回失败并提示加确认参数；交互式回答「否」照旧返回成功。\n- 为什么做：与数据库迁移命令和两个孤儿清理命令已定的规则对齐，避免脚本把什么都没重新封装的一次运行当成密钥轮换完成。\n- 出错会怎样：只改未确认时的退出码与提示文字，读取、重新封装和写入的内容都不变；依赖旧退出码的脚本需加确认参数，出问题可直接撤回本改动。\n- 要你做什么：无。\n\n## Breaking\n\n**BREAKING** (an exit status narrows), shipped as `patch`: the change is not to the metadata protocol (`Metadata-protocol: none`), so the level axis grades `patch`, as the precedent #36676 did for the orphans commands.\n\n- **FROM:** `os secret rewrap --apply` on a database with a version-1 `sys_secret` row to re-wrap, without `--yes`, stdin not a terminal, text face: nothing opened or written, `Aborted — no row was opened or written.`, exit `0`.\n- **TO:** nothing opened or written, `Confirmation required. Re-run with --yes to re-wrap. No row was opened or written.`, exit `1`.\n- **Unchanged:** answering `n` at the `[y/N]` prompt in a terminal still prints `Aborted — …` and exits `0`; `--json` without `--yes` already exited `1` with `confirmation_required`; `--yes` re-wraps as before; a dry run, or an `--apply` run with nothing to re-wrap, exits `0` without asking.\n- **The fix for a script:** pass `--yes` to re-wrap; drop `--apply` to get only the dry-run report.\n\nADR-0087 disposition: the changeset carries the marker `adr-0087: not-required (no-migration-prescription)`; no metadata, stored shape or export moves. `node scripts/check-adr-0087-registration.mjs --base origin/main` at b15bd751: `1 declared-breaking changeset(s), each carrying an ADR-0087 disposition` (`[BREAKING+bang+clause-②-narrowing]`).\n\n## What changes\n\n`os secret rewrap --apply`, run where stdin is not a terminal and without `--yes`, now prints a warning naming `--yes` and exits 1. The shape is the one `os db orphans` / `os secret orphans` took in #36676 (and the `os migrate` family's): inside the `!flags.yes` gate, after the `--json` face, a non-TTY branch warns and calls `this.exit(1)`. The `this.exit(1)` sits inside the `try` whose `catch` already rethrows the exit signal (`isExitSignal`) and whose `finally` shuts the stack down. Nothing about what rewrap opens, re-seals or writes changes.\n\nThe confirmation pin `packages/cli/test/orphans-confirmation-exit.pin.test.ts` widens its population from \"non-migrate commands declaring boolean `delete` and `yes`\" to \"non-migrate commands declaring a boolean `yes`\", whatever mode flag it confirms. Today that is `db orphans`, `secret orphans` and `secret rewrap`; the next command with a `--yes` outside `src/commands/migrate` fails the population case until it has a roster row. Per ruling record 6583487846 the row goes into the existing harness file, not a new one. The rewrap row runs the real reference union, planner, executor and local crypto provider (over `OS_SECRET_KEY`) on a fake engine holding one version-1 row its setting references; only the boot is replaced.\n\nRead first, by risk:\n1. `packages/cli/src/commands/secret/rewrap.ts` — the new non-TTY branch inside the `!flags.yes` gate.\n2. `packages/cli/test/orphans-confirmation-exit.pin.test.ts` — the widened population, the `one-shot-settings` mock now keeping the real `oneShotCrypto`, and the rewrap fixture.\n\nTwo-minute check: `pnpm --filter @objectstack/cli exec vitest run --project unit test/orphans-confirmation-exit.pin.test.ts` — expect 13 passed.\n\n## Tests\n\nPer roster member (3): text face non-TTY without `--yes` (exit 1, output names `--yes`, nothing written, no export, no prompt); `--json` face (exit 1, `confirmation_required`); control `--yes` (exit 0, one write, export written where the mode writes one); control terminal answered `n` (prompted, exit 0, nothing written). Plus the population case. 13 tests.\n\n<details><summary>Premise probe on origin/main 3e8edf78 (before the fix)</summary>\n\nA probe driving the real command (boot replaced only):\n\n```\nPROBE tty=false exit=0 writes=0 lines=[\"  ℹ Aborted — no row was opened or written.\"]\nPROBE tty=true exit=0 writes=0 lines=[\"  ℹ Aborted — no row was opened or written.\"]\n```\n</details>\n\n<details><summary>Pin run at 824d7593</summary>\n\n```\n Test Files  1 passed (1)\n      Tests  13 passed (13)\nos-verify-lock: VERDICT command-exit 0\n```\n</details>\n\n<details><summary>Ablation at 824d7593 (the non-TTY this.exit(1) removed via scripts/ablation-replace.mjs, then restored)</summary>\n\nThe first attempt was refused by the tool as a no-op (the replacement text already occurred in the anchor), nothing ran; the second landed (anchor 1 -> 0, blob 104d5a39 -> d90df941):\n\n```\n     × secret rewrap — text face: exit 1, names --yes\n  ⚠ Confirmation required. Re-run with --yes to re-wrap. No row was opened or written.: expected +0 to be 1\n      Tests  1 failed | 12 passed (13)\nablation-replace: ok restored: blob == HEAD (104d5a39fd3c) and `git diff HEAD` is empty\n```\n</details>\n\n## Acceptance notes\n\n- `content/docs/deployment/cli.mdx` § `os secret rewrap` documents `-y, --yes` as \"skip the confirmation prompt\" and says nothing about the unconfirmed exit status; left as is (outside the claimed surface, and nothing in it is now false).\n\n## Verification\n\nLocal runs are listed with their head in the os-dev report on #36679; CI's check-runs on this PR are the record for every family CI runs.\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01L9qibwZirQyEPMnAGdpGGW)_\n"
+}

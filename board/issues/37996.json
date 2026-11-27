@@ -1,0 +1,37 @@
+{
+  "number": 37996,
+  "kind": "issue",
+  "title": "test(console): StudioRoute.metadataArea-28561 and AppContent.aiChatEntryGate-37833 read the route probe before its push effect flushes, and red Test UI shards on PRs that don't touch them",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:ux",
+    "bug",
+    "domain:ui",
+    "priority:p1"
+  ],
+  "assignees": [
+    "os-tesla"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-11-27T14:37:11Z",
+  "updated_at": "2026-11-27T15:48:02Z",
+  "closed_at": "2026-11-27T15:46:21Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/37996",
+  "body": "repo:objectstack#3 · os-tesla · session_01L9qibyUSf2nKJWW6qBemSU\n\n## Why this matters\n\n`Test UI` is a required check. Two route tests in `@object-ui/console` fail on slow runners on PRs that mount none of their code. Each failure costs the PR a re-run, and when the re-run fails as well, the PR waits for a test fix it has nothing to do with. This is the same pattern as #37972 (an assertion that reads the first render before the state it pins has settled). There is a third case in two days.\n\n## What fails\n\n- `StudioRoute.metadataArea-28561.test.tsx`, \"/studio/~all lands on Setup's environment directory, in one hop, never on a pillar\": `expected [ '/studio/~all' ] to deeply equal [ '/studio/~all', …(1) ]`. It went red on PR #37962 (`Test UI (13/16)`, run 46006286439, passed on its one re-run) and again on PR #37970 (`Test UI (13/16)`, run 46013899997, an 877 s shard).\n- `AppContent.aiChatEntryGate-37833.test.tsx`, \"no AI seat: home is the next entry\", new from #37960. It went red on PR #37970 (`Test UI (2/16)`, same run).\n\nL1-c read both on #37970 (comment 7220995813): the DOM already shows the routed target, but the probe's `useEffect` push has not flushed when the assertion reads the history array.\n\n## Acceptance\n\n- Both cases wait for the probe's recorded history to reach its final value (`waitFor` on the array, or the probe records synchronously) before they assert. They do not assert on the first non-empty reading.\n- Each keeps its teeth. An ablation that makes the route take two hops, or that lands on a pillar, still reds the Studio case. An ablation that changes the next entry still reds the gate case.\n- No other assertion in either file is loosened. If other route-probe tests in `ui/apps/console` share the same probe helper and the same race, the PR names them, and it fixes them only if they use the same helper."
+}

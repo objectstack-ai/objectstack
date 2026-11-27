@@ -14,18 +14,20 @@
     "area:ai",
     "documentation",
     "domain:skills",
-    "pm:queue",
+    "pm:dispatched",
     "priority:p2"
   ],
-  "assignees": [],
+  "assignees": [
+    "os-sales"
+  ],
   "milestone": null,
   "type": "Task",
   "created_at": "2026-11-26T15:24:59Z",
-  "updated_at": "2026-11-27T08:22:25Z",
+  "updated_at": "2026-11-27T17:29:31Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 2,
+  "comments": 3,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/37612",
   "body": "repo:objectstack#2 · os-sales · session_01L6bhgV6i8jfWwSXjpWJrjA\n\nFiling gate: ① · Source: fleet (the `Skills-docs: follow-up owed` line of the #36423 code PR; the area thread's report, the PR follows)\n\n## What happens\n\nThe #36423 code PR adds one key to `KanbanConfigSchema`: `kanban.cardFooter`, a strict object with two booleans, `comments` and `attachments`. Each turns on a count in the card's footer, read with one grouped query per board. The comment count is the record's open top-level threads. The attachment count is read only when the object has `enable.files`. Any other member is refused by name.\n\n`skills/objectstack-ui/rules/list-views.md` \"Configuring Kanban Views\" (origin/main, :254-290) shows every `kanban:` setting an author writes (`groupByField`, `lanes`, `summary`, `showFieldLabels`, `hideEmptyFields`, `columns`) and has no `cardFooter`. An agent asked for \"show comment counts on the cards\" finds no key there and either invents one, which the strict schema refuses, or says it can't be done.\n\n`skills/**` is governed (Tier H), so this text does not ride the code PR.\n\n## Expected\n\n- In that section's example or the notes under it, one line for `cardFooter: { comments: true, attachments: true }`. Say that comments count open top-level threads, that attachments need `enable.files` on the object (with it off, the count is not shown), and that no other member is accepted.\n- Pay for the line in the same file under the token ratchet (no ceiling moves).\n- Write it against the merged code PR's tree: key spelling, the two members, and when each count is shown.\n\nBlocked-by: #36423 (its code PR merges)\nCategory ①: a shipped skill would teach an incomplete key list for a setting the platform reads, so an agent cannot author a feature the board has.\nPriority: p2, the grade of #36423.\nBusiness reason: app builders who ask an agent for card counts on a board get them only if the skill names the key.\nReader: seat 2 area s2-ux-L (repo:objectstack#2), after the code PR merges; Tier H, so os-zhuang approves.\nDedupe: `list-views cardFooter` and `kanban cardFooter skills` (open issues), 0 hits besides #36423 itself.\nRelated: #36423."

@@ -1,0 +1,31 @@
+{
+  "number": 37991,
+  "kind": "issue",
+  "title": "MongoDB standalone: a write on an object with a metadata before* hook is refused with a driver hint (retryWrites=false) that does not fix it, and nothing says so at boot",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:data",
+    "domain:server",
+    "pm:queue",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-11-27T14:26:22Z",
+  "updated_at": "2026-11-27T15:17:46Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/37991",
+  "body": "repo:objectstack#2 · os-sales · session_01L6bhgV6i8jfWwSXjpWJrjA\n\nFiling gate: ① (a measured answer that misleads the operator) · Source: fleet (the #34563 measurement, PR #37990; probe and raw results kept with the card thread)\n\n## What happens\n\nMeasured on a MongoDB 8.0 standalone server as the default store (#34563, cell N3): every write on an object that carries a metadata `before*` hook is refused, even when nothing in the write fails, because the write opens a unit and a standalone server has no transactions. That a replica set is needed is documented (the objectql CHANGELOG entry for the unit, `hooks.mdx`). Two things are not:\n\n- [ ] **The refusal names the wrong fix.** The user sees the driver's own text, \"This MongoDB deployment does not support retryable writes. Please add retryWrites=false to your connection string.\" Measured: with `retryWrites=false` the answer is the same. Expected: the refusal says the object's `before*` hook needs a transaction and the store needs a replica set, not the driver's hint.\n- [ ] **Nothing is loud before the first write.** A standalone default store boots clean, and the first hooked write is where the operator learns it. Expected: say at boot (or at the first unit) that this store cannot carry units, naming the objects it affects, or state why the first write is the right place.\n\nWrites to an object with no such hook were not measured on the standalone cell; measure one as the control.\n\nGrade: area:data · bug · reach: MongoDB standalone deployments with metadata `before*` hooks · evidence: the #34563 measurement\nSuggested-grade: p3\nSize: S\nRelated: #34563, PR #37990, PR #34503."
+}

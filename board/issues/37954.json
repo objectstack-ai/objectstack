@@ -2,8 +2,8 @@
   "number": 37954,
   "kind": "issue",
   "title": "service-knowledge: record-change sync runs without the realtime service (data-engine after-write hooks)",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -13,18 +13,23 @@
   "labels": [
     "area:ai",
     "domain:server",
-    "pm:queue",
     "priority:p2"
   ],
-  "assignees": [],
+  "assignees": [
+    "os-elon-musk"
+  ],
   "milestone": null,
   "type": "Feature",
   "created_at": "2026-11-27T12:52:24Z",
-  "updated_at": "2026-11-27T13:18:28Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-27T17:11:47Z",
+  "closed_at": "2026-11-27T17:10:53Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 1,
+  "comments": 4,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/37954",
   "body": "repo:objectstack#1 · os-elon-musk · session_016WV4cwPhGV4g9p1BGQaZbP\n\nFiling gate: ③ maintainer-directed (topic child of #37000) · Source: maintainer (hotlong, cloud project): 「云上需要知识库，用turso」 / 「云端不应该让客户配置向量模型」, recorded on cloud#4993 comment 7218621399 · Spec: objectstack#37000 comment 7218695999\nGrading: area:ai · Feature · p2 (topic; blocks cloud#4993 part 2) · reach: every kernel that mounts the knowledge service without a `realtime` service, starting with hosted cloud kernels · evidence: read on main bc173343ea57.\nDedupe: `knowledge realtime sync` → 28 (open: #37735 — queue the embed work, a different half of the same seam, coordinated below; #37110 — rollback re-read, taken over by #37735; #37000 parent) · `service-knowledge after-write hooks` → 20 (no open card on a realtime-free trigger) · `knowledge realtime absent event sync data engine hook` → 15 (seat posts only).\n\nReader: area o1-C of seat repo:objectstack#1 claims it after triage's first touch.\n\n## 维护者速读\n- 问题：托管内核不挂 realtime 服务，知识库只在启动时建一次索引，之后新建、修改的记录永远搜不到（除非手工重建）。\n- 做什么：没有 realtime 时，改为订阅数据引擎的写后钩子来同步记录变化；两条路径同时存在时每次写入只同步一次；向量计算不能卡在业务写入的响应路径上。\n- 谁受益：云上（Turso 知识库）的所有租户；这张卡挡住 cloud#4993 的第 2 部分。\n- 需要你做的：无。\n\n## What\nPremise re-read on main bc173343ea57: every cited fact holds; line numbers moved and one phrase of the spec is corrected (the reap path).\n- `packages/services/service-knowledge/src/knowledge-service-plugin.ts:591-609` (spec: 590-607): the `kernel:ready` handler takes `realtime` through `ctx.getService('realtime')`; on a throw it warns `IRealtimeService unavailable — event sync disabled` and returns (:597-608). The subscription `realtime.subscribe('knowledge-event-sync', …)` starts at :610 and calls `service.handleRecordUpsert` (:638) / `handleRecordDelete` (:645).\n- `packages/services/service-knowledge/src/knowledge-service.ts:1351-1362` (spec: 1386-1391): `buildSourcesAtBoot()` builds each due source once at boot (trigger `boot`); the plugin starts it in the background (`knowledge-service-plugin.ts:568`). Nothing else feeds later creates/updates when realtime is absent.\n- Correction to the spec's wording: the delete/reap path is NOT a data-engine hook. `syncReapGuards` (`knowledge-service-plugin.ts:861-889`, called at :596 before the realtime branch) registers a guard with the `lifecycle` service (`registerReapGuard`) and is realtime-independent. The data engine's after-write hooks (`engine.registerHook('afterInsert' | 'afterUpdate' | 'afterDelete', …)`, `packages/objectql/src/engine-hooks-and-functions.ts:96`; plugin precedent `packages/plugins/plugin-approvals/src/approval-activity-feed.ts:293`) are a new trigger source here, not something the plugin already uses. Record deletes outside the sweep (a user delete) also arrive only through realtime today, so they are part of this fix.\n\nProblem: with no `realtime` service the index is built at boot and never sees later creates, updates or user deletes. Hosted kernels mount no `realtime` (cloud decided not to take it on).\n\nWhat: when `realtime` is absent, or always, sync subscribes to the data engine's after-write hooks and calls the same `handleRecordUpsert` / `handleRecordDelete`; one path, no double handling when both exist (each write is synced once). The embed call must not sit on the business write's response path (queue or defer).\n\nCoordination: #37735 (open) moves the embed work onto the queue service and takes over #37110, but its bridge still starts from the realtime subscription. This card supplies the realtime-free trigger; whichever lands second adopts the other's seam, and the PR states which. Note `handleRecordUpsert`'s own note (`knowledge-service.ts:1993-2040`) says the realtime event is published from inside the write before its unit commits; an after-write hook has the same exposure, so the PR states what it observes (the #37110 half stays with #37735).\n\n## Acceptance\n- A kernel with no realtime service: create and update a record of an indexed object, and search finds the new text without a rebuild.\n- With realtime present, each write is synced once.\n- A slow embedder does not delay the write's response.\n- A user delete of an indexed record de-indexes it on a kernel with no realtime service.\n\nParent: #37000."

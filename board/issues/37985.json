@@ -2,9 +2,9 @@
   "number": 37985,
   "kind": "pull_request",
   "title": "docs(skills): objectstack-ui teaches that a select badge is coloured only when its option declares color",
-  "state": "open",
+  "state": "closed",
   "state_reason": null,
-  "draft": true,
+  "draft": false,
   "author": {
     "login": "objectstack-fleet[bot]",
     "id": 332303061,
@@ -12,6 +12,7 @@
   },
   "labels": [
     "documentation",
+    "pm:awaiting-merge",
     "size/s",
     "tooling"
   ],
@@ -21,11 +22,15 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-27T14:06:08Z",
-  "updated_at": "2026-11-27T14:13:34Z",
-  "closed_at": null,
-  "closed_by": null,
-  "merged_at": null,
-  "comments": 3,
+  "updated_at": "2026-11-27T17:23:32Z",
+  "closed_at": "2026-11-27T17:23:30Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-11-27T17:23:30Z",
+  "comments": 9,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/pull/37985",
   "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-tesla\"} -->\n_Requested by **Tesla** · [project thread](https://claude.ai/code/project/chan_01AXsQkLFKRdQCqQ3RTr6Jao?thread=cmsg_01AXsQkLFKRdQCqQ3RTr6Jao5v13WT1hqhQVEQQGiYPr2F)_\n\nFixes #37406\n\nClause-②: no\nMetadata-protocol: none\n\n## 维护者速读\n\n- 用户能看到什么变化:用 AI 搭应用的人,让 AI 给下拉选项(如状态、优先级)上色时,AI 会直接在选项上写明颜色;以前技能里没讲这件事,AI 可能以为颜色会自动出现,结果界面一片灰。\n- 为什么做:属于「下拉选项颜色只认声明」这次裁决(「A 全部去掉，没配就灰」)的收尾,界面已改完,这里补上对外技能里的那一句说明。\n- 出错会怎样:只多了一句说明文字,不改任何运行行为;写错了最多是 AI 少配或多配颜色,直接撤回这次合并即可。\n- 要你做什么:无。\n\n## What changes\n\n- `skills/objectstack-ui/rules/list-views.md`, under Column Features: one sentence. A `select` badge is coloured only when its option declares `color`, with the tiny option shape, the accepted values, and \"any other option renders neutral\".\n- `scripts/check-skills-token-ratchet.mjs`: the `list-views.md` row moves 4448 to 4510, pinned at the measurement, with the provenance comment.\n- `.changeset/37406-ui-skill-select-option-colour.md`: `@objectstack/skills` patch.\n\nThe accepted values were read from the renderer, not from the card: `BADGE_COLOR_MAP` in `ui/packages/fields/src/index.tsx` keys exactly `gray`, `red`, `orange`, `yellow`, `green`, `blue`, `indigo`, `purple`, `pink`; `resolveColorName` passes those through and sends a value starting with `#` to the hex path; everything else, no declaration included, falls to `NEUTRAL_BADGE_CLASSES` in `getBadgeColorClasses`. The sentence claims that and no more.\n\nNothing was removed: on `origin/main` 0b539b6a, `grep -rniE 'colou?r' skills/objectstack-ui` has no line about a select option's colour and none implying a colour derived from the value, so the card's \"remove or correct\" half had nothing to act on.\n\n### Skill length readings\n\n| Reading | Before | After |\n|:--|--:|--:|\n| `skills/objectstack-ui/rules/list-views.md`, lines | 410 | 414 |\n| same file, bytes / tokens (`ceil(bytes / 4)`) | 17792 / 4448 | 18039 / 4510 |\n| every published `SKILL.md`, lines summed | 4958 | 4958 |\n| every published skill `.md`, lines summed | 18795 | 18799 |\n| ratcheted (authored) bundle, tokens | 199685 | 199747 |\n\nNet on `skills/objectstack-ui/**`: +4 lines (one blank, three of text), 0 deleted.\n\n### Why the ratchet row rises instead of being paid by deletion\n\nThe file sat at zero headroom, and the standing ruling on this ratchet is 「A:先削重复,余额按实测提高」. There is no restatement to cut for this sentence: option colour was untaught in the skill (0 hits), so nothing in the file says the same thing twice. The raise runs on the ratchet header's other clause, \"a ruling of record that orders text into a file still authorises its own measured delta\": ruling record 7178358629 on #36882 (maintainer verbatim 「A 全部去掉，没配就灰」), term (5), orders \"`Skills-docs:` a line that colour is declared via `color`\", and its analysis names `skills/objectstack-ui` as the place. The row moves by the sentence's own measured delta (+62 tokens) and by no more.\n\n## Tests\n\nNo runtime behaviour changes, so there is no test to add and no ablation. Local gate readings on head `790d10b4`:\n\n<details><summary>Token ratchet and its self-test</summary>\n\n```\n✓ check-skills-token-ratchet: skills/objectstack-ui/rules/list-views.md is 4510 tokens (ceiling 4510; headroom 0).\n✓ check-skills-token-ratchet: 61 authored bundle file(s) within their ceilings; 11 generator-owned file(s) and 42 eval fixture(s) measured, not ratcheted.\n✓ check-skills-token-ratchet self-test: 111 cases pass.\n```\n\nBefore the row moved, the same gate was red on this file alone: \"is 4522 tokens; the ratchet ceiling is 4448\" on the first draft, which was then tightened to the 4510 that landed.\n\n</details>\n\n<details><summary>Derived gate set: 66 commands, 61 exit 0, 5 not measured</summary>\n\n`node scripts/pm/dispatch-gates.mjs --commands` on the committed tree derives 66 commands. 61 ran and exited 0, among them `check:skill-links`, `check:skill-identifier-liveness`, `check:skill-compatibility`, `check:skill-frame-sync`, `check:skill-served-sections`, `check:doc-authoring`, `check:role-word`, `check:ratchet-remedy-authority`, `check:published-files`, `check:pm-dispatch-gates`, `check:nul-bytes`, `check-empty-changeset`, `check-changeset-no-major`, `check-adr-0087-registration`, `check-declaration-mirrors`.\n\nNOT MEASURED, five families that exit 3 with PREREQUISITE NOT MET because they read built `dist/` output and this worktree was not built (the diff touches no package source, so no build was owed): `check:doc-formula-expressions`, `check:dts-closure`, `check:dual-build-cjs-loads`, `check:lean-entry-closure`, `check:sourcemap-no-sources-content`. CI's build jobs carry them.\n\n</details>\n\n## Acceptance notes\n\n- Card acceptance 1, \"colour on a select option badge appears only when the option declares `color` (family name or hex), and undeclared options render neutral\": the sentence says it, with the family names as the renderer keys them.\n- Card acceptance 2, \"remove or correct any text that implies automatic colouring by value\": 0 such lines in `skills/objectstack-ui` on the base commit.\n- A declared `color` that is neither one of the nine names nor a `#` hex also renders neutral; the sentence's \"any other option\" covers it. The warning for that case is tracked on the #36882 line of work and is not part of this change.\n- `scripts/check-skills-token-ratchet.mjs` is also edited by the open pull request 37947 (a different row); `overlap-check.mjs --pr=37947` answers \"merges cleanly\" against both `origin/main` and that head.\n- Governed surface (`skills/**`): this pull request stays draft and is landed by its tier's record, not by its author.\n\n## Verification\n\nRead first, by risk:\n\n1. `skills/objectstack-ui/rules/list-views.md`, the one added paragraph under Column Features: is every listed value one the renderer honours.\n2. `scripts/check-skills-token-ratchet.mjs`, the `list-views.md` row: 4510 equals `ceil(18039 / 4)`, and the authority comment.\n3. `.changeset/37406-ui-skill-select-option-colour.md`.\n\nTwo-minute check: `node scripts/check-skills-token-ratchet.mjs`, expected last line \"61 authored bundle file(s) within their ceilings\" and the `list-views.md` line at \"4510 tokens (ceiling 4510; headroom 0)\".\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01L9qibzJAZWQUrXJCVTtzB7)_"

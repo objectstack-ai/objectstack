@@ -1,0 +1,36 @@
+{
+  "number": 37990,
+  "kind": "pull_request",
+  "title": "docs(objectql): state the measured outcome of a failed ctx.api statement in a before* hook's unit",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/s",
+    "skip-changeset"
+  ],
+  "assignees": [
+    "os-sales"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-27T14:23:20Z",
+  "updated_at": "2026-11-27T15:42:11Z",
+  "closed_at": "2026-11-27T15:42:08Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-11-27T15:42:08Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/37990",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-sales\"} -->\n_Requested by **Sales** · [project thread](https://claude.ai/code/project/chan_01D5bWFY3rFzgJcytD5gD4Uu?thread=cmsg_01D5bWFY3rFzgJcytD5gD4UuM6DDXTRt1TtiVmBMQXbibu)_\n\nFixes #34563\n\n## 维护者速读\n\n- 用户看到的变化：文档和 18.6 的更新说明不再写「从代码推断、没实测」，改成实测结果。行为本身没改。\n- 实测结论：在 PostgreSQL 和 MongoDB 副本集上，before* 钩子里的 `ctx.api` 写入一旦在数据库层失败，不管钩子自己 catch、`onError: 'log'` 吞掉，还是 `retryPolicy` 重试，外层保存都会被拒（重试也全部被拒），用户拿到的是数据库原始报错（PG `25P02`、Mongo `251`），记录和钩子写入都不留。SQLite 上同样情况保存会成功。MongoDB 单机（非副本集）上，带这种钩子的对象每次保存都失败，哪怕什么都没出错，加 `retryWrites=false` 也没用。\n- 出问题会怎样：只改文字，最坏是说法不准，回滚这个合并即可。\n- 需要你做的：无。\n\n## What changes\n\nDocs only. Two places said the before* hook unit's failure rules were \"read in the driver's code, not measured\"; both now state the measurement:\n\n- `content/docs/automation/hooks.mdx` (*After hooks run inside the unit of work*): the MongoDB standalone outcome, and the failed-statement rule widened from PostgreSQL alone to PostgreSQL and a MongoDB replica set, with the exact error each answers, the retry outcome and the SQLite contrast. The \"not yet measured; tracked in #34563\" pointer is removed.\n- `packages/objectql/CHANGELOG.md`, the released `a8e09bb` entry (18.6): the two \"Inside the new unit\" bullets (MongoDB, PostgreSQL) amended in place, as AGENTS.md's Documentation Guardrails row for `packages/*/CHANGELOG.md` prescribes for a factual error in a released entry (a dedicated docs-only PR, never an erratum in a later entry).\n\n## Why\n\nThe card's Done-when: both cells measured, linked on the card, and the docs say exactly what was measured. The comment's N5 cell (replica set) is measured too.\n\n## Verification\n\nMeasured with a throwaway vitest probe (not committed) in `packages/runtime`: a real `ObjectQL` over a real `SqlDriver` / `MongoDBDriver`, `bindHooksToEngine` with one metadata-bound `beforeInsert` hook on `zz_case` whose `ctx.api` insert into `zz_note` hits a unique constraint on a pre-seeded value. Tree: `objectstack-ai/objectstack` `origin/main` 57ab0876. Servers: PostgreSQL 16.15, MongoDB 8.0.38 standalone and single-node replica set (`rs0`), SQLite (better-sqlite3) as the contrast.\n\n| Path | SQLite | PostgreSQL 16.15 | MongoDB 8.0 replica set | MongoDB 8.0 standalone |\n|:---|:---|:---|:---|:---|\n| control: hook writes a valid row | stored, both rows | stored, both rows | stored, both rows | **refused**: \"does not support retryable writes\", nothing stored |\n| hook body catches the failure | stored, side write absent | **refused** `25P02`, nothing stored | **refused** code `251` \"Transaction … has been aborted\", nothing stored | refused (same message as control) |\n| `onError: 'log'` | stored (`[hook] handler failed (onError=log; suppressing)`) | **refused** `25P02`, nothing stored | **refused** `251`, nothing stored | refused (same) |\n| `retryPolicy {maxRetries: 2}`, 2nd attempt writes a valid row | stored after 2 attempts, retry row kept | **refused** `25P02`; both retries answered `25P02`; nothing stored | **refused** `251`; both retries answered `251`; nothing stored | refused (same) |\n| `retryPolicy` + `onError: 'log'` | stored after 2 attempts | **refused** `25P02`, nothing stored | **refused** `251`, nothing stored | refused (same) |\n\n- On PostgreSQL the hook saw `DuplicateRecordError` (`DUPLICATE_RECORD`, 409, cause SQLSTATE `23505`); the outer write's error is the raw driver error (`code: '25P02'`, no `status`), not an ADR-0112 refusal.\n- The standalone row was re-run with `retryWrites=false` on the connection string: the same message on all five paths. A write to an object with no such hook (the seed insert, and a `mongosh` insert) succeeds on the same server.\n- Raw results (one JSON line per cell × path) and the probe are in the project thread's files; the card carries the table.\n- Gates run locally: `check:doc-authoring`, `check:doc-anchors`, `check:docs-transcript-drift`, `check:pm-skill-id-lint`: all green.\n\nNot in this PR, for the seat: `skills/objectstack-data/references/data-hooks.md:60` and its eval `hooks-security-seeds-datasources.json:317` still say \"MongoDB needs a replica set (read in code, not measured)\" (Tier H, its own card); `content/docs/releases/v18/18-6.mdx:411` is release-owned and names the failed-statement rule for PostgreSQL only.\n\nClause-②: no\nMetadata-protocol: none\n\n## Human Minimum\n\n- [x] 1. Schemas start as Zod; `packages/spec` holds no runtime logic. (not touched)\n- [x] 2. Every name I added uses the casing for its kind. (none added)\n- [x] 3. No formatter ran; `pnpm lint` passes. (docs only; no lintable source changed)\n- [x] 4. One issue, one branch off an up-to-date `main`, one pull request.\n- [x] 5. A change that publishes carries a changeset: nothing publishes from this diff (`skip-changeset`).\n- [x] 6. `packages/spec` touched: not touched.\n- [ ] 7. No hand edits to `packages/*/CHANGELOG.md`: deliberately edited. This is the dedicated docs-only amendment of a released entry that AGENTS.md's Documentation Guardrails row prescribes.\n- [x] 8. Title, body and comments are in English (the 维护者速读 block is the maintainer's Chinese summary).\n- [x] The *Before Submitting* list in CONTRIBUTING.md is done.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01L6bhgWfqiK4KtAFo9PN4Xr\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01L6bhgWfqiK4KtAFo9PN4Xr)_\n"
+}

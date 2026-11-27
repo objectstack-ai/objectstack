@@ -1,0 +1,36 @@
+{
+  "number": 38012,
+  "kind": "issue",
+  "title": "spec/docs: agent.zod.ts still says the absorbed agent-knowledge-topics-to-sources conversion remains in the chain; agents.mdx can name the excess-property tsc error",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:ai",
+    "domain:docs",
+    "priority:p3"
+  ],
+  "assignees": [
+    "os-elon-musk"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-11-27T15:43:07Z",
+  "updated_at": "2026-11-27T18:58:34Z",
+  "closed_at": "2026-11-27T18:57:38Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/38012",
+  "body": "repo:objectstack#1 · os-elon-musk · session_016WV4cxBECSPtHxQMZDHSie\n\nFiling gate: ② follow-up out of #37967. The source is the contract record 7222359751 on PR #38003 (nits N1 and N2) and L1-a's ACCEPT 7222372893 on the same head, which asks for one small card taking both. The owning area files it under the source card.\nGrading: area:ai · Task · p3 · reach: readers of the `agent.zod.ts` docblock and of the shipped `ai/agents` docs page · evidence: read on `main`.\n\n## 维护者速读\n- 做什么：规格源码里一句注释说某个协议 17 的转换「仍在链上」，其实它在发布前就被合并掉了，现在没有任何地方注册它；另外对外文档 ai/agents 页可以补半句：直接在 `defineAgent` 里写这两个已退役字段，TypeScript 编译仍会报「多余属性」错误。\n- 谁受益：读规格源码和文档的作者，看到的说法与实际一致。\n- 不做会怎样：只是一句注释和一处可补充的说明，不影响任何行为。\n- 需要你做的：无。\n\n## What\n1. **N1, spec comment.** `packages/spec/src/ai/agent.zod.ts` ~:102-103 (after PR #38003; ~:104-105 on its head): \"The protocol-17 `agent-knowledge-topics-to-sources` conversion remains in the chain (it rewrites historical SOURCES and imports nothing from here).\" No registry or entry module carries that id; `packages/spec/src/conversions/entries/17/sharing-rule-access-level-full-to-edit.ts:17` records it as \"ABSORBED — `agent-knowledge-topics-to-sources` (protocol 17, #3855)\", and `retired-after.census.json` has no row for it. Correct the sentence to what the tree says. Comment only.\n2. **N2, docs half-clause (optional per the record).** `content/docs/ai/agents.mdx`, the `tools` and `knowledge` rows: `defineAgent` takes `z.input` of the strict `AgentSchema` (`agent.zod.ts` ~:645), a closed object type, so an inline `defineAgent({ …, tools: [...] })` literal still fails `tsc` as an excess property. Add that as a half-clause beside the parse refusal, without claiming the old by-name `never` refusal. If it does not read well in the table, leave it out and say so.\n\n## Acceptance\n- The `agent.zod.ts` sentence matches `sharing-rule-access-level-full-to-edit.ts:17` and the census; no schema, type or export changes.\n- Any `agents.mdx` addition is true on `main` (a type-level check or a cited existing test).\n- `Clause-②: no`, `Metadata-protocol: none`. Changeset: `@objectstack/spec` patch (spec publishes `src/**/*.zod.ts`).\n\nBlocked-by: #37967 (PR #38003)\nParent: #37967\nSize: XS\nDedupe (objectstack, is:issue): `agent-knowledge-topics-to-sources` 14 (none open) · `\"excess property\" defineAgent` 0. No duplicate."
+}

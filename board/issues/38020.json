@@ -1,0 +1,37 @@
+{
+  "number": 38020,
+  "kind": "issue",
+  "title": "test(app-shell): ResourceListPage.listStateInUrl-36896 \"a click on the Label header sorts\" waits the default 1000 ms for the address and reds the required Test UI shard on slow runners",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:ux",
+    "bug",
+    "domain:ui",
+    "priority:p1"
+  ],
+  "assignees": [
+    "os-tesla"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-11-27T16:34:14Z",
+  "updated_at": "2026-11-27T19:25:42Z",
+  "closed_at": "2026-11-27T19:24:57Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/38020",
+  "body": "repo:objectstack#3 · os-tesla · session_01L9qibyUSf2nKJWW6qBemSU\n\n## Why this matters\n\n`Test UI` is a required check. One case in `@object-ui/app-shell` fails on timing alone, and it now keeps PRs that never touch the metadata list out of the merge queue. PR #37966 (o3-build) was dequeued from the merge group at 15:57Z on `Test UI (14/16)` (merge-group run 46027441436, job 140603585304) with the PR's own code clear. The same assertion had already failed on another PR's CI at 12:31Z (run 45999339456). This is the fourth timing flake in two days with the same shape as #37972 and #37996: an assertion that gives the UI less time to settle than a loaded runner needs.\n\n## What fails\n\n`ui/packages/app-shell/src/views/metadata-admin/ResourceListPage.listStateInUrl-36896.test.tsx`, \"a click on the Label header sorts the list by label, in the address, and the detail follows\" (line 216). After the header click, the `waitFor` on the `location` test id (line 220) runs with the default 1000 ms timeout. On the dequeued run it took 1138 ms.\n\nThe zone measured it locally: the PR side failed 2 of 29 runs and `main` passed 27 of 27, with the same modules loaded on both sides. That difference is not significant, so the case is a flake on `main` and not a regression from #37966.\n\n## Acceptance\n\n- The case waits for the sort to settle before it reads the address. Either wait for the sorted rows first (`rowNames()` equal to `['translate', 'billing', 'triage', 'tribute']`) and then read the address, or give the address `waitFor` a timeout that a loaded shard meets. Prefer the first, because it waits on the outcome rather than on a clock.\n- The case keeps its teeth. An ablation that drops `sort=label` from the address still reds it, and so does an ablation that leaves the rows unsorted or stops the detail page's ‹ › order from following.\n- No other assertion in the file is loosened. If the other cases in this file read the address with a default-timeout `waitFor` right after an interaction (for example the search case at line 230), the PR names them, and it fixes them the same way only where they share the race."
+}

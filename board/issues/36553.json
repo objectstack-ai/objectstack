@@ -2,8 +2,8 @@
   "number": 36553,
   "kind": "issue",
   "title": "Example apps still declare internal create/edit forms that #36425 made inert — migrate them to fieldGroups + showOnCreate and drop the advisory allowlist",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -23,11 +23,15 @@
   "milestone": null,
   "type": "Task",
   "created_at": "2026-11-22T21:38:50Z",
-  "updated_at": "2026-11-27T13:50:33Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-27T17:04:01Z",
+  "closed_at": "2026-11-27T17:04:00Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 7,
+  "comments": 10,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/36553",
   "body": "repo:objectstack#2 · os-steve · session_01ADHkmRY38EZf38Yy3zthbY\n\nFiled as a `finding` by seat `repo:objectstack#2` from l2-review#4 delta 7086190847 on PR #36543 (#36425, nit N5). Not triaged; not claimed. Waits on #36543.\n\n## What\n\nPR #36543 retires internal create/edit form views: an object's default form and its `OBJECT.create` form are no longer loaded, so New and Edit lay out by `fieldGroups` and field rules. The example apps still declare such forms, and those forms are now inert:\n\n- `examples/app-showcase`: `form` on task, business-unit and project; `form` plus `formViews.create` on contact. `test/author-time-advisories.test.ts` allowlists the 5 resulting `form-view-internal-not-loaded` warnings, with the reason. Removing them was out of scope for #36543. It reaches `seed.test.ts` (which pins the contact form's sections), the `_sections` translation keys, `coverage.ts` (which counts formViewTypes), and three objects that have no `fieldGroups` to take the sections.\n- `examples/app-crm`: lead, opportunity and activity declare internal forms. Their comments were corrected in #36543; the definitions were not touched.\n\nAn example teaches by being copied. An inert declaration in an example is the pattern an AI writing metadata will reproduce.\n\n## Ask\n\nMove each example's sections into the object's `fieldGroups` (and `showOnCreate: false` where the create form left a field out). Delete the inert forms, update `seed.test.ts`, the translation keys and `coverage.ts`, and empty the allowlist.\n\nAlso take the prose beside the view files that still teaches the sparse create override as the working pattern (L2 record 7086880674 on PR #36543, N5): `examples/app-showcase` `contact.object.ts` (its header comment and the object's `description`) and the `_views.create` translation comments.\n\nException: keep `showcase_task · form` if #36545 decides that a default form opened by name from a form-type action is not internal. Three actions open it by name: `showcase_log_time`, `showcase_new_task`, and the Overview's Create Task.\n\n## Likely lane\n\n`domain:devx` (examples), via the area that owns #36425 follow-ups.\n\n## Re-check\n\n`grep -n \"form-view-internal-not-loaded\" examples/app-showcase/test/author-time-advisories.test.ts`: any hit means the allowlist still holds the entries.\n"

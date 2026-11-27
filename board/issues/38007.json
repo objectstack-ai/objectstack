@@ -1,0 +1,36 @@
+{
+  "number": 38007,
+  "kind": "pull_request",
+  "title": "docs(sharing): list the tri-state write verdicts and the set form; correct the per-row cost in the 35802 release note",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/s",
+    "tooling"
+  ],
+  "assignees": [
+    "os-sales"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-27T15:18:46Z",
+  "updated_at": "2026-11-27T16:25:50Z",
+  "closed_at": "2026-11-27T16:25:48Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-11-27T16:25:48Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/38007",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-sales\"} -->\n_Requested by **Sales** · [project thread](https://claude.ai/code/project/chan_01D5bWFY3rFzgJcytD5gD4Uu?thread=cmsg_01D5bWFY3rFzgJcytD5gD4UuCWYvPEsHj9Q8qnw3KqGjKP)_\n\nFixes #37563\n\nClause-②: no\nMetadata-protocol: none\n\n## 维护者速读\n\n- 是什么：纯文档。共享服务文档页补上三态写入判定 `checkEdit` / `checkDelete`（allow / abstain / deny）、它们和 `canEdit` / `canDelete` 的关系，以及可选的集合形式 `checkEditMany` / `checkDeleteMany` 和缺省时逐条回退；已发布的 35802 发版说明里那段「每行成本」原位改正。\n- 为什么：插件作者读这页学不到三态判定和集合形式；35802 说明里的每行成本在 #35934 之后对自带的共享服务已经不对（现在每 1,000 条两次读取），正式版会同时带上两条互相矛盾的说明。\n- 影响谁：只影响读文档和发版说明的人；没有行为变化，可整体撤回。\n- 需要你：无。\n\n## What changes\n\n1. `content/docs/kernel/runtime-services/sharing-service.mdx`: the method list gains `checkEdit` / `checkDelete` and the optional `checkEditMany?` / `checkDeleteMany?`; a new section \"The write verdicts: tri-state, two-state and set form\" states the three verdicts and their bases, that `canEdit` / `canDelete` are the not-`deny` projection, and the set form's terms (one verdict per id in order, same bases and verb boundary, reads grow per chunk, 1,000 ids per chunk in the bundled `SharingService`, feature-detected with a per-record fallback, fail-closed per chunk). *Returns* lists the new return types. Every sentence is taken from `packages/spec/src/contracts/sharing-service.ts` (the `SharingWriteVerdict` and `ISharingService` doc blocks), `packages/plugins/plugin-sharing/src/sharing-service.ts` (`WRITE_VERDICT_CHUNK = 1000`, the abstain arms) and `packages/plugins/plugin-security/src/security-plugin-sharing-verdicts.ts` (the `typeof … === 'function'` detection and the batch of 25).\n2. The 35802 release note (\"a predicate update or delete now writes the rows a Modify All holder, a non-creator owner or an edit-share target can write by id…\"), shipped in `@objectstack/plugin-security` 19.0.0-next.0: its cost paragraph is amended in place. It now states the set-form cost the bundled sharing service has since #35934 (chunks of 1,000; on 10,000 rows 24 / 13 / 14 store reads, the figures measured in the 35934 note) and keeps the old per-row measurements as the cost of a sharing service without the set form. Nothing else in the note moves.\n\n## DELIBERATE CORRECTION\n\nThis PR rewrites somebody else's release note, in two places, with the same text:\n\n- `packages/plugins/plugin-security/CHANGELOG.md`, section `19.0.0-next.0`, the 35802 entry — AGENTS.md *Documentation Guardrails* row for `packages/*/CHANGELOG.md`: a factual error in a released entry is amended in that entry in a dedicated docs-only PR.\n- `.changeset/pre/35802-predicate-write-floor-deferral.md`, the consumed prerelease copy. The stable cut re-applies every consumed changeset (`scripts/changeset-changelog.mjs`, \"The stable cut folds its prerelease sections\"), so without this the 19.0.0 section would print the stale paragraph again, and the fold would keep the amended next.0 section beside it with a warning. Changing both keeps them byte-equal, so the fold drops the prerelease section as usual.\n\nThe paragraph replaced: \"The by-id decision costs one sharing verdict, a few store reads, for each matched row the floor does not already admit. Measured on SQLite in memory:\". The paragraph put in its place begins \"The by-id decision is one sharing verdict for each matched row the floor does not already admit. The bundled sharing service (`@objectstack/plugin-sharing`) answers all of them through its set form…\", followed by \"A sharing service that does not implement the set form is asked `checkEdit` / `checkDelete` once per row, 25 at a time, with the same answers, and then each verdict costs a few store reads. Measured on SQLite in memory with the per-row form:\" ahead of the unchanged bullets.\n\nBecause the PR changes an existing changeset and adds none, `Check Changeset` is red by design (route 0, ruling D on #18375); it carries no `skip-changeset` label.\n\n## Verification\n\n- Every new docs sentence was checked against the three source files named above.\n- The two amended copies are identical apart from the CHANGELOG's two-space indent (`git diff`).\n- Local docs gates could not run: this container has no `node_modules`. `check:docs-audit-scope` (dependency-free) passes. CI runs the rest.\n\n## Human Minimum\n\n- [x] 1. Schemas start as Zod; `packages/spec` holds no runtime logic. (not touched)\n- [x] 2. Every name I added uses the casing for its kind. (no names added)\n- [x] 3. No formatter ran; `pnpm lint` passes. (no code)\n- [x] 4. One issue, one branch off an up-to-date `main`, one pull request.\n- [x] 5. A change that publishes carries a changeset, and both declaration lines are filled in here and in the changeset. (publishes nothing; corrects a consumed note, see above)\n- [x] 6. `packages/spec` touched: its generated artifacts are regenerated and committed. (not touched)\n- [ ] 7. No hand edits to `content/docs/references/`, `packages/*/CHANGELOG.md` or `content/docs/releases/`. — one deliberate hand edit of a released CHANGELOG entry, the docs-only route AGENTS.md prescribes for a factual error.\n- [x] 8. Title, body and comments are in English. (the 维护者速读 block is the fleet's maintainer summary)\n- [x] The *Before Submitting* list in CONTRIBUTING.md is done.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01L6bhgVoRLoKr6LLz2gnWG3\n"
+}

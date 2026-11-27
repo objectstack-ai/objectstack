@@ -1,0 +1,35 @@
+{
+  "number": 38000,
+  "kind": "pull_request",
+  "title": "test(console): record the route probes in a layout effect so a drawn page is already recorded",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "size/s",
+    "skip-changeset"
+  ],
+  "assignees": [
+    "os-tesla"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-27T14:55:03Z",
+  "updated_at": "2026-11-27T15:46:22Z",
+  "closed_at": "2026-11-27T15:46:19Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-11-27T15:46:19Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/38000",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-tesla\"} -->\n_Requested by **Tesla** · [project thread](https://claude.ai/code/project/chan_01AXsQkLFKRdQCqQ3RTr6Jao?thread=cmsg_01AXsQkLFKRdQCqQ3RTr6Jao7TkF6tARYTW3zLaaPzFK5G)_\nFixes #37996\n\nClause-②: no\nMetadata-protocol: none\n\n## 维护者速读\n\n- 用户无感：只改两份控制台路由测试，产品代码一行未动。\n- 为什么做：这两份测试在慢的 CI 机器上偶发变红，挡住了与它们无关的 PR（如问 AI 的那张）。\n- 出错会怎样：只影响测试，可随时撤回；改坏的话这两份测试会稳定变红，不会伤到用户。\n- 要你做什么：无。\n\n## What changes\n\nBoth files record the router's history through a private `LocationProbe` that pushed in a passive `useEffect`. Each case waits for the routed DOM (`findByTestId`, or the outside-`act` `drawn()` poll) and then reads the history array. React may flush a passive effect after the DOM is visible, so on a slow runner the read came one entry short: CI run 46013899997, `Test UI (2/16)`, `expected [ '/apps/policy' ] to deeply equal [ '/apps/policy', …(1) ]` at the outside-`act` \"a member with no AI seat: the home is the next entry, not a hold that never ends\" case.\n\nBoth probes now record in `useLayoutEffect`, which runs in the same commit that writes the DOM. Once a routed page is drawn, its location is already recorded. No assertion, wait or timeout changes; the diff is the effect hook and a comment on each probe.\n\nThe race was in the probe, not only in the two cases the card names, so the fix covers every case in both files that reads `seen` / `pathnames` (31 of 46).\n\nFiles: `ui/apps/console/src/components/StudioRoute.metadataArea-28561.test.tsx`, `ui/packages/app-shell/src/console/__tests__/AppContent.aiChatEntryGate-37833.test.tsx`. Test-only: neither file ships in a package's `files[]` (`@object-ui/app-shell` is private and ships `dist`; `@object-ui/console` ships `dist` and its plugin entry), so this PR carries `skip-changeset`.\n\n## Tests\n\n<details><summary>Reproduction on origin/main dc45b1e6 (before the fix)</summary>\n\n- Baseline: both files, 46/46 passed.\n- Each probe's push delayed 30 ms with `setTimeout` (a late passive-effect flush): 31 failed / 15 passed of 46, including both cases the card names, with CI's failure shape (`expected [ '/apps/policy' ] to deeply equal [ '/apps/policy', …(1) ]`, and for the Studio case an array one entry short of `[ '/studio/~all', … ]`). Mutation reverted, `git diff HEAD` empty.\n</details>\n\n<details><summary>After the fix, head 556804f8</summary>\n\n- `pnpm --dir ui exec vitest run apps/console/src/components/StudioRoute.metadataArea-28561.test.tsx packages/app-shell/src/console/__tests__/AppContent.aiChatEntryGate-37833.test.tsx`: 46/46 passed, eight runs in a row (8/8).\n</details>\n\n<details><summary>Ablations (teeth kept), each through scripts/ablation-replace.mjs, restored to the HEAD blob with git diff HEAD empty</summary>\n\n- S1, two hops: `StudioAllLegAddress` first sends any `~all` URL to `/studio/~all/hop`, then to its target. Studio file: 5 failed / 28 passed. The three \"lands on Setup's environment directory, in one hop, never on a pillar\" rows fail at line 188 (`expect(seen).toEqual([url, '/apps/setup/component/security/access-directory'])`), the two \"without Setup's entry capability\" rows at line 200.\n- S2, lands on a pillar: `StudioAllLegAddress` always sends a Setup holder to the area's root. The three Setup-directory rows fail at line 185 (`findByTestId('setup-directory')`; the builder is drawn instead).\n- G1, changed next entry: `resolveLandingRoute` skips the first entry the member is shown. Gate file: 6 failed / 7 passed. The card's case (\"a member with no AI seat: the home is the next entry, not a hold that never ends\") fails at line 418 (`expect(pathnames).toEqual(['/apps/policy', '/apps/policy/crm_case'])`); the others at lines 300, 313, 324, 357 and 461.\n</details>\n\n## Acceptance notes\n\n- Same probe shape elsewhere, named per the card and not edited here (each is a private function in its own file, none shares a helper with these two). A census of `useLocation` probes that push in a passive `useEffect` found: `ui/packages/app-shell/src/views/ObjectView.listUrlState-11860.test.tsx`, `ui/packages/app-shell/src/views/ObjectView.ufViewSwitch-11992.test.tsx`, `ui/packages/app-shell/src/views/ObjectView.listPageInUrl-30850.test.tsx`, `ui/packages/app-shell/src/layout/__tests__/usePhoneNavDrawerHistory-29131.test.tsx`, `ui/packages/app-shell/src/console/ai/__tests__/AiChatPage.buildClosedRoutes-36969.test.tsx`, `ui/apps/console/src/pages/system/ApprovalsInboxPage.lateBulkReload-37548.test.tsx`, `ui/apps/console/src/pages/system/ApprovalsInboxPage.lateBulkToast-37328.test.tsx`. The census matched a push within a short `useEffect` body, so a probe spelled across a longer body may be missing from it. Whether each one races depends on whether it reads the array right after a DOM wait; not measured here. carrier: seat repo:objectstack#3.\n\n## Verification\n\nRun the two files with the command under Tests; expect 46 passed. To see the race the assertions are exposed to, delay either probe's push with `setTimeout(…, 30)`, which stands in for a late passive-effect flush: the history assertions go red.\n"
+}

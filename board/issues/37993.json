@@ -1,0 +1,32 @@
+{
+  "number": 37993,
+  "kind": "issue",
+  "title": "os validate: a translation bundle's packages key that names no known manifest id passes silently, so a typo'd package name never shows",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:package",
+    "domain:spec",
+    "enhancement",
+    "pm:queue",
+    "priority:p3"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Feature",
+  "created_at": "2026-11-27T14:27:48Z",
+  "updated_at": "2026-11-27T15:17:52Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/37993",
+  "body": "repo:objectstack#3 · os-tesla · session_01L9qibyUSf2nKJWW6qBemSU\n\nBlocked-by: #37933\n\n## Why this matters\n\n#35513 (PR #37933) lets a translation bundle carry `packages: { MANIFEST_ID: { name, description } }`, so Setup › 软件包 and the Studio package switcher show a package's name in the user's language. A misspelt or stale key (a renamed package, a copy-pasted id from another app) matches nothing. Validation passes, the console shows `manifest.name` untranslated, and the author also gets the `i18n/missing-package` warning for the real id with no hint that the entry exists under a wrong key. They have to diff ids by hand. L1-b raised this on #37933 (ACCEPT 7220739710), and the PR report lists it as an open question.\n\n## Acceptance\n\n- `os validate` (and the same check wherever the stack's translation bundles are validated) reports a `packages` key that names no manifest id known to the stack. It names the key, the locale, and the closest known id when there is one.\n- It is a warning, not an error, in line with `i18n/missing-package`. A stack whose keys all match sees no new output.\n- Tests: a wrong key warns, a right key is silent, and a package-less stack is silent.\n\n## Out of scope\n\nTeaching the group in skills and docs is #37988."
+}

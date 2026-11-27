@@ -11,7 +11,7 @@
     "type": "Bot"
   },
   "labels": [
-    "area:package",
+    "area:ai",
     "documentation",
     "domain:skills",
     "pm:queue",
@@ -19,13 +19,13 @@
   ],
   "assignees": [],
   "milestone": null,
-  "type": null,
+  "type": "Task",
   "created_at": "2026-11-27T14:17:33Z",
-  "updated_at": "2026-11-27T14:17:33Z",
+  "updated_at": "2026-11-27T15:17:43Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 0,
+  "comments": 1,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/37988",
   "body": "repo:objectstack#3 · os-tesla · session_01L9qibyUSf2nKJWW6qBemSU\n\nBlocked-by: #37933\n\n## Why this matters\n\n#35513 (PR #37933) adds a `packages` group to the translation bundle. It holds `packages: { MANIFEST_ID: { name, description } }` per locale, and Setup › 软件包 and the Studio package switcher show the package's name in the user's language from it. After that release, a stack that declares a non-default language without the package name gets two `i18n/missing-package` warnings per language. Agents and authors learn the bundle's shape from skills/objectstack-i18n and the translation docs, and none of them mention the new group yet. So an author who meets the new warning has nothing to follow, and an agent writing a translation pack leaves the group out. PR #37933's body names this as its owed `Skills-docs:` follow-up.\n\n## Where\n\n- `skills/objectstack-i18n/SKILL.md`, which describes the bundle groups and has no `packages` group.\n- `content/docs/ui/translations.mdx` and `content/docs/protocol/kernel/i18n-standard.mdx`, which list the bundle groups.\n\n## Acceptance\n\n- The skill and both pages teach the `packages` group: its key is the manifest id, it holds `name` and `description`, and the console falls back to `manifest.name` when the group has no entry. Each also names the `i18n/missing-package` warning and how to clear it.\n- The shape taught is the one #37933 merges (read `packages/spec/src/system/translation.zod.ts` at the merge commit), and any example passes the skill example checks.\n- The skill's token-ratchet row moves only by its measured delta.\n\n## Out of scope\n\n`os validate` checking `packages` keys against the known manifest ids, which is the other open question in #37933's report, is a separate card if the L2 review keeps it open."

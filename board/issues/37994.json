@@ -1,0 +1,32 @@
+{
+  "number": 37994,
+  "kind": "issue",
+  "title": "Studio translations: the translation table offers no row for the package's own name and description, so an admin cannot translate them without code",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:package",
+    "domain:ui",
+    "enhancement",
+    "pm:queue",
+    "priority:p3"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Feature",
+  "created_at": "2026-11-27T14:28:12Z",
+  "updated_at": "2026-11-27T15:17:55Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/37994",
+  "body": "repo:objectstack#3 · os-tesla · session_01L9qibyUSf2nKJWW6qBemSU\n\nBlocked-by: #37933\n\n## Why this matters\n\nAfter #35513 (PR #37933), Setup › 软件包 and the Studio package switcher show a package's name in the user's language, read from the translation bundle's new `packages` group. Studio's translation editor is where an admin fills in translations for a stack's objects, fields and other keys, and it offers no row for the package's own name or description. The admin who sees an untranslated package name, or the new `i18n/missing-package` warning, can only fix it by editing the translation source in code. Everything else they translate in Studio. L1-b raised this on #37933 (ACCEPT 7220739710).\n\n## Acceptance\n\n- Studio's translation table lists, per locale, the package's `name` and `description` under the `packages` group, keyed by the package's manifest id, and saving writes them into that group.\n- An empty cell falls back to `manifest.name` and `manifest.description` in the console, the same as the bundle path.\n- Tests pin the row's presence and a save round trip. The preview cards for the translation categories include the group.\n\n## Out of scope\n\n`os validate` checking `packages` keys is the sibling card. Teaching the group is #37988."
+}
