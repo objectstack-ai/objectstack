@@ -196,9 +196,10 @@ describe('[#24769] the two buttons the knowledge service contributes, at the HTT
     expect(answer.body?.data?.message).toContain('text-embedding-3-small');
   });
 
-  it('POST /api/settings/knowledge/test is answered by the adapter check (200, not 400)', async () => {
+  it('POST /api/settings/knowledge/test is answered by the Turso form check (200, not 400)', async () => {
+    // The Turso fields alone: the check reads no `adapter` since #37104.
     const answer = await post(http, 'knowledge', 'test', {
-      values: { adapter: 'turso', turso_url: 'file:./knowledge.db' },
+      values: { turso_url: 'file:./knowledge.db' },
     });
     expect(answer.status).toBe(200);
     expect(answer.body?.data?.ok).toBe(true);

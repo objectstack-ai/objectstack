@@ -1859,6 +1859,9 @@ importers:
       '@objectstack/service-knowledge':
         specifier: workspace:*
         version: link:../../services/service-knowledge
+      '@objectstack/service-settings':
+        specifier: workspace:*
+        version: link:../../services/service-settings
       '@types/node':
         specifier: ^26.6.5
         version: 26.6.5
