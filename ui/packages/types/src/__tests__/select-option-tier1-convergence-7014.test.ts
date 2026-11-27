@@ -102,9 +102,9 @@
  *
  * ## The control the spec fixtures need
  *
- * A select option's `value` is a lowercase machine identifier with a minimum
- * length, so a one-character value fails `too_small` and NOT for the reason a
- * key-boundary fixture is asking about. Every fixture here uses a value long
+ * A select option's `value` is a lowercase machine identifier, so an uppercase
+ * value fails `invalid_format` and NOT for the reason a key-boundary fixture is
+ * asking about. Every fixture here uses a value long
  * enough that the only thing under test is the key set, and the accepting
  * control proves it.
  */
@@ -422,12 +422,12 @@ describe('the derived base carries the spec vocabulary', () => {
   it('CONTROL: a clean option is accepted, and for the stated reason', () => {
     const res = SpecSelectOptionSchema.safeParse(CONTROL);
     expect(res.success).toBe(true);
-    // …and the reason really is "no extra key, valid value": a one-character
+    // …and the reason really is "no extra key, valid value": an uppercase
     // value fails for a DIFFERENT reason, which is what makes the ACCEPT above
     // a reading rather than luck.
-    const short = SpecSelectOptionSchema.safeParse({ label: 'H', value: 'h' });
-    expect(short.success).toBe(false);
-    expect(short.success ? [] : short.error.issues.map((i) => i.code)).toContain('too_small');
+    const upper = SpecSelectOptionSchema.safeParse({ label: 'H', value: 'H' });
+    expect(upper.success).toBe(false);
+    expect(upper.success ? [] : upper.error.issues.map((i) => i.code)).toContain('invalid_format');
   });
 
   it('accepts an option carrying every spec key at once', () => {
