@@ -6,7 +6,7 @@
 
 fix(lint)!: three publish-time checks for seeds, flow nodes and actions that save and do not work
 
-Clause-②: no (narrowing)
+Clause-②: yes (narrowing)
 Metadata-protocol: narrowed
 Skills-docs: follow-up #37814
 
