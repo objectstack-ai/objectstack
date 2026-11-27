@@ -561,6 +561,22 @@ describe('[#35143] validateObjectReferences — the object a seed, a flow node o
       expect(write('crm_lead').errors).toEqual([]);
     });
 
+    it('an `action` saved into a package is judged against its closure: another package\'s object resolves only once declared', () => {
+      // `crm_lead` is owned by `com.acme.crm`; the action is saved into `com.acme.ext`.
+      const owned = objects.map((o) => ({ ...o, _packageId: 'com.acme.crm' }));
+      const write = (dependencies: string[]) =>
+        runRuntimeAuthoringRules({
+          type: 'action',
+          item: { name: 'go', label: 'Go', objectName: 'crm_lead', type: 'script', locations: ['record_header'], body: { language: 'js', source: 'return 1;' } },
+          context: { objects: owned },
+          packageScope: { packageId: 'com.acme.ext', dependencies },
+        });
+      const refused = write([]).errors.filter((e) => e.rule === OBJECT_REFERENCE_UNKNOWN);
+      expect(refused.map((e) => [e.path, e.severity])).toEqual([['actions[0].objectName', 'error']]);
+      expect(refused[0].hint).toContain('com.acme.ext');
+      expect(write(['com.acme.crm']).errors).toEqual([]);
+    });
+
     it('a `flow` write whose create_record node names an object the deployment does not serve is refused', () => {
       const write = (objectName: string) =>
         runRuntimeAuthoringRules({

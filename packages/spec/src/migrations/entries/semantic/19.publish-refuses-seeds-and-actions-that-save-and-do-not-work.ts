@@ -29,7 +29,9 @@ export const entry: SemanticMigration = {
     + 'sandbox refuses a body\'s write it was not granted (403 INSUFFICIENT_PRIVILEGES) every time the action reaches '
     + 'it. Stored metadata is not rewritten or refused at boot. The next publish of a seed, flow, action or object '
     + 'that carries one of these is refused with the fix named. An `action` write is also judged for its params\' '
-    + '`reference` / `objectOverride` objects, as `os validate` already judged them.',
+    + '`reference` / `objectOverride` objects, as `os validate` already judged them, and an action saved into a '
+    + 'package is judged against that package\'s closure, as a flow saved there already was: an object '
+    + 'another package owns resolves only when the manifest declares that package in `dependencies`.',
   acceptanceCriteria:
     'os validate reports none of the three errors; a publish of every seed, flow, action and object the package carries '
     + 'succeeds.',

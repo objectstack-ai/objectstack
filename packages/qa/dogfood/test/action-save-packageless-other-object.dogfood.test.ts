@@ -48,7 +48,7 @@ describe('[ADR-0150 D4] a package-less action save on an object the package does
       // P binds an action to `showcase_invoice`, which the showcase package
       // owns, so P declares that package: the publish gate refuses an action
       // bound to an object outside the package's closure (#35143), as it
-      // already refused a flow or a view there.
+      // already refused a flow there.
       manifest: {
         id: PKG, name: 'QA save other object', version: '0.1.0', type: 'app', namespace: 'qasaveother',
         dependencies: { 'com.example.showcase': '*' },
