@@ -7,8 +7,10 @@
  *
  * Three holds:
  *  - against `DEFAULT_METADATA_TYPE_REGISTRY`: every type the directory can
- *    list has exactly one row, and every row names a registered, listable
- *    type — so a newly registered type fails here until it is placed;
+ *    list has exactly one row unless the menu draws no row for it
+ *    (`STUDIO_MENU_NO_ROW_TYPES`: `datasource`, objectstack#37920), and every
+ *    row names a registered, listable type — so a newly registered type fails
+ *    here until it is placed;
  *  - against the ruling: the rows, in order, with their tiers. The expected
  *    values are literals, so a reordered or re-tiered row fails here, not in
  *    the menu;
@@ -23,12 +25,15 @@ import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { DEFAULT_METADATA_TYPE_REGISTRY } from '@objectstack/spec/kernel';
 import { HIDDEN_DIRECTORY_TYPES } from '../metadata-admin/directoryScope.js';
-import { STUDIO_MENU_PLACEMENT } from './studioMenuPlacement.js';
+import { STUDIO_MENU_NO_ROW_TYPES, STUDIO_MENU_PLACEMENT } from './studioMenuPlacement.js';
 
 /** The types a package's directory can list: every registered type it does not hide. */
-const LISTABLE_TYPES = DEFAULT_METADATA_TYPE_REGISTRY.map((entry) => entry.type).filter(
+const DIRECTORY_TYPES = DEFAULT_METADATA_TYPE_REGISTRY.map((entry) => entry.type).filter(
   (type) => !HIDDEN_DIRECTORY_TYPES.has(type),
 );
+
+/** The types the menu draws a row for: every type the directory lists but the no-row ones. */
+const LISTABLE_TYPES = DIRECTORY_TYPES.filter((type) => !STUDIO_MENU_NO_ROW_TYPES.has(type));
 
 describe('the menu placement table agrees with the registry (objectstack#37200)', () => {
   it('every type the directory can list has exactly one row', () => {
@@ -48,6 +53,15 @@ describe('the menu placement table agrees with the registry (objectstack#37200)'
   it('the rows and the listable types are the same set', () => {
     expect(STUDIO_MENU_PLACEMENT.map((row) => row.type).sort()).toEqual([...LISTABLE_TYPES].sort());
   });
+
+  // ADR-0084, amended 2026-11-26, decision 12: the type stays registered `system` and the
+  // directory still lists it; like `field`, it is a type that draws no row.
+  it('datasource is a registered system type the directory lists, and it has no row (objectstack#37920)', () => {
+    expect([...STUDIO_MENU_NO_ROW_TYPES]).toEqual(['datasource']);
+    expect(DEFAULT_METADATA_TYPE_REGISTRY.find((entry) => entry.type === 'datasource')?.domain).toBe('system');
+    expect(DIRECTORY_TYPES).toContain('datasource');
+    expect(STUDIO_MENU_PLACEMENT.map((row) => row.type)).not.toContain('datasource');
+  });
 });
 
 describe('the menu placement table holds the ruled order and tiers (objectstack#37200)', () => {
@@ -66,7 +80,7 @@ describe('the menu placement table holds the ruled order and tiers (objectstack#
       'picklist', 'hook', 'mapping', 'object_extension', 'seed',
       'view', 'action',
       'job',
-      'doc', 'book', 'email_template', 'translation', 'api', 'datasource', 'external_catalog',
+      'doc', 'book', 'email_template', 'translation', 'api', 'external_catalog',
       'assignment_rule', 'sharing_rule', 'queue', 'capability',
       'ai_context', 'knowledge_source',
     ]);
@@ -181,6 +195,14 @@ describe('the groups the 2026-11-26 placements touch read as ADR-0084 lists them
     expect(groupTiers('ui')).toEqual({
       common: ['app', 'page', 'dashboard', 'report'],
       advanced: ['view', 'action'],
+    });
+  });
+
+  // objectstack#37920 — the datasource row is gone; external_catalog closes up behind api.
+  it('平台 Platform: no 常用 type | doc · book · email_template · translation · api · external_catalog', () => {
+    expect(groupTiers('system')).toEqual({
+      common: [],
+      advanced: ['doc', 'book', 'email_template', 'translation', 'api', 'external_catalog'],
     });
   });
 
