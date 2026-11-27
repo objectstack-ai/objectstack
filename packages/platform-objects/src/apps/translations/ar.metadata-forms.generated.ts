@@ -1664,6 +1664,9 @@ export const arMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       }
     }
   },
+  form: {
+    label: "نموذج"
+  },
   page: {
     label: "الصفحة",
     sections: {

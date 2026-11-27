@@ -418,6 +418,9 @@
         "studio-authoring.validation-rules-authoring"
       ]
     },
+    "form": {
+      "waived": "WAIVED 2026-11-26 — the kind is new (ADR-0159 card ②, #37086) and no checklist item has been run against an authored `form` item yet. What exists: the showcase authors one `form` item, `forms: [FeedbackForm]` (examples/app-showcase/src/ui/forms/feedback.form.ts, public at /forms/showcase-feedback, an address no other form holds); its contact-us form is still an old `view` shape (examples/app-showcase/src/ui/views/inquiry.view.ts), which the anonymous doors read through the one projection, so access-security.public-form-intake keeps driving the same door and the same answers. The type's own rules are pinned below the checklist — FormSchema, the projection and the intake layer in packages/spec/src/ui/form-item.test.ts, the two-type withdrawal, FORM_ADDRESS_TAKEN on save, publish and restore, the old-shape row removal and the package-less list refusal on both doors in packages/rest/src/public-form-two-type-withdrawal.test.ts, and the authoring rules in packages/lint/src/validate-form-items.test.ts. WHAT RETIRES THIS WAIVER — an item that drives GET /forms/showcase-feedback and its submit for the authored form, a `form` override that withdraws it, and the 409 for a second form left open on the address; the same edit replaces this waiver with `items` naming it. Card ④ (#37088: the examples, their translation keys and the docs move to `forms:`) moves the contact-us form, after which access-security.public-form-intake drives an authored form too."
+    },
     "view": {
       "items": [
         "records-forms.view-type-gallery",

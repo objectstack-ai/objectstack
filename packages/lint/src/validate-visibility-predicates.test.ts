@@ -302,7 +302,7 @@ describe('the layer a site declares for itself (#7815)', () => {
   });
 
   it('`opts.layer` still governs every site that declares no data source', () => {
-    // The file-aware caller's contract is unchanged: a `*.form.ts` whose form
+    // The file-aware caller's contract is unchanged: a `*.metadata-form.ts` whose form
     // carries no `data: { provider: 'schema' }` is still only reachable through
     // the option, and a page component always is.
     expect(validateVisibilityPredicates(runtimeForm("data.type == 'grid'"), { layer: 'metadata' }))
@@ -519,7 +519,7 @@ describe('visibility-bare-identifier (#6128 / #5149 requirement 3)', () => {
       expect(bareFindings(stack).map((f) => f.path)).toEqual(['views[0].form.sections[0]']);
     });
 
-    it('a bare form view whose `sections` sit at the top (the `defineForm` shape)', () => {
+    it('a bare form view whose `sections` sit at the top (the `defineMetadataForm` shape)', () => {
       const stack = { views: [{ name: 'v', sections: [{ visibleWhen: 'approved', fields: [] }] }] };
       expect(bareFindings(stack).map((f) => f.path)).toEqual(['views[0].sections[0]']);
     });
@@ -1543,7 +1543,7 @@ describe('visibility-predicate-over-budget (#7217)', () => {
   });
 
   it('speaks the LAYER\'s binding root in its remedy', () => {
-    // A `*.form.ts` author binds `data`, so a `record.`-flavoured example would
+    // A `*.metadata-form.ts` author binds `data`, so a `record.`-flavoured example would
     // be a second wrong prescription in a rule whose whole point is that the
     // prescription must be followable.
     const metadata = overBudgetFindings(formStack(OVER_AST_NODES), { layer: 'metadata' });
@@ -1570,7 +1570,7 @@ describe('visibility-predicate-over-budget (#7217)', () => {
 // (`authoring-rules.ts` → `validateVisibilityPredicates(stack)`, no options):
 // a form view declaring `data: { provider: 'schema', schemaId }` is judged
 // there on its own say-so. That door's audience is a Studio / REST `/meta` /
-// MCP author who has no `*.form.ts` to open, so a message that justified the
+// MCP author who has no `*.metadata-form.ts` to open, so a message that justified the
 // layer by naming that file prescribed correctly and then explained itself
 // somewhere the reader cannot go.
 //
@@ -1588,8 +1588,8 @@ describe('emitted prose names the surface, not a source file (#8042)', () => {
     }],
   });
 
-  /** Any `*.view.ts` / `*.page.ts` / `*.form.ts` spelling, in any position. */
-  const SOURCE_FILENAME = /\.(form|view|page)\.ts/;
+  /** Any `*.view.ts` / `*.page.ts` / `*.metadata-form.ts` spelling, in any position. */
+  const SOURCE_FILENAME = /[.-](form|view|page)\.ts/;
 
   it('the mis-layered advisory explains the metadata layer without naming a file', () => {
     const f = validateVisibilityPredicates(publishedForm("record.type == 'grid'"))
@@ -1617,7 +1617,7 @@ describe('emitted prose names the surface, not a source file (#8042)', () => {
 
   it('the RUNTIME arm is file-free too — the mirror sentence carried the same defect', () => {
     // A view or page published through Studio has no `*.view.ts` either, and
-    // this arm explained the forbidden `data.` root by naming `*.form.ts`. Same
+    // this arm explained the forbidden `data.` root by naming `*.metadata-form.ts`. Same
     // class, other direction; fixing only the graded arm would have left half
     // the sentence pointing at a file.
     const f = validateVisibilityPredicates(formStack("data.type == 'grid'"))[0];
@@ -1659,7 +1659,7 @@ describe('emitted prose names the surface, not a source file (#8042)', () => {
   it('the file-aware caller reads the SAME prose — this changed strings, not a code path', () => {
     // `MISLAYER_BY_LAYER` is keyed by LAYER, not by how the layer was decided,
     // so a caller passing `opts.layer = 'metadata'` (the file-aware caller,
-    // linting a real `*.form.ts`) reads exactly what the published-through-
+    // linting a real `*.metadata-form.ts`) reads exactly what the published-through-
     // Studio author reads. Pinned because the tempting shape of this fix — fork
     // the wording by caller and give the file-aware one its filename back — is
     // two messages for one condition, which #5240 rules out.
@@ -1676,15 +1676,15 @@ describe('emitted prose names the surface, not a source file (#8042)', () => {
   it('the file-aware CALLER contract keeps its filename — this was not a find-and-replace', () => {
     // The discrimination that IS the card. What was wrong is prose addressed to
     // an AUTHOR who may hold no file; `opts.layer` is addressed to a CALLER that
-    // is linting one, where `*.form.ts` is both accurate and the useful word. A
+    // is linting one, where `*.metadata-form.ts` is both accurate and the useful word. A
     // blanket strip would have deleted that too, and would pass every assertion
     // above — this is the one that notices.
     const source = readFileSync(
       join(dirname(fileURLToPath(import.meta.url)), 'validate-visibility-predicates.ts'),
       'utf8',
     );
-    expect(source).toContain('a file-aware caller linting a `*.form.ts` does');
-    expect(source).toContain('when linting a `*.form.ts` metadata-editing form');
+    expect(source).toContain('a file-aware caller linting a `*.metadata-form.ts` does');
+    expect(source).toContain('when linting a `*.metadata-form.ts` metadata-editing form');
   });
 });
 
@@ -1901,7 +1901,7 @@ describe('[#22161] one-line verdicts — the rule ids this file shortened', () =
 
   // What each verdict stopped saying, which `os explain RULE_ID` now prints.
   const MOVED: Record<string, readonly string[]> = {
-    [VISIBILITY_ROOT_MISLAYERED]: ['ADR-0089', '`*.form.ts`', '`page.VAR`'],
+    [VISIBILITY_ROOT_MISLAYERED]: ['ADR-0089', '`*.metadata-form.ts`', '`page.VAR`'],
     [VISIBILITY_PREDICATE_OVER_BUDGET]: ['falls OPEN', 'settled behaviour', 'SIZE fault', '`maxListElements` is 64'],
     [VISIBILITY_PREDICATE_SYNTAX]: ['falls OPEN', 'settled behaviour', 'ADR-0032', '`===`'],
     [VISIBILITY_PREDICATE_UNKNOWN_FUNCTION]: ['`throwOnError: true`', 'falls CLOSED', '`console.warn`', 'CEL_STDLIB_FUNCTIONS'],

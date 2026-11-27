@@ -169,6 +169,9 @@ describe('R7 — an open approval request gains the package that holds its flow'
             { fields: ['status', 'object_name'], unique: false },
             { fields: ['status', 'updated_at'], unique: false },
             { fields: ['submitter_id', 'status'], unique: false },
+            // ADR-0162 item 7 (the root run) adds these two, after this card.
+            { fields: ['root_run_id', 'object_name', 'record_id'], unique: false },
+            { fields: ['record_run_id'], unique: false },
         ]));
         expect((SysApprovalRequest.fields as Record<string, any>).process_package).toMatchObject({
             type: 'text', required: false, readonly: true,

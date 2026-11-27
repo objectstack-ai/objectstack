@@ -21,6 +21,7 @@ import { setupShowcaseExternalDatasource } from './src/system/datasources/extern
 import { registerShowcaseApprovalDemo } from './src/security/seed-approval-demo.js';
 import { TaskViews, ProjectViews, InquiryViews, BusinessUnitViews, ContactViews, FieldZooViews } from './src/ui/views/index.js';
 import { ShowcaseApp } from './src/ui/apps/index.js';
+import { FeedbackForm } from './src/ui/forms/index.js';
 import { ChartGalleryDashboard, OpsDashboard, RevenuePulseDashboard } from './src/ui/dashboards/index.js';
 import { ShowcaseTaskDataset, ShowcaseProjectDataset, ShowcaseInvoiceDataset, ShowcaseAccountDataset } from './src/ui/datasets/index.js';
 import { allReports } from './src/ui/reports/index.js';
@@ -224,6 +225,8 @@ export default defineStack({
   // UI
   apps: [ShowcaseApp],
   views: [TaskViews, ProjectViews, InquiryViews, BusinessUnitViews, ContactViews, FieldZooViews],
+  // [ADR-0159] The authored `form` item (`defineForm`), on an address of its own.
+  forms: [FeedbackForm],
   pages: [CapabilityMapPage, StartHerePage, ComponentGalleryPage, ProjectWorkspacePage, ProjectDetailPage, TaskWorkbenchPage, TaskTriagePage, TaskBoardPage, TaskCalendarPage, TaskGalleryPage, TaskSchedulePage, TaskTimelinePage, TaskMapPage, TaskAllViewsPage, ActiveProjectsPage, TaskDetailPage, InvoiceDocumentPage, ReviewQueuePage, NewProjectWizardPage, MyWorkPage, SettingsPage, StylingGalleryPage, CommandCenterPage, CommandCenterJsxPage, CrmWorkbenchPage, TaskDeskPage, PageVariablesPage, ContactFormPage, RenewalsPipelinePage],
   dashboards: [ChartGalleryDashboard, OpsDashboard, RevenuePulseDashboard],
   books: allBooks,

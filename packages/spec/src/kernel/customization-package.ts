@@ -322,6 +322,9 @@ export const OVERRIDE_TYPE_CLASSIFICATION = {
   translation: listed,
   email_template: listed,
   page: listed,
+  // [ADR-0159 D4] `form` is `view`'s form half: overridable on the terms a form
+  // `view` item is today, so a declared override switches an installed form off.
+  form: listed,
   app: listed,
   dataset: listed,
   doc: listed,

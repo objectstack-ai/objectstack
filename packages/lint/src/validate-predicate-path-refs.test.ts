@@ -9,7 +9,7 @@
  * metadata forms this repo actually SHIPS (`METADATA_FORM_REGISTRY`), which is
  * both the corpus count the widening discipline requires before an `error`-level
  * gate may land, and the reverse verification — restoring #6254's pre-fix
- * `object.form.ts` spellings must turn the count from 0 to the number of
+ * `object.metadata-form.ts` spellings must turn the count from 0 to the number of
  * `data.type`-rooted predicates that form ships today (17; #6254 itself
  * measured 16, and #11410 added the second `deleteBehavior` declaration).
  */
@@ -78,7 +78,7 @@ const explanationOf = (rule: string): string => explainRule(rule)?.paragraphs.jo
 const resolveSchema = (schemaId: string) => (schemaId === 'demo' ? DemoSchema : undefined);
 const run = (stack: Record<string, unknown>) => validatePredicatePathRefs(stack, { resolveSchema });
 
-/** A `defineForm`-shaped view: the bare FormView with a schema data source. */
+/** A `defineMetadataForm`-shaped view: the bare FormView with a schema data source. */
 const form = (sections: unknown[], schemaId = 'demo') => ({
   views: [{ name: 'demo_form', data: { provider: 'schema', schemaId }, sections }],
 });
@@ -511,7 +511,7 @@ describe('registry wiring', () => {
 //
 // `METADATA_FORM_REGISTRY` is the whole population of `data.`-rooted predicates
 // this repo ships (17 forms; 48 predicates, all `visibleWhen`). Every entry is a
-// `defineForm` output, i.e. exactly the bare FormView shape `formViewSites`
+// `defineMetadataForm` output, i.e. exactly the bare FormView shape `formViewSites`
 // walks as its `self` rung — so the corpus is fed through the rule's PRODUCTION
 // entry point, not through a parallel walker written for the test.
 //
@@ -566,7 +566,7 @@ describe('#7010 corpus — shipped METADATA_FORM_REGISTRY', () => {
     };
     corrupt(corrupted.views);
     // The count tracks the CORPUS, not an issue: 49 after #13216 added
-    // a `page` section to `view.form.ts` — the surface block for the new `page`
+    // a `page` section to `view.metadata-form.ts` — the surface block for the new `page`
     // view type, gated by `visibleWhen: "data.type == 'page'"` exactly as every
     // other surface block is — so the walk has one more predicate to reach.
     // It was 51 after objectui#6140 (maintainer ruling 2026-08-25, Option A)
@@ -586,7 +586,7 @@ describe('#7010 corpus — shipped METADATA_FORM_REGISTRY', () => {
     // removed. Earlier measurements stay what they were: history, not the census.
     // It is 52 today, and this one is a REMOVAL: #17063 retired the
     // `type: 'page'` list-view mount under ADR-0049 enforce-or-remove, and
-    // `view.form.ts`'s `page` section — the single `pageName` input gated
+    // `view.metadata-form.ts`'s `page` section — the single `pageName` input gated
     // `data.type == 'page'` — went with the key it configured. A form input for
     // an unwritable key is the false-compliant UI half of a retirement, so the
     // census falls by exactly one.
@@ -611,11 +611,11 @@ describe('#7010 corpus — shipped METADATA_FORM_REGISTRY', () => {
     // accepts each key whatever the sibling value is, but only some field
     // types, page kinds or action operations ever read it, and offering a knob
     // the runtime does not deliver is what Prime Directive #10 forbids. Fifteen
-    // are `field.form.ts` rows mirrored from the same key's row in the object
+    // are `field.metadata-form.ts` rows mirrored from the same key's row in the object
     // designer's quick-add grid, so the two surfaces cannot disagree about when
     // a knob applies; the other four are `page :: source`, `action :: openIn`,
     // `action :: newTabUrl` and `action :: undoable`.
-    // Measured rather than inferred from the delta: the shipped `*.form.ts`
+    // Measured rather than inferred from the delta: the shipped `*.metadata-form.ts`
     // corpus was differenced against the merge base `5ce3705052` by
     // `<form>::<field>::<source>`. Exactly nineteen entries were added and NONE
     // was removed — `field :: ackPlaintextMasking | allowCreate |
@@ -651,13 +651,13 @@ describe('#7010 corpus — shipped METADATA_FORM_REGISTRY', () => {
     // It is 83 today, an ADDITION of ONE: the field form's `useGrouping` row,
     // offered once the key was enforced, carries `scale`'s gate — the key is a
     // display hint for `number` fields only. Measured, not inferred: the
-    // shipped `*.form.ts` corpus differenced against the merge base
+    // shipped `*.metadata-form.ts` corpus differenced against the merge base
     // `d78a0bda07` adds exactly `field :: useGrouping :: data.type == 'number'`
     // and removes none.
     // It is 85 today, an ADDITION of TWO: #21863 offered the action form's
     // `outcomeMessages` and `onSuccess` rows, each gated on the two action types
     // whose parse accepts the key. Measured, not inferred: the shipped
-    // `*.form.ts` corpus differenced against the merge base `607463d736` by
+    // `*.metadata-form.ts` corpus differenced against the merge base `607463d736` by
     // `<form>::<field>::<source>`, 83 → 85, adds exactly
     // `action :: outcomeMessages` and `action :: onSuccess`, both
     // `data.type == 'api' || data.type == 'script'`, and removes none. The two
@@ -666,7 +666,7 @@ describe('#7010 corpus — shipped METADATA_FORM_REGISTRY', () => {
     // `dueLike` and `settledWhen` rows, the deadline semantic. These two are
     // PARSE gates, not meaningfulness gates: `FieldSchema` refuses both keys off
     // `date` / `datetime`, and `settledWhen` without `dueLike: true`. Measured,
-    // not inferred: the shipped `*.form.ts` corpus differenced against the
+    // not inferred: the shipped `*.metadata-form.ts` corpus differenced against the
     // merge base `dee7692f0b` by `<form>::<field>::<source>`, 85 → 87, adds
     // exactly `field :: dueLike :: data.type in ['date','datetime']` and
     // `field :: settledWhen :: data.type in ['date','datetime'] && data.dueLike
@@ -676,7 +676,7 @@ describe('#7010 corpus — shipped METADATA_FORM_REGISTRY', () => {
     // It is 88 today, an ADDITION of ONE: #22870 offered the field form's
     // `mailAssociation` row, a PARSE gate like the deadline pair (`FieldSchema`
     // refuses the key off `email`). Measured, not inferred: the shipped
-    // `*.form.ts` corpus differenced against the merge base `018b077fb` by
+    // `*.metadata-form.ts` corpus differenced against the merge base `018b077fb` by
     // `<form>::<field>::<source>`, 87 → 88, adds exactly
     // `field :: mailAssociation :: data.type == 'email'` and removes none. It
     // does reach the literal-comparison census below.
@@ -784,7 +784,7 @@ describe('#7010 corpus — shipped METADATA_FORM_REGISTRY', () => {
     // note above) — exactly the #11566 (PR #11989) respell of the sibling
     // `maxLength` row, which took the measurement from 47 to 44. Earlier
     // measurements stay what they were — history, not the census. It was 42
-    // when #13216's `page` section in `view.form.ts` carried a
+    // when #13216's `page` section in `view.metadata-form.ts` carried a
     // `data.type == 'page'` gate; it is 41 today because #17063 retired that
     // section with the `type: 'page'` mount it configured (ADR-0049
     // enforce-or-remove), taking that one `==` literal comparison with it. The
@@ -850,7 +850,7 @@ describe('#7010 corpus — shipped METADATA_FORM_REGISTRY', () => {
 
   it('catches the pre-#6254 bare spellings when they are restored (reverse verification)', () => {
     // The reverse direction is RED-on-restore: #6254 rewrote 16 predicates in
-    // `object.form.ts` from `type ...` to `data.type ...`. Restoring the bare
+    // `object.metadata-form.ts` from `type ...` to `data.type ...`. Restoring the bare
     // spelling on a deep copy of the shipped `object` form must produce one
     // `predicate-path-unrooted` finding per `data.type`-rooted predicate the
     // form ships — the class the issue measured, and the class this rule exists
@@ -881,7 +881,7 @@ describe('#7010 corpus — shipped METADATA_FORM_REGISTRY', () => {
       }
       if (!node || typeof node !== 'object') return;
       const rec = node as Record<string, unknown>;
-      // `defineForm` PARSES, so a shipped predicate is the post-parse
+      // `defineMetadataForm` PARSES, so a shipped predicate is the post-parse
       // `{ dialect, source }` envelope, not the raw string the source file spells.
       const predicate = rec.visibleWhen;
       const source = typeof predicate === 'string' ? predicate

@@ -112,6 +112,9 @@ const GATED_AT: Readonly<Record<string, string>> = {
   ai_context: 'aiContexts',
   // [ADR-0161 K4] `knowledge_source`: strict from the release that admits the type, authored at `knowledgeSources:`.
   knowledge_source: 'knowledgeSources',
+  // [ADR-0159 card ②] `form`: CLOSED from its first day (`FormSchema` is a
+  // `strictObject`), authored at `forms:` as a flat array of that same shape.
+  form: 'forms',
   // [#5384] `api` GRADUATED here from NOT_YET_CLOSED — the deliberate ratchet
   // step this file's own note asked for. `ApiEndpointSchema` is `strictObject`
   // as of #5384, so the stack's `apis:` array and the registry schema now reject

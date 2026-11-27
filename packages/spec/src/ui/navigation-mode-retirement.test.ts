@@ -44,7 +44,7 @@ import type { ConversionNotice } from '../conversions/types';
 import { MIGRATIONS_BY_MAJOR } from '../migrations/registry';
 import { defineStack } from '../stack.zod';
 import { ComponentPropsMap } from './component.zod';
-import { pageForm } from './page.form';
+import { pageForm } from './page.metadata-form';
 import { InterfacePageConfigSchema } from './page.zod';
 import { ListViewSchema, NavigationConfigSchema, NavigationModeSchema, ObjectListViewSchema } from './view.zod';
 

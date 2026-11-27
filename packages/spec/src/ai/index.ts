@@ -28,12 +28,12 @@
  */
 
 export * from './agent.zod';
-export { agentForm } from './agent.form';
+export { agentForm } from './agent.metadata-form';
 export * from './tool.zod';
-export { toolForm } from './tool.form';
+export { toolForm } from './tool.metadata-form';
 export * from './skill.zod';
-export { skillForm } from './skill.form';
-export { aiContextForm } from './ai-context.form';
+export { skillForm } from './skill.metadata-form';
+export { aiContextForm } from './ai-context.metadata-form';
 export * from './conversation.zod';
 export * from './model-registry.zod';
 export * from './usage.zod';

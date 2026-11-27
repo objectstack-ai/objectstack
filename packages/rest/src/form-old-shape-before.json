@@ -1,0 +1,287 @@
+{
+  "meta-view-list": {
+    "status": 200,
+    "body": {
+      "type": "view",
+      "items": [
+        {
+          "name": "ftt_inquiry.contact",
+          "object": "ftt_inquiry",
+          "viewKind": "form",
+          "config": {
+            "type": "simple",
+            "sections": [
+              {
+                "fields": [
+                  "name",
+                  "email"
+                ]
+              }
+            ],
+            "sharing": {
+              "enabled": true,
+              "allowAnonymous": true,
+              "publicLink": "/forms/contact-37086"
+            },
+            "data": {
+              "provider": "object",
+              "object": "ftt_inquiry"
+            }
+          },
+          "order": 0,
+          "scope": "package",
+          "_packageId": "com.example.forms37086",
+          "_packageVersion": "1.0.0",
+          "_provenance": "package",
+          "_diagnostics": {
+            "valid": true
+          }
+        },
+        {
+          "name": "ftt_inquiry.form",
+          "object": "ftt_inquiry",
+          "viewKind": "form",
+          "config": {
+            "type": "simple",
+            "sections": [
+              {
+                "fields": [
+                  "name"
+                ]
+              }
+            ],
+            "sharing": {
+              "enabled": true,
+              "allowAnonymous": true,
+              "publicLink": "/forms/whole-37086"
+            },
+            "data": {
+              "provider": "object",
+              "object": "ftt_inquiry"
+            }
+          },
+          "order": 1,
+          "scope": "package",
+          "isDefault": true,
+          "_packageId": "com.example.forms37086",
+          "_packageVersion": "1.0.0",
+          "_provenance": "package",
+          "_diagnostics": {
+            "valid": true
+          }
+        },
+        {
+          "name": "ftt_inquiry.standalone",
+          "object": "ftt_inquiry",
+          "viewKind": "form",
+          "label": "Contact us",
+          "config": {
+            "type": "simple",
+            "sections": [
+              {
+                "fields": [
+                  "name",
+                  "email"
+                ]
+              }
+            ],
+            "sharing": {
+              "enabled": true,
+              "allowAnonymous": true,
+              "publicLink": "/forms/standalone-37086"
+            },
+            "data": {
+              "provider": "object",
+              "object": "ftt_inquiry"
+            }
+          },
+          "_diagnostics": {
+            "valid": true
+          }
+        }
+      ],
+      "changedAt": {
+        "ftt_inquiry.standalone": "2026-11-26T07:19:38.576Z"
+      }
+    }
+  },
+  "data-object-resolve": {
+    "status": 200,
+    "body": {
+      "slug": "contact-37086",
+      "object": "ftt_lead",
+      "form": {
+        "type": "simple",
+        "sections": [
+          {
+            "fields": [
+              "name",
+              "email"
+            ]
+          }
+        ],
+        "sharing": {
+          "enabled": true,
+          "allowAnonymous": true,
+          "publicLink": "/forms/contact-37086"
+        },
+        "data": {
+          "provider": "object",
+          "object": "ftt_lead"
+        }
+      },
+      "objectSchema": {
+        "name": "ftt_lead",
+        "label": "Lead",
+        "fields": {
+          "name": {
+            "name": "name",
+            "type": "text",
+            "label": "Name"
+          },
+          "email": {
+            "name": "email",
+            "type": "text",
+            "label": "Email"
+          }
+        }
+      }
+    }
+  },
+  "data-object-submit": {
+    "status": 400,
+    "body": {
+      "error": "Organization is required",
+      "code": "VALIDATION_FAILED",
+      "fields": [
+        {
+          "field": "organization_id",
+          "code": "required",
+          "message": "Organization is required",
+          "label": "Organization"
+        }
+      ]
+    }
+  },
+  "crm-resolve": {
+    "status": 200,
+    "body": {
+      "slug": "contact-us",
+      "object": "crm_lead",
+      "form": {
+        "type": "simple",
+        "data": {
+          "provider": "object",
+          "object": "crm_lead"
+        },
+        "sections": [
+          {
+            "name": "contact_us",
+            "label": "Contact us",
+            "collapsible": false,
+            "collapsed": false,
+            "columns": 1,
+            "fields": [
+              {
+                "field": "name",
+                "required": true,
+                "span": "auto"
+              },
+              {
+                "field": "company",
+                "span": "auto"
+              },
+              {
+                "field": "email",
+                "required": true,
+                "span": "auto"
+              },
+              {
+                "field": "phone",
+                "span": "auto"
+              },
+              {
+                "field": "title",
+                "span": "auto"
+              }
+            ]
+          }
+        ],
+        "sharing": {
+          "enabled": true,
+          "publicLink": "/forms/contact-us",
+          "allowAnonymous": true
+        }
+      },
+      "objectSchema": {
+        "name": "crm_lead",
+        "label": "Lead",
+        "fields": {
+          "name": {
+            "label": "Lead Name",
+            "type": "text",
+            "required": true,
+            "searchable": true,
+            "multiple": false,
+            "unique": false,
+            "maxLength": 200,
+            "hidden": false,
+            "readonly": false,
+            "sortable": true,
+            "externalId": false
+          },
+          "email": {
+            "label": "Email",
+            "type": "email",
+            "required": false,
+            "searchable": true,
+            "multiple": false,
+            "unique": false,
+            "hidden": false,
+            "readonly": false,
+            "sortable": true,
+            "externalId": false
+          },
+          "phone": {
+            "label": "Phone",
+            "type": "phone",
+            "required": false,
+            "searchable": false,
+            "multiple": false,
+            "unique": false,
+            "hidden": false,
+            "readonly": false,
+            "sortable": true,
+            "externalId": false
+          },
+          "company": {
+            "label": "Company",
+            "type": "text",
+            "required": false,
+            "searchable": true,
+            "multiple": false,
+            "unique": false,
+            "maxLength": 200,
+            "hidden": false,
+            "readonly": false,
+            "sortable": true,
+            "externalId": false
+          },
+          "title": {
+            "label": "Title",
+            "type": "text",
+            "required": false,
+            "searchable": false,
+            "multiple": false,
+            "unique": false,
+            "maxLength": 120,
+            "hidden": false,
+            "readonly": false,
+            "sortable": true,
+            "externalId": false
+          }
+        }
+      }
+    }
+  }
+}

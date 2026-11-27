@@ -217,6 +217,7 @@ const JUDGED_FIXTURES: Record<OwnerStampJudgedCollection, { item: Record<string,
   picklists: { item: { name: 'probe_pick', label: 'Pick', options: [{ value: 'aa', label: 'A' }] } },
   actions: { item: { name: 'probe_go', label: 'Go', type: 'script', target: 'go' } },
   views: { item: { object: 'probe_thing', list: { type: 'grid', data: { provider: 'object', object: 'probe_thing' }, columns: ['title'] } } },
+  forms: { item: { name: 'probe_thing.intake', object: 'probe_thing', type: 'simple', sections: [{ fields: [{ field: 'title' }] }] } },
   pages: { item: { name: 'probe_page', label: 'Page', type: 'app', regions: [] } },
   dashboards: { item: { name: 'probe_dash', label: 'Dash', widgets: [] } },
   reports: {

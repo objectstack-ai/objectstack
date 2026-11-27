@@ -93,6 +93,8 @@ export const KIND_COVERAGE: Record<MetadataType, KindCoverage> = {
 
   // ── ui ──
   view: { status: 'demonstrated', files: ['src/ui/views/task.view.ts', 'src/ui/views/project.view.ts'] },
+  // [ADR-0159] One authored `form` item, a public form on an address no other form holds.
+  form: { status: 'demonstrated', files: ['src/ui/forms/feedback.form.ts'] },
   page: { status: 'demonstrated', files: ['src/ui/pages/index.ts'] },
   dashboard: {
     status: 'demonstrated',

@@ -119,6 +119,6 @@
     "lowerRequiresMembershipReach": "src/identity/membership-reach.ts#lowerRequiresMembershipReach (function)",
     "mapMembershipRole": "src/identity/eval-user.zod.ts#mapMembershipRole (function)",
     "membershipReachPredicate": "src/identity/membership-reach.ts#membershipReachPredicate (function)",
-    "positionForm": "src/identity/position.form.ts#positionForm (const)"
+    "positionForm": "src/identity/position.metadata-form.ts#positionForm (const)"
   }
 }

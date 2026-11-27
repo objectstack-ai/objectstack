@@ -1,0 +1,220 @@
+// Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
+
+import { defineMetadataForm } from './view.zod';
+
+/**
+ * Page Metadata Form
+ * 
+ * Form layout for creating/editing page metadata definitions.
+ */
+export const pageForm = defineMetadataForm({
+  schemaId: 'page',
+  type: 'simple',
+  sections: [
+    {
+      label: 'Basics',
+      description: 'Page identity and template.',
+      columns: 2,
+      fields: [
+        { field: 'name', required: true, colSpan: 1, helpText: 'Unique identifier (snake_case)' },
+        { field: 'label', required: true, colSpan: 1, helpText: 'Page title shown to users' },
+        { field: 'icon', widget: 'icon', colSpan: 1, helpText: 'Icon for navigation menu' },
+        {
+          field: 'type',
+          colSpan: 1,
+          // The page KIND, not a visualization. Kanban/Calendar/Gallery/Timeline
+          // are visualizations OF a List page (set under Interface →
+          // Appearance → Allowed visualizations), not page types — so they are
+          // deliberately absent here. Only kinds with a dedicated renderer are
+          // offered; roadmap kinds (dashboard/form/record_detail/…) are valid in
+          // the schema but hidden until they render distinctly.
+          options: [
+            { label: 'List / Interface page', value: 'list' },
+            { label: 'Record page', value: 'record' },
+            { label: 'Home page', value: 'home' },
+            { label: 'App page', value: 'app' },
+            { label: 'Utility panel', value: 'utility' },
+          ],
+          helpText: 'Page kind. "List / Interface" binds a source view into a curated surface — how it looks (grid / kanban / calendar / …) is a visualization set under Interface, not a page type.',
+        },
+        // A list/interface page renders via InterfaceListPage and ignores the
+        // region template, so hide it there (same rationale as Data Context / Layout).
+        { field: 'template', colSpan: 2, visibleWhen: "data.type != 'list'", helpText: 'Layout template (e.g., "header-sidebar-main")' },
+        { field: 'description', widget: 'textarea', colSpan: 2, helpText: 'Page description for navigation' },
+        // #19331 — `source` is declared by PageSchema and was offered by no
+        // control, so a source-authored page could only be written through the
+        // Source tab's free-text JSON. `type: 'code'` rather than a textarea:
+        // the value is program text, and the code control is what this registry
+        // already uses for every other program-text row (`action.body.source`,
+        // `object.fields.expression`). `visibleWhen` is a MEANINGFULNESS gate,
+        // not a parse gate — `PageSchema` accepts the key whatever the `kind`,
+        // but only the two source kinds (`html` / `react`) ever read it; the two layout
+        // kinds (`full` / `slotted`) compose regions and slots instead.
+        { field: 'source', type: 'code', language: 'jsx', colSpan: 2, visibleWhen: "data.kind in ['html','react']", helpText: "Page source text. For kind 'html' it is constrained JSX compiled to the component tree at save time — parsed, never executed. For kind 'react' it is real React executed at render by the trusted runtime." },
+      ],
+    },
+    {
+      label: 'Data Context',
+      description: 'Record binding and page-local state.',
+      // Interface/list pages bind their data via the Interface section
+      // (source/sourceView), not a page-level object — hide this to keep
+      // the panel lean (the region/record machinery doesn't apply).
+      visibleWhen: "data.type != 'list'",
+      fields: [
+        { field: 'object', widget: 'ref:object', helpText: 'Bound object (for Record pages)' },
+        {
+          field: 'variables',
+          type: 'repeater',
+          helpText: 'Local page state variables',
+          // Explicit sub-fields so `source` can use the `ref:component` picker —
+          // a variable's `source` names the component (by `id`) that writes it,
+          // so it's chosen from the page's real canvas components, not typed by
+          // hand. Reconciled against PageVariableSchema by
+          // metadata-form-zod-reconciliation.test.ts (#3786).
+          fields: [
+            { field: 'name', label: 'Name', required: true, helpText: 'Variable name — exposed to expressions as `page.<name>`' },
+            { field: 'type', label: 'Type', helpText: 'Value type' },
+            { field: 'defaultValue', label: 'Default Value', helpText: 'Initial value (defaults to a type-appropriate empty value)' },
+            { field: 'source', label: 'Written By', widget: 'ref:component', helpText: 'Component (by id) that writes this variable — e.g. an element:record_picker' },
+          ],
+        },
+      ],
+    },
+    {
+      label: 'Layout',
+      description: 'Page regions and components placed within them.',
+      // List pages render a curated list surface, not free-form regions —
+      // the region designer is irrelevant here, so hide it for list pages.
+      visibleWhen: "data.type != 'list'",
+      fields: [
+        // Not required: slotted pages compose via `slots`, list pages ignore
+        // regions entirely, and a full home/app/utility page may author none.
+        // A full RECORD page must place a component here (unless it binds no
+        // `object` and draws an `interfaceConfig.source` list), and the parse
+        // says so (`checkPageRecordPlacesComponent`) — a form-level `required`
+        // could not: it would also bind every page this form edits that
+        // legitimately has none.
+        {
+          field: 'regions',
+          type: 'repeater',
+          helpText: 'Layout regions (header, main, sidebar, footer) with components',
+          // Row-property names (#17508): every authorable row property, `label`
+          // equal to the item schema's `.meta({ title })`, so `os i18n extract`
+          // emits a catalog key per column and the panel keeps its schema-derived
+          // widgets (no `type` here).
+          fields: [
+            { field: 'name', label: 'Region' },
+            { field: 'width', label: 'Width' },
+            { field: 'components', label: 'Components' },
+          ],
+        },
+      ],
+    },
+    {
+      name: 'interface',
+      label: 'Interface (list pages)',
+      description: 'Interface mode (Airtable parity): the page defines its own data surface directly — columns, filters, visualizations and toolbar — no inheriting from a separate view.',
+      collapsible: true,
+      // Primary content for a list page — open by default (still collapsible).
+      collapsed: false,
+      visibleWhen: "data.type == 'list'",
+      fields: [
+        {
+          field: 'interfaceConfig',
+          type: 'composite',
+          helpText:
+            'The page IS the view: source picks the object, columns/filterBy are defined directly here; appearance.allowedVisualizations whitelists renderers (one entry = locked); userActions toggles the toolbar.',
+          // Order: common authoring controls first, rarely-used ones last.
+          // Explicit sub-fields so `userFilters` can use the dedicated
+          // filter-mode selector (None / Tabs / Dropdown, ADR-0047 §3.4a).
+          // None maps to ABSENCE of userFilters — the protocol stores
+          // "no filter bar" as omission, not a literal element: 'none'.
+          // (`element: 'toggle'` stays valid but deprecated — not offered.)
+          // Reconciled against InterfacePageConfigSchema by
+          // metadata-form-zod-reconciliation.test.ts (#3786), which is what
+          // caught `sort` missing here while the schema declared it.
+          fields: [
+            // ── Data ── the page defines its own data surface directly.
+            { field: 'source', widget: 'ref:object', helpText: 'Object this page reads from' },
+            // Columns are defined ON the page (no view inheritance). `dependsOn:
+            // 'source'` tells the picker which object's fields to offer.
+            { field: 'columns', widget: 'field-multi', dependsOn: 'source', helpText: 'Columns to show — defined directly on the page (blank = all object fields)' },
+            { field: 'filterBy', widget: 'filter-builder', dependsOn: 'source', helpText: 'Always-on base filter for the page — same visual builder as the list toolbar.' },
+            {
+              field: 'sort',
+              type: 'repeater',
+              dependsOn: 'source',
+              helpText: 'Default sort order for the page, defined directly on the page.',
+              // Row-property names (#17508): every authorable row property, `label`
+              // equal to the item schema's `.meta({ title })`, so `os i18n extract`
+              // emits a catalog key per column and the panel keeps its schema-derived
+              // widgets (no `type` here).
+              fields: [
+                { field: 'field', label: 'Field' },
+                { field: 'order', label: 'Direction' },
+              ],
+            },
+            { field: 'levels', helpText: 'Hierarchy levels to display (tree-like sources)' },
+            // ── Appearance ──
+            { field: 'appearance', type: 'composite', disclosure: 'popover', helpText: 'Allowed visualizations (Grid / Kanban / Calendar / …) and description visibility' },
+            // ── User filters ──
+            {
+              field: 'userFilters',
+              widget: 'filter-mode',
+              helpText: 'End-user filter bar: None (no bar) / Tabs (named presets) / Dropdown (per-field). None removes the config.',
+            },
+            // ── User actions ──
+            { field: 'userActions', type: 'composite', disclosure: 'popover', helpText: 'Toolbar toggles (search, sort, filter, row height)' },
+            // [#24692] The two live keys only: `mode` / `formView` are tombstones
+            // on `AddRecordConfigSchema`, and `enabled` is required.
+            {
+              field: 'addRecord',
+              type: 'composite',
+              disclosure: 'popover',
+              helpText: 'Add-record entry point',
+              fields: [{ field: 'enabled' }, { field: 'position' }],
+            },
+            // The list page's own empty state — the list view's `EmptyStateSchema`,
+            // by reference, so the same popover shape as `appearance` above. The
+            // console's list page draws it in place of the source view's, whole
+            // (`cfg.emptyState ?? view.emptyState` in objectui's InterfaceListPage).
+            { field: 'emptyState', type: 'composite', disclosure: 'popover', helpText: "What the page shows when its list has no rows: a heading, a message, an icon and one link. Set here, it replaces the source view's empty state." },
+            // Buttons ARE object actions — pick from the source object's actions.
+            { field: 'buttons', widget: 'action-multi', dependsOn: 'source', helpText: "Toolbar buttons — pick from this object's actions" },
+            {
+              field: 'recordAction',
+              options: [
+                { label: 'Drawer (right-side peek)', value: 'drawer' },
+                { label: 'Full page', value: 'page' },
+                // `modal` was retired (#26677): a record opens in the drawer,
+                // which expands to the full page, or as the full page.
+                { label: 'Not clickable', value: 'none' },
+              ],
+              helpText: 'How clicking a record opens its detail',
+            },
+            { field: 'showRecordCount', helpText: 'Show the record count bar' },
+            { field: 'allowPrinting', helpText: 'Allow users to print this page' },
+          ],
+        },
+      ],
+    },
+    {
+      label: 'Advanced',
+      description: 'Activation, audience, and accessibility.',
+      collapsible: true,
+      collapsed: true,
+      fields: [
+        // [#23015] One default record page per object per deployment
+        // (`PageSchema.isDefault`); the old "for this page type" stated a rule
+        // nothing enforced.
+        { field: 'isDefault', helpText: 'Open this record page for its object\'s records. One default record page per object: a second is refused.' },
+        { field: 'kind', helpText: 'Page override mode: full or slotted (for record pages)' },
+        // `assignedProfiles` input removed with the key (ADR-0090 D2 / ADR-0049): a form
+        // input for an unwritable key is the false-compliant UI half of a retirement, and
+        // its helpText shipped translated into four locale bundles. Page audience is the
+        // permission set's; there is nothing to author here.
+        { field: 'aria', type: 'composite', helpText: 'Accessibility attributes (ARIA labels, roles)' },
+      ],
+    },
+  ],
+});

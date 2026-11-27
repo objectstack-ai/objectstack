@@ -24,7 +24,7 @@
 import { describe, it, expect } from 'vitest';
 import { z } from 'zod';
 
-import { reportForm } from './report.form';
+import { reportForm } from './report.metadata-form';
 import { ReportSchema } from './report.zod';
 
 type Node = Record<string, any>;

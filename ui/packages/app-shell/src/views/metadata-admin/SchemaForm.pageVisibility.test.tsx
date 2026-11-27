@@ -3,6 +3,9 @@
 import { describe, it, expect, afterEach } from 'vitest';
 import { render, screen, cleanup } from '@testing-library/react';
 import { SchemaForm } from './SchemaForm';
+// Paid at module top, during collection (check:test-source-alias): the source under test reaches it through a dynamic import.
+import '@objectstack/formula';
+import '@objectstack/lint';
 
 afterEach(cleanup);
 
@@ -42,7 +45,7 @@ const pageSchema = {
   },
 };
 
-// FormView mirroring framework PR #1817 (packages/spec/src/ui/page.form.ts).
+// FormView mirroring framework PR #1817 (packages/spec/src/ui/page.metadata-form.ts).
 const pageForm = {
   type: 'simple' as const,
   sections: [

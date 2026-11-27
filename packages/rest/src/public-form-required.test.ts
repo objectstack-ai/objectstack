@@ -30,6 +30,7 @@
  */
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
+import { projectedFormsOf } from '@objectstack/spec/ui';
 import { ObjectQL } from '@objectstack/objectql';
 import { SqlDriver } from '@objectstack/driver-sql';
 import { ObjectStackProtocolImplementation } from '@objectstack/metadata-protocol';
@@ -134,6 +135,8 @@ describe('[#24131] POST /forms/:slug/submit enforces the form\'s own `required`'
     const protocol: any = new ObjectStackProtocolImplementation(engine as any);
     const realGetMetaItems = protocol.getMetaItems.bind(protocol);
     protocol.getMetaItems = async (request: any) => {
+      // [ADR-0159 D5] The `form` read, as the protocol serves it for the injected old shape: its projection.
+      if (request?.type === 'form') return projectedFormsOf([FORM]);
       if (request?.type === 'view') return [FORM];
       if (request?.type === 'object') return [LEAD];
       return realGetMetaItems(request);
@@ -141,6 +144,8 @@ describe('[#24131] POST /forms/:slug/submit enforces the form\'s own `required`'
     // [#28409] The doors judge withdrawal against the effective list beside
     // the per-package layer: the injected list is that whole layer here.
     protocol.getMetaItemsPerPackage = async (request: any) => (request?.type === 'view' ? [FORM] : []);
+    // [ADR-0159 D6 rule 7] No stored body here: the store is not provisioned, the injected lists are the layer.
+    protocol.getUnreadableFormBodies = async () => [];
     const rest = new RestServer(mockServer() as any, protocol, { api: { requireAuth: false } } as any);
     rest.registerRoutes();
     const submit = rest.getRoutes().find((r: any) => r.method === 'POST' && r.path === '/api/v1/forms/:slug/submit');

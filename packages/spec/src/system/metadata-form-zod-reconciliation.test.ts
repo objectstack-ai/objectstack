@@ -3,7 +3,7 @@
 /**
  * **Metadata form ↔ Zod reconciliation** (#3786).
  *
- * Every entry in {@link METADATA_FORM_REGISTRY} is a hand-written `defineForm`
+ * Every entry in {@link METADATA_FORM_REGISTRY} is a hand-written `defineMetadataForm`
  * layout that names keys of a Zod schema it never imports. That is the
  * hand-copied-list shape #3786 was filed about: two descriptions of one key set,
  * a comment asking the next author to keep them in step, and nothing that fails
@@ -198,7 +198,7 @@ const LEDGER: ReadonlyArray<OmitEntry | SubsetEntry> = [
     key: 'sourceView',
     why: '@deprecated legacy named-view inheritance, honored at runtime as a fallback but deliberately not offered to new authors — a page defines columns/sort/filterBy directly (ADR-0047 revised)',
   },
-  // #30267 — `view.form.ts` now spells out `userFilters`' children. This walk
+  // #30267 — `view.metadata-form.ts` now spells out `userFilters`' children. This walk
   // resolves the block through the view union to the page-shaped
   // `UserFiltersSchema`; the list arm the view form lays out takes
   // `ObjectUserFiltersSchema`, which omits these three page-only keys and
@@ -228,20 +228,20 @@ const LEDGER: ReadonlyArray<OmitEntry | SubsetEntry> = [
     kind: 'subset',
     type: 'object',
     path: 'fields',
-    why: "the object editor's inline column grid is a QUICK-ADD surface covering the common authoring keys; the full per-field editor is `field.form.ts` (registered as the `field` metadata type), which is where the long tail of FieldSchema is authored",
+    why: "the object editor's inline column grid is a QUICK-ADD surface covering the common authoring keys; the full per-field editor is `field.metadata-form.ts` (registered as the `field` metadata type), which is where the long tail of FieldSchema is authored",
   },
   // ── Depth two (#14327): the lists nested inside the `fields` quick-add row ──
   {
     kind: 'subset',
     type: 'object',
     path: 'fields.options',
-    why: "one row of the `fields` quick-add grid (the subset entry above), so the same design applies one level down: an option is captured as label / value / color / description, and the long tail — `default`, the per-option `visibleWhen` CEL predicate — is authored in the full per-field editor (`field.form.ts`), whose `options` repeater is schema-derived and so offers every SelectOptionSchema key",
+    why: "one row of the `fields` quick-add grid (the subset entry above), so the same design applies one level down: an option is captured as label / value / color / description, and the long tail — `default`, the per-option `visibleWhen` CEL predicate — is authored in the full per-field editor (`field.metadata-form.ts`), whose `options` repeater is schema-derived and so offers every SelectOptionSchema key",
   },
   {
     kind: 'subset',
     type: 'object',
     path: 'fields.summaryOperations',
-    why: "one row of the `fields` quick-add grid (the subset entry above): the roll-up is captured as object / field / function; `relationshipField` (auto-detected unless the child references this object twice) and the `filter` FilterCondition are authored in the full per-field editor (`field.form.ts`), whose own `summaryOperations` composite offers both with their dedicated widgets (`ref:object`, `filter-condition`)",
+    why: "one row of the `fields` quick-add grid (the subset entry above): the roll-up is captured as object / field / function; `relationshipField` (auto-detected unless the child references this object twice) and the `filter` FilterCondition are authored in the full per-field editor (`field.metadata-form.ts`), whose own `summaryOperations` composite offers both with their dedicated widgets (`ref:object`, `filter-condition`)",
   },
   // ── Depth two (#14327): the lifecycle policy blocks ──
   {
@@ -596,7 +596,7 @@ const LEDGER: ReadonlyArray<OmitEntry | SubsetEntry> = [
     type: 'object',
     path: ROOT_PATH,
     key: 'actions',
-    why: "authored through its own editor — the `action` type (ruling record 5861442317): each element is that type's own node, the schema `getMetadataTypeSchema('action')` answers and `action.form.ts` edits, and the key's own describe says the list is `auto-populated from top-level actions via objectName`, so an inline editor here would be a second, poorer copy of the action form",
+    why: "authored through its own editor — the `action` type (ruling record 5861442317): each element is that type's own node, the schema `getMetadataTypeSchema('action')` answers and `action.metadata-form.ts` edits, and the key's own describe says the list is `auto-populated from top-level actions via objectName`, so an inline editor here would be a second, poorer copy of the action form",
   },
   {
     kind: 'omit',

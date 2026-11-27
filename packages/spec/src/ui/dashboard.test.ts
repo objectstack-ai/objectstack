@@ -24,7 +24,7 @@ import {
 import * as ui from './index';
 import { readFileSync } from 'node:fs';
 import { ChartTypeSchema } from './chart.zod';
-import { dashboardForm } from './dashboard.form';
+import { dashboardForm } from './dashboard.metadata-form';
 
 /**
  * ADR-0021 single-form: every dashboard widget binds a `dataset` and selects

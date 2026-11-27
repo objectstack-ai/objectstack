@@ -31,6 +31,7 @@
  */
 
 import { describe, it, expect, beforeAll, afterAll, vi } from 'vitest';
+import { projectedFormsOf } from '@objectstack/spec/ui';
 import { ObjectQL } from '@objectstack/objectql';
 import { SqlDriver } from '@objectstack/driver-sql';
 import { ObjectStackProtocolImplementation } from '@objectstack/metadata-protocol';
@@ -171,6 +172,8 @@ describe('[#27606] POST /forms/:slug/submit: a form row\'s `options` subset is e
     const protocol: any = new ObjectStackProtocolImplementation(engine as any);
     const realGetMetaItems = protocol.getMetaItems.bind(protocol);
     protocol.getMetaItems = async (request: any) => {
+      // [ADR-0159 D5] The `form` read, as the protocol serves it for the injected old shape: its projection.
+      if (request?.type === 'form') return projectedFormsOf([FORM, WIDE_FORM, LOOSE_FORM]);
       if (request?.type === 'view') return [FORM, WIDE_FORM, LOOSE_FORM];
       if (request?.type === 'object') return [CASE];
       return realGetMetaItems(request);
@@ -178,6 +181,8 @@ describe('[#27606] POST /forms/:slug/submit: a form row\'s `options` subset is e
     // [#28409] The doors judge withdrawal against the effective list beside
     // the per-package layer: the injected list is that whole layer here.
     protocol.getMetaItemsPerPackage = async (request: any) => (request?.type === 'view' ? [FORM, WIDE_FORM, LOOSE_FORM] : []);
+    // [ADR-0159 D6 rule 7] No stored body here: the store is not provisioned, the injected lists are the layer.
+    protocol.getUnreadableFormBodies = async () => [];
     const realCreateData = protocol.createData.bind(protocol);
     createData = vi.fn(realCreateData);
     protocol.createData = createData;

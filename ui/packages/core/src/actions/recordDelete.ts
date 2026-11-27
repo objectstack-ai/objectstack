@@ -215,6 +215,21 @@ function refusalSummary(
   deps: Pick<RecordDeleteDeps, 't' | 'objectDef'>,
   refused: Array<{ record: Row; err: unknown }>,
 ): string | undefined {
+  const lines = bulkDeleteRefusalLines(deps, refused);
+  return lines.length > 0 ? lines.join('\n') : undefined;
+}
+
+/**
+ * The lines {@link refusalSummary} joins, for a surface that lays them out
+ * itself — the related list's bulk delete outcome (objectstack-ai/objectstack#37816).
+ * Empty when no refusal carried a reason: the caller keeps the bare count.
+ * `err` is the rejection, or the reason's text itself (a batch call's named
+ * error arrives as a string).
+ */
+export function bulkDeleteRefusalLines(
+  deps: { t: Translate; objectDef?: unknown },
+  refused: ReadonlyArray<{ record: Row; err: unknown }>,
+): string[] {
   const groups = new Map<string, Row[]>();
   for (const { record, err } of refused) {
     const reason = refusalText(deps, err);
@@ -223,7 +238,6 @@ function refusalSummary(
     if (rows) rows.push(record);
     else groups.set(reason, [record]);
   }
-  if (groups.size === 0) return undefined;
   const lines: string[] = [];
   for (const [reason, rows] of groups) {
     if (lines.length === MAX_REFUSAL_LINES) break;
@@ -254,7 +268,7 @@ function refusalSummary(
       }),
     );
   }
-  return lines.join('\n');
+  return lines;
 }
 
 /**

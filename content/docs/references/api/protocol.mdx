@@ -1947,6 +1947,7 @@ The published metadata item body, opaque by ruling (1C). Shape is the item's own
 | **datasets** | `Record<string, { label?: string; description?: string; dimensions?: Record<string, object>; measures?: Record<string, object> }>` | optional | Analytics dataset translations keyed by dataset name |
 | **reports** | `Record<string, { label?: string; description?: string; blocks?: Record<string, object> }>` | optional | Report translations keyed by report name |
 | **pages** | `Record<string, { label?: string; description?: string; title?: string; subtitle?: string; … }>` | optional | Page translations keyed by page name |
+| **forms** | `Record<string, { label?: string; description?: string; title?: string; submitBehavior?: object; … }>` | optional | Form translations keyed by form name (ADR-0159 D8) |
 | **flows** | `Record<string, { label?: string; successMessage?: string; errorMessage?: string; screens?: Record<string, object>; … }>` | optional | Screen-flow translations keyed by flow name |
 | **hooks** | `Record<string, { refusals?: Record<string, object>; texts?: Record<string, object> }>` | optional | Hook translations keyed by hook name |
 | **positions** | `Record<string, { label?: string; description?: string }>` | optional | Position translations keyed by position name |

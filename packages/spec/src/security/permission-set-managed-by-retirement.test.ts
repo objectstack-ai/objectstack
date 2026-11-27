@@ -41,7 +41,7 @@ import { applyConversionsToStoredItem } from '../conversions/stored';
 import { getMetadataTypeSchema } from '../kernel/metadata-type-schemas';
 import { MIGRATIONS_BY_MAJOR, RETIRED_KEYS_BY_MAJOR } from '../migrations/registry';
 import { defineStack, ObjectStackDefinitionSchema } from '../stack.zod';
-import { permissionForm } from './permission.form';
+import { permissionForm } from './permission.metadata-form';
 import { PermissionSetSchema, type PermissionSet } from './permission.zod';
 
 const KEY = 'managedBy';

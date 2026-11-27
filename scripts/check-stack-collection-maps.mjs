@@ -504,6 +504,14 @@ const SITES = [
       },
       {
         direction: 'missing',
+        keys: ['forms'],
+        reason:
+          'not offered yet (ADR-0159 card ②): a `form` item is named `OBJECT.KEY` and is checked against its '
+          + '`object` (the name\'s prefix must equal it), so a map key standing in for the name would carry a '
+          + 'second spelling of that identity; the array form is the one the record and its conversion write.',
+      },
+      {
+        direction: 'missing',
         keys: ['datasourceMapping', 'capabilities', 'docs', 'books', 'tools', 'skills', 'aiContexts', 'knowledgeSources', 'picklists'],
         reason:
           'no map form has ever been offered for these. `datasourceMapping` is a rule LIST whose precedence is '
@@ -561,7 +569,7 @@ const SITES = [
           'datasources', 'datasourceMapping', 'objectExtensions', 'apps', 'jobs', 'emailTemplates',
           'docs', 'books', 'positions', 'capabilities', 'sharingRules', 'webhooks', 'tools', 'skills',
           'aiContexts', 'knowledgeSources', 'hooks', 'mappings', 'analyticsCubes', 'connectors', 'data', 'picklists', 'picklistExtensions',
-          'queues', 'assignmentRules',
+          'queues', 'assignmentRules', 'forms',
         ],
         reason:
           'DRIFT in the opposite direction, under the same acceptance constraint: ADDING a member widens '
@@ -755,7 +763,7 @@ const SITES = [
           'views', 'pages', 'dashboards', 'reports', 'datasets', 'actions', 'flows', 'jobs',
           'emailTemplates', 'docs', 'books', 'apis', 'webhooks', 'agents', 'tools', 'skills',
           'aiContexts', 'knowledgeSources', 'hooks', 'mappings', 'analyticsCubes', 'connectors', 'data', 'picklists', 'picklistExtensions',
-          'queues', 'assignmentRules',
+          'queues', 'assignmentRules', 'forms',
         ],
         reason:
           'DELIBERATE — a four-collection SUBSET, not an enumeration of the collection set. This block '

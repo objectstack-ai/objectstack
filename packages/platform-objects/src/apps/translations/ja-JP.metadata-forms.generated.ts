@@ -1664,6 +1664,9 @@ export const jaJPMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       }
     }
   },
+  form: {
+    label: "フォーム"
+  },
   page: {
     label: "ページ",
     sections: {

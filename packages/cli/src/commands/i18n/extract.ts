@@ -451,7 +451,7 @@ export default class I18nExtract extends Command {
        * `@objectstack/platform-objects` owns. Those records are unreadable here
        * (no `metadataForms` bundle exists in this package for them to be about),
        * and they would move all three of this package's companions every time an
-       * unrelated `*.form.ts` in `packages/spec` changed — the same cross-package
+       * unrelated `*.metadata-form.ts` in `packages/spec` changed — the same cross-package
        * coupling ADR-0029 D8 and each package's `bundle-ownership.test.ts` exist
        * to keep out of its committed bundles.
        *

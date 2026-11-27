@@ -1664,6 +1664,9 @@ export const koMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       }
     }
   },
+  form: {
+    label: "양식"
+  },
   page: {
     label: "페이지",
     sections: {

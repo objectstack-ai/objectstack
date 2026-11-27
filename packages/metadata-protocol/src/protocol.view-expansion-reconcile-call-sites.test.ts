@@ -152,7 +152,13 @@ type Route =
     /** The write-through or the heal is called after the write, in the same member, before its next write. */
     | { readonly sameMember: 'applyRegistryWriteThrough' | 'restoreArtifactRegistryView' }
     /** The member hands the row to its callers, and each of them calls `then`, which calls the write-through. */
-    | { readonly handedTo: 'callers'; readonly then: 'runPublishSideEffects' };
+    | { readonly handedTo: 'callers'; readonly then: 'runPublishSideEffects' }
+    /**
+     * [ADR-0159 D5] A module function that writes inside its caller's
+     * transaction and hands the rows it wrote back: each caller calls `then`
+     * after the commit, and `then` both writes through and heals.
+     */
+    | { readonly handedTo: 'module callers'; readonly then: 'healOldShapeFormRowRemovals' };
 
 // [#28355] A door's write lives in its `…Unaudited` body; the public door of the same name
 // only wraps it with the refusal audit, so the member is the body's name.
@@ -172,6 +178,12 @@ const WRITES: ReadonlyArray<{ readonly member: string; readonly verb: string; re
     { member: 'undoLandedPromotions', verb: 'repo.restoreVersion(', route: { sameMember: 'restoreArtifactRegistryView' } },
     { member: 'undoLandedPromotions', verb: 'repo.delete(', route: { sameMember: 'restoreArtifactRegistryView' } },
     { member: 'undoLandedPromotions', verb: 'repo.put(', route: { sameMember: 'restoreArtifactRegistryView' } },
+    // [ADR-0159 D5] A `form` save, publish or delete removes (or re-saves) the old-shape `view` row of
+    // its name in the same transaction; each door heals the registry from the rows handed back.
+    { member: 'applyOldShapeFormRowRemovals', verb: 'repo.delete(', route: { handedTo: 'module callers', then: 'healOldShapeFormRowRemovals' } },
+    { member: 'applyOldShapeFormRowRemovals', verb: 'repo.put(', route: { handedTo: 'module callers', then: 'healOldShapeFormRowRemovals' } },
+    // [ADR-0159 D5] …and the undo of that write on a runtime that cannot roll back puts each row back, healed.
+    { member: 'restoreOldShapeFormRowRemovals', verb: 'repo.restoreVersion(', route: { sameMember: 'restoreArtifactRegistryView' } },
 ];
 
 /** The verb as `WRITES` spells it: no whitespace after its open paren, [#29985] the class as `this`. */
@@ -206,7 +218,7 @@ describe('[#23198] every stored-row write in protocol.ts and its modules reaches
 
     it('a write handed to its callers reaches the write-through in each of them', () => {
         for (const row of WRITES) {
-            if (!('handedTo' in row.route)) continue;
+            if (!('handedTo' in row.route) || row.route.handedTo !== 'callers') continue;
             const callers = codeMatches(new RegExp(`\\b${SELF}\\.${row.member}\\(`));
             expect(callers.length, `${row.member}: its callers`).toBeGreaterThan(0);
             for (const call of callers) {
@@ -216,6 +228,25 @@ describe('[#23198] every stored-row write in protocol.ts and its modules reaches
                 expect(then.length, `${call.member}: ${row.member} → ${row.route.then}`).toBeGreaterThan(0);
             }
             expect(bodyOf(row.route.then)).toMatch(new RegExp(`\\b${SELF}\\.applyRegistryWriteThrough\\(`));
+        }
+    });
+
+    it('[ADR-0159 D5] a write handed to its module callers is healed in each of them, after the call', () => {
+        const rows = WRITES.filter((row) => 'handedTo' in row.route && row.route.handedTo === 'module callers');
+        expect(rows.length, 'the module-handed writes').toBeGreaterThan(0);
+        for (const row of rows) {
+            const then = (row.route as { then: string }).then;
+            const callers = codeMatches(new RegExp(`(?<![.\\w])${row.member}\\(`)).filter((call) => call.member !== row.member);
+            expect(callers.length, `${row.member}: its callers`).toBeGreaterThan(0);
+            for (const call of callers) {
+                const { end } = memberAt(call.scanned, call.offset);
+                const heals = codeMatches(new RegExp(`(?<![.\\w])${then}\\(`))
+                    .filter(({ scanned, offset }) => scanned === call.scanned && offset > call.offset && offset < end);
+                expect(heals.length, `${call.member}: ${row.member} → ${then}`).toBeGreaterThan(0);
+            }
+            const body = bodyOf(then);
+            expect(body).toMatch(new RegExp(`\\b${SELF}\\.applyRegistryWriteThrough\\(`));
+            expect(body).toMatch(new RegExp(`\\b${SELF}\\.restoreArtifactRegistryView\\(`));
         }
     });
 
@@ -252,7 +283,12 @@ describe('[#29985] the census reads the modules the split moved bodies to', () =
         expect(codeMatches(STORED_ROW_WRITE)
             .filter(({ scanned }) => scanned !== HOST && !isCodemodModule(scanned))
             .map(({ scanned, member }) => `${scanned.file}: ${member}`))
-            .toEqual(['protocol-packageless-overlay-migration.ts: migratePackagelessOverlays']);
+            .toEqual([
+                'protocol-form-writes.ts: applyOldShapeFormRowRemovals',
+                'protocol-form-writes.ts: applyOldShapeFormRowRemovals',
+                'protocol-form-writes.ts: restoreOldShapeFormRowRemovals',
+                'protocol-packageless-overlay-migration.ts: migratePackagelessOverlays',
+            ]);
     });
 });
 

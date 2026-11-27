@@ -302,6 +302,8 @@ describe('#20730 §1 packagedObjectBaseOf — one per-type packaged-base resolve
         getPackagedBookBase: vi.fn((name: string) => ({ kind: 'book', name })),
         // An import mapping is an ADR-0146 D2 listed overridable type as well.
         getPackagedMappingBase: vi.fn((name: string) => ({ kind: 'mapping', name })),
+        // [ADR-0159] A `form` override replaces its base's form (an authored item or an old shape's projection).
+        getPackagedFormBase: vi.fn((name: string) => ({ kind: 'form', name })),
     });
 
     it('asks each type its own accessor, handing the served name through unchanged', () => {
@@ -322,7 +324,8 @@ describe('#20730 §1 packagedObjectBaseOf — one per-type packaged-base resolve
         expect(packagedObjectBaseOf(p, 'app', 'crm')).toEqual({ kind: 'app', name: 'crm' });
         expect(packagedObjectBaseOf(p, 'book', 'crm_manual')).toEqual({ kind: 'book', name: 'crm_manual' });
         expect(packagedObjectBaseOf(p, 'mapping', 'crm_lead_feed')).toEqual({ kind: 'mapping', name: 'crm_lead_feed' });
-        for (const accessor of ['getPackagedPageBase', 'getPackagedDatasetBase', 'getPackagedAppBase', 'getPackagedBookBase', 'getPackagedMappingBase'] as const) {
+        expect(packagedObjectBaseOf(p, 'form', 'crm_lead.web_to_lead')).toEqual({ kind: 'form', name: 'crm_lead.web_to_lead' });
+        for (const accessor of ['getPackagedPageBase', 'getPackagedDatasetBase', 'getPackagedAppBase', 'getPackagedBookBase', 'getPackagedMappingBase', 'getPackagedFormBase'] as const) {
             expect(p[accessor], accessor).toHaveBeenCalledTimes(1);
         }
     });

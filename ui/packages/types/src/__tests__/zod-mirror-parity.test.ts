@@ -5834,6 +5834,16 @@ function typeLiteralOf(shape: Record<string, unknown>): string | undefined {
   return values.length === 1 && typeof values[0] === 'string' ? values[0] : undefined;
 }
 
+/**
+ * Barrel names the spec exports for an UNRELATED schema, so the same-name rule
+ * (1) above would pair two layers that never meet. Each is skipped on its
+ * `spec#NAME` side only: a `ComponentPropsMap` row still pairs it by its `type`.
+ */
+const SPEC_NAME_COLLISIONS: Readonly<Record<string, string>> = {
+  FormSchema:
+    "objectui's `FormSchema` is the `form` component node; the spec's (ADR-0159 card ②, objectstack#37086) is the `form` METADATA ITEM — `name` `OBJECT.KEY`, one `object` — which reaches a renderer only through `@objectstack/rest`'s form doors, never as a node",
+};
+
 /** Every derived spec pair, with the keys its spec side declares and the mirror side does not. */
 function measureSpecOnlyKeys(): { pairs: string[]; specOnly: string[] } {
   const spec: Record<string, unknown> = { ...SpecData, ...SpecUi };
@@ -5846,7 +5856,7 @@ function measureSpecOnlyKeys(): { pairs: string[]; specOnly: string[] } {
     if (!mirrorShape) continue;
     const literal = typeLiteralOf(mirrorShape);
     const sides: [string, unknown][] = [];
-    if (name in spec) sides.push([`spec#${name}`, spec[name]]);
+    if (name in spec && !(name in SPEC_NAME_COLLISIONS)) sides.push([`spec#${name}`, spec[name]]);
     if (literal !== undefined && literal in rows) sides.push([`ComponentPropsMap['${literal}']`, rows[literal]]);
     const bag = objectOf(mirrorShape.properties);
     const mirrored = new Set([...Object.keys(mirrorShape), ...(bag ? Object.keys(bag) : [])]);
@@ -5880,6 +5890,13 @@ otherwise add a SPEC_ONLY_KEY_ROWS row saying what happens to it.`).toEqual([]);
     expect(dead, 'a row for a key the mirror now declares, or the spec no longer does — delete it').toEqual([]);
     const bare = Object.entries(SPEC_ONLY_KEY_ROWS).filter(([, row]) => row.why.trim().length < 40);
     expect(bare.map(([key]) => key), 'a row without its reason is an oversight').toEqual([]);
+  });
+
+  it('every name collision is still a collision, and says why', () => {
+    const spec: Record<string, unknown> = { ...SpecData, ...SpecUi };
+    const stale = Object.keys(SPEC_NAME_COLLISIONS).filter((name) => !(name in spec) || !(name in ZodBarrel));
+    expect(stale, 'a collision row for a name one side no longer exports — delete it').toEqual([]);
+    expect(Object.values(SPEC_NAME_COLLISIONS).every((why) => why.trim().length >= 40)).toBe(true);
   });
 
   it('the pairing can see both kinds of pair (non-vacuity)', () => {

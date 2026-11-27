@@ -29,7 +29,7 @@
  *     reference, measured on all three baselined example configs — so both
  *     action branches emit `objects.OBJECT._actions.ACTION.*`.
  *   - Two declarations, one form field. `deleteBehavior` is declared twice in
- *     each of `field.form.ts` / `object.form.ts`, gated on `visibleWhen`; both
+ *     each of `field.metadata-form.ts` / `object.metadata-form.ts`, gated on `visibleWhen`; both
  *     render into one key. Config-independent — it duplicates six entries on an
  *     EMPTY config, and it never reaches `os lint`'s report, which hides the
  *     `metadataForms` bucket unless `--include-platform` is passed. A

@@ -4818,6 +4818,7 @@ const STUDIO_EN: Record<string, string> = {
   'engine.translationPreview.category.dashboards': 'Dashboards',
   'engine.translationPreview.category.datasets': 'Datasets',
   'engine.translationPreview.category.reports': 'Reports',
+  'engine.translationPreview.category.forms': 'Forms',
   'engine.translationPreview.category.pages': 'Pages',
   'engine.translationPreview.category.flows': 'Flows',
   'engine.translationPreview.category.hooks': 'Hooks',

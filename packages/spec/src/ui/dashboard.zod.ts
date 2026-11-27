@@ -149,7 +149,7 @@ function refuseRecordlessAskAi(
  * bundle names the same column through
  * `metadataForms.dashboard.fields['header.actions.<field>'].label`, which
  * `resolveMetadataFormSchemaTitles` (`system/i18n-resolver.ts`) overlays onto
- * the derived schema. `dashboard.form.ts` declares the same four children with
+ * the derived schema. `dashboard.metadata-form.ts` declares the same four children with
  * the same labels so the extractor emits those keys; `dashboard.test.ts` pins
  * the two spellings equal.
  */

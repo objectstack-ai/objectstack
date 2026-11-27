@@ -38,6 +38,7 @@ import {
   Database,
   FileInput,
   FileText,
+  FormInput,
   Gauge,
   Globe2,
   LayoutDashboard,
@@ -100,6 +101,8 @@ const CATEGORY_DEFS = {
   datasets: { label: 'engine.translationPreview.category.datasets', icon: Database, flat: false },
   reports: { label: 'engine.translationPreview.category.reports', icon: BarChart3, flat: false },
   pages: { label: 'engine.translationPreview.category.pages', icon: PanelsTopLeft, flat: false },
+  // [ADR-0159 card ②] A `form` item's label, title and thank-you panel.
+  forms: { label: 'engine.translationPreview.category.forms', icon: FormInput, flat: false },
   flows: { label: 'engine.translationPreview.category.flows', icon: Workflow, flat: false },
   hooks: { label: 'engine.translationPreview.category.hooks', icon: Webhook, flat: false },
   positions: { label: 'engine.translationPreview.category.positions', icon: Users, flat: false },

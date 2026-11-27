@@ -135,6 +135,7 @@ import { validateSemanticRoles } from './validate-semantic-roles.js';
 import { validateFormLayout } from './validate-form-layout.js';
 import { validateInternalFormViews } from './validate-internal-form-views.js';
 import { validatePublicFormFileFields } from './validate-public-form-file-fields.js';
+import { validateFormConsumers, validateFormPublicAddresses } from './validate-form-items.js';
 import { validateThankYouRecordFields } from './validate-thank-you-record-fields.js';
 import { validateAssignmentRules } from './validate-assignment-rules.js';
 import { validateAiContext } from './validate-ai-context.js';
@@ -1892,6 +1893,37 @@ export const AUTHORING_RULES: readonly AuthoringRule[] = [
       '`os build`): an internal form view still installs and runs, inert, so the runtime door has nothing ' +
       'to refuse, and the Studio no longer offers internal form views to save.',
     run: (stack) => validateInternalFormViews(stack),
+  },
+  // [ADR-0159 ruled question 3 = A] An authored `form` left open on a public
+  // address another form of the stack holds (authored or projected out of an
+  // old `view` shape). Gating. The runtime half is the save door's own
+  // `FORM_ADDRESS_TAKEN` refusal, judged over the effective `form` read, which
+  // a per-write snapshot does not carry.
+  {
+    name: 'validateFormPublicAddresses',
+    tier: 'gating',
+    input: 'parsed',
+    commands: ALL,
+    source: 'packages/lint/src/validate-form-items.ts',
+    surfaces: CLI_ONLY,
+    surfaceReason:
+      'The runtime door judges the same clash over the effective `form` read (`formAddressClashRefusal`, ' +
+      '`409 FORM_ADDRESS_TAKEN`): a per-write snapshot carries no other form, so the gate would judge nothing.',
+    run: (stack) => validateFormPublicAddresses(stack),
+  },
+  // [ADR-0159 D1] An authored `form` no link and no action reaches: the
+  // successor of `form-view-internal-not-loaded` for `form` items. Advisory.
+  {
+    name: 'validateFormConsumers',
+    tier: 'advisory',
+    input: 'normalized',
+    commands: ALL,
+    source: 'packages/lint/src/validate-form-items.ts',
+    surfaces: CLI_ONLY,
+    surfaceReason:
+      'Advisory for the app author at the check tools: a form nothing reaches still installs and runs, so the ' +
+      'runtime door has nothing to refuse.',
+    run: (stack) => validateFormConsumers(stack),
   },
   // Ruling C on #25572 (#25650) — a form open to anonymous intake that
   // declares a file field (a `FILE_REFERENCE_TYPES` type on the bound object)

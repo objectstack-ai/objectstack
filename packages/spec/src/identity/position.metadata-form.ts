@@ -1,0 +1,44 @@
+// Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
+
+import { defineMetadataForm } from '../ui/view.zod';
+
+/**
+ * Position — canonical FormView layout.
+ *
+ * Positions are flat capability-distribution groups (ADR-0090 D3): name,
+ * label, optional description, and the permission sets they distribute. No hierarchy — the org tree lives on
+ * business units. Single section is enough; the FormView gives the editor
+ * friendly labels and required markers.
+ */
+export const positionForm = defineMetadataForm({
+  schemaId: 'position',
+  type: 'simple',
+  sections: [
+    {
+      label: 'Position',
+      description:
+        'A position is a flat, assignable bundle of permission sets (e.g. sales_rep, sales_manager): it names the sets it distributes. Capability lives on permission sets; visibility depth lives on the business-unit tree.',
+      columns: 2,
+      fields: [
+        { field: 'name', required: true, helpText: 'snake_case' },
+        { field: 'label', required: true },
+        { field: 'description', colSpan: 2 },
+        // [ADR-0131 D3/D4] The sets a holder of this position holds, by name —
+        // what the authorization resolver reads (the junction rows grant nothing).
+        // D4 resolves a reference registry-first, so the row binds the
+        // permission-set registry (metadata type `permission`) rather than a
+        // free-text tag box: `ref-multi:<type>` is the list form of the
+        // `ref:<type>` pickers (`ref:object`, `ref:dataset`), offering the
+        // declared names and committing each pick's name. An explicit widget
+        // outranks type inference, so the row declares no `type`.
+        { field: 'permissionSets', widget: 'ref-multi:permission', colSpan: 2, helpText: 'Permission sets this position distributes, by name (snake_case).' },
+        // #19331 — `delegatable` is declared by PositionSchema and was offered by
+        // no control, so the only door to an ADR-0091 D3 self-service delegation
+        // was the Source tab's free-text JSON. A boolean node takes the boolean
+        // control; the copy states the gate the runtime actually applies. The
+        // decision record (ADR-0091 D3) stays in this comment, out of the help text.
+        { field: 'delegatable', type: 'boolean', colSpan: 1, helpText: 'Holders may delegate this position themselves, time-boxed and with a reason. Default false — delegation is admin-only.' },
+      ],
+    },
+  ],
+});

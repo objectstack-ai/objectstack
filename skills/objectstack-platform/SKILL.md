@@ -32,7 +32,7 @@ metadata:
 
 `defineStack()` accepts an `ObjectStackDefinitionInput` whose top-level keys
 are `manifest`, `packages`, `objects`, `objectExtensions`, `picklists`,
-`picklistExtensions`, `views`, `apps`, `pages`, `dashboards`, `reports`,
+`picklistExtensions`, `views`, `forms`, `apps`, `pages`, `dashboards`, `reports`,
 `datasets`, `actions`, `flows`, `jobs`,
 `emailTemplates`, `docs`, `books`, `positions`, `permissions`,
 `capabilities`, `sharingRules`, `queues`, `assignmentRules`, `apis`, `webhooks`, `api`, `server`,
