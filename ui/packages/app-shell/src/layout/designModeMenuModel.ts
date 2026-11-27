@@ -413,8 +413,10 @@ export function aiChatOffered(menu: Menu, served: Menu, stored: Menu | null | un
 /**
  * `menu` with the entry `id` made the app's home (objectstack#37832,
  * 「Set as home」): moved to the first place of the top level, and nothing
- * else. The home is the first entry shown (ui ADR-0057 Amendment A4), so the
- * move is the whole edit; `landing` is never written.
+ * else; `landing` is never written. The home follows the app's landing rule
+ * (ui ADR-0057 Amendment A4): a declared `landing` comes first; with none,
+ * from 768 px up the first entry shown lands; below 768 px the app root is
+ * the app's menu, where the entry is its first row.
  */
 export function asHome(menu: Menu, id: string): Menu {
   return moveEntry(menu, id, null, 0);

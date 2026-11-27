@@ -49,8 +49,10 @@
  * judged by `AiChatNavParamsSchema` as typed (`aiChatParamsOf`). An app has at
  * most one, so the kind is not offered once the app has one (`aiChatOffered`).
  * That entry's 「⋮」 edits the copy again, and 「Set as home」 moves it to the
- * first place of the top level, the first entry shown being the app's home;
- * it writes no `landing`.
+ * first place of the top level, and writes no `landing`. The home follows the
+ * app's landing rule (ui ADR-0057 Amendment A4): a declared `landing` comes
+ * first; with none, from 768 px up the first entry shown lands; below 768 px
+ * the app root is the app's menu, where the entry is its first row.
  *
  * In the picker's 「Dashboards」, the first row is 「New dashboard…」
  * (objectstack#36364): it asks for a name, and on 「Create」 the dashboard is
