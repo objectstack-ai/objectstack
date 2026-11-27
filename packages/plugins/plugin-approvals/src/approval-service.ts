@@ -1715,6 +1715,23 @@ export interface ApproverExpressionContext {
  * nobody was ever asked — so the node must complete down its `approve` edge
  * instead of suspending.
  */
+/**
+ * [ADR-0162 Execution item 7] The root run of a run, as the automation service
+ * hands it to a node (`AutomationEngine.rootRunOf`, its `RootRun`): mirrored
+ * here because this plugin deliberately does not depend on service-automation.
+ * A request records the id and the start ({@link ApprovalService.openNodeRequest}).
+ */
+export interface ApprovalRootRun {
+  /** The root run's id; the request's own `flow_run_id` when its run is the root. */
+  runId: string;
+  /** The key the automation service files the root run's flow under. */
+  flowName: string;
+  /** The object of the root run's record; `null` for a root run started on no record. */
+  object: string | null;
+  /** When the root run started (ISO 8601). */
+  startedAt: string;
+}
+
 export interface ApprovalNodeAutoOutcome {
   autoApproved: true;
   reason: 'empty_approvers';
@@ -5163,6 +5180,15 @@ export class ApprovalService implements IApprovalService, ObjectSchemaReadDelega
        * to be a root run".
        */
       runRoot?: boolean;
+      /**
+       * [ADR-0162 Execution item 7] The root run of the run that opens this
+       * request: the run its tree was started on, as the automation service
+       * hands it (`rootRunOf`). Its id and its start are recorded in columns
+       * of their own (`root_run_id`, `root_run_started_at`), which the store
+       * can be asked for: they place the request in its approval. `null` or
+       * absent records none (an engine that hands no root run).
+       */
+      rootRun?: ApprovalRootRun | null;
     },
     context: ExecutionContext,
   ): Promise<ApprovalRequestRow | ApprovalNodeAutoOutcome> {
@@ -5569,6 +5595,9 @@ export class ApprovalService implements IApprovalService, ObjectSchemaReadDelega
       payload_json: input.record != null ? JSON.stringify(this.snapshotRecord(input.object, input.record)) : null,
       flow_run_id: input.runId,
       flow_node_id: input.nodeId,
+      // [ADR-0162 Execution item 7] The request's approval: its root run.
+      root_run_id: input.rootRun?.runId ?? null,
+      root_run_started_at: input.rootRun?.startedAt ?? null,
       node_config_json: JSON.stringify(configSnapshot),
       organization_id: requestOrg,
       created_at: now,
