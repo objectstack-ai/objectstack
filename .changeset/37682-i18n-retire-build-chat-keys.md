@@ -4,7 +4,7 @@
 
 feat(i18n)!: the 280 translation keys `@object-ui/i18n@18.6.0` shipped for the retired build chat are removed
 
-Clause-②: no
+Clause-②: no (narrowing)
 Metadata-protocol: none
 
 <!-- adr-0087: not-required (no-migration-prescription) The removed operands are translation keys in the published i18n catalogues: no packages/spec schema, registered node type, stored metadata row or ADR-0087 conversion surface names them, and nothing a metadata author writes changes, so there is nothing for objectstack migrate meta to rewrite -->

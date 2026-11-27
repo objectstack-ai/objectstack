@@ -124,12 +124,10 @@ neither of the two message contracts nearby, because neither is true of both
 modes (objectui#4424):
 
 - **Not `@object-ui/types`' authoring `ChatMessage`.** In API mode the values
-  come from the runtime mapper and carry `buildProgress`, `blueprintProgress`,
-  `charts`, and `pendingActionId` / `draftReview` / `proposedPlan` /
-  `proposedChanges` / `builderHandoff` on each tool invocation — the approval
-  card, the "Review N changes" affordance, the plan card, the build panel and
-  the inline charts. The authoring contract declares none of them, so rebuilding
-  a message field-by-field from it deletes all of them, and the compiler agrees.
+  come from the runtime mapper and carry `charts`, and `pendingActionId` on
+  each tool invocation — the inline charts and the approval card. The
+  authoring contract declares neither, so rebuilding
+  a message field-by-field from it deletes both, and the compiler agrees.
   API mode also produces the AI SDK's three approval states
   (`'approval-requested'` / `'approval-responded'` / `'output-denied'`), which
   the authoring contract refuses — they are runtime-only (objectui#10018).
@@ -201,18 +199,6 @@ The floating panel is responsive by default. On desktop it uses the configured
 safe side gutters, stays above the mobile bottom navigation area, and hides the
 FAB while open so the close button in the panel header is the only active
 dismiss control.
-
-A host that wants to signal a waiting approval outside the chat can pass
-`ChatbotEnhanced` the optional `onPlanApprovalPendingChange(pending, count)`
-callback. `pending` is `true` while the thread's newest proposal still waits
-for the user: a proposed plan that offers "Build it", or a change plan whose
-card still offers its confirm button. It is `false` otherwise: no proposal,
-the user approved or confirmed it, or its build or confirm landed. `count` is
-how many items that proposal asks the user to confirm: the rows of a change
-plan, 1 for a proposed plan, 0 when nothing is pending. It fires once on mount
-and again on every change of either value. The console uses it to put a
-marker on its chat launchers while the chat is closed (objectui#11666), and
-Studio's right slot shows the count beside the folded copilot.
 
 During a conversation, the chat surface renders an inline assistant responding
 indicator while the backend is streaming, keeps message actions quiet until
@@ -309,8 +295,7 @@ import { AIElements } from '@object-ui/plugin-chatbot';
 `<ChatbotEnhanced>` renders and the mappers below produce. On top of the core
 `id` / `role` / `content` / `timestamp` / `avatar` / `avatarFallback` fields it
 carries the streaming and agent-process keys (`streaming`, `toolInvocations`,
-`reasoning`, `sources`, `traceId`, `buildProgress`, `blueprintProgress`,
-`charts`), all optional.
+`reasoning`, `sources`, `traceId`, `charts`), all optional.
 
 ```tsx
 import type { ChatbotEnhancedMessage } from '@object-ui/plugin-chatbot';
