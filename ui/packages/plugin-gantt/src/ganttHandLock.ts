@@ -17,8 +17,9 @@
  * the one verdict of `@object-ui/core`, never `readonly` alone:
  *
  * - {@link ganttHandLockedInteractions}, the STATIC half
- *   (`fieldStaticallyReadOnlyByHand`): a gesture that can only write a field
- *   locked on every record is not drawn;
+ *   (`fieldStaticallyReadOnlyByHand`: `readonly`, or the hand lock
+ *   `uiReadonly`): a gesture that can only write a field locked on every
+ *   record is not drawn;
  * - {@link ganttPatchByHand}, the FULL verdict over the stored record
  *   (`fieldReadOnlyByHand`, `readonlyWhen` and `uiReadonlyWhen` included),
  *   judged on the write itself, so every commit path — undo and redo too —

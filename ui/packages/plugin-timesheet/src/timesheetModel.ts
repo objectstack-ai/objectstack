@@ -339,7 +339,8 @@ export interface CellWriteGrants {
  * several records never.
  *
  * `lockedByHand` answers whether the value field is read-only by hand over a
- * stored record (the field hand lock, `fieldReadOnlyByHand` in
+ * stored record (the field hand lock — `uiReadonly`, or `uiReadonlyWhen` TRUE
+ * over the record — and the server lock, `fieldReadOnlyByHand` in
  * `@object-ui/core`, objectstack#37448): typing into or clearing a one-record
  * cell is an edit by hand of that record, so a locked record's cell draws no
  * input. An empty cell's create is judged by the static half only, as the

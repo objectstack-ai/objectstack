@@ -1069,7 +1069,7 @@ export const enMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       },
       uiReadonly: {
         label: "Ui Readonly",
-        helpText: "People cannot edit this field in the console (dialogs, the record page, grids, kanban and calendar drag), while actions, imports, the API and flows still write it, each write judged by the object's validations. Leave it off when Read-only is on: that one already keeps every client write out."
+        helpText: "People cannot edit this field anywhere in the console (dialogs, the record page, grids, kanban, calendar and Gantt drag, the timesheet), while actions, imports, the API and flows still write it, each write judged by the object's validations. Leave it off when Read-only is on: that one already keeps every client write out."
       },
       hidden: {
         label: "Hidden",
@@ -1097,7 +1097,7 @@ export const enMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       },
       uiReadonlyWhen: {
         label: "Ui Readonly When",
-        helpText: "CEL predicate over the record (e.g. record.status != 'draft') — while it is TRUE, people cannot edit the field of an existing record in the console (the edit dialog, the record page, grids, kanban and calendar drag); a new record's create dialog is not judged. Actions, imports, the API and flows still write it, judged by the object's validations. Reads the record's own columns, as Read-only when does."
+        helpText: "CEL predicate over the record (e.g. record.status != 'draft') — while it is TRUE, people cannot edit the field of an existing record anywhere in the console (the edit dialog, the record page, grids, kanban, calendar and Gantt drag, the timesheet); a new record's create dialog is not judged. Actions, imports, the API and flows still write it, judged by the object's validations. Reads the record's own columns, as Read-only when does."
       },
       requiredWhen: {
         label: "Required When",

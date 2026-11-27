@@ -1069,7 +1069,7 @@ export const ptBRMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       },
       uiReadonly: {
         label: "Somente leitura na interface",
-        helpText: "Ninguém pode editar este campo manualmente no console (diálogos, página do registro, grades, arrastar no kanban e no calendário), enquanto ações, importações, a API e fluxos continuam gravando-o, cada gravação julgada pelas validações do objeto. Deixe desativado quando Somente leitura estiver ativado: ele já bloqueia toda gravação do cliente."
+        helpText: "Ninguém pode editar este campo manualmente no console (diálogos, página do registro, grades, arrastar no kanban, no calendário e no Gantt, a folha de horas), enquanto ações, importações, a API e fluxos continuam gravando-o, cada gravação julgada pelas validações do objeto. Deixe desativado quando Somente leitura estiver ativado: ele já bloqueia toda gravação do cliente."
       },
       hidden: {
         label: "Oculto",
@@ -1097,7 +1097,7 @@ export const ptBRMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       },
       uiReadonlyWhen: {
         label: "Somente leitura na interface quando",
-        helpText: "Predicado CEL sobre o registro (ex.: record.status != 'draft') — enquanto for TRUE, ninguém pode editar o campo de um registro existente no console (a caixa de edição, a página do registro, as grades e o arrastar no kanban e no calendário); a caixa de criação de um novo registro não o avalia. Ações, importações, a API e os fluxos continuam gravando-o, julgados pelas validações do objeto. Lê as colunas do próprio registro, como Somente leitura quando."
+        helpText: "Predicado CEL sobre o registro (ex.: record.status != 'draft') — enquanto for TRUE, ninguém pode editar o campo de um registro existente no console (a caixa de edição, a página do registro, as grades e o arrastar no kanban, no calendário e no Gantt, a folha de horas); a caixa de criação de um novo registro não o avalia. Ações, importações, a API e os fluxos continuam gravando-o, julgados pelas validações do objeto. Lê as colunas do próprio registro, como Somente leitura quando."
       },
       requiredWhen: {
         label: "Obrigatório quando",

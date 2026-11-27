@@ -1069,7 +1069,7 @@ export const esESMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       },
       uiReadonly: {
         label: "Solo lectura en la interfaz",
-        helpText: "Nadie puede editar este campo a mano en la consola (diálogos, página del registro, cuadrículas, arrastre en kanban y calendario), mientras que las acciones, las importaciones, la API y los flujos siguen escribiéndolo, y las validaciones del objeto juzgan cada escritura. Déjelo desactivado cuando Solo lectura esté activado: ese ya impide toda escritura de cliente."
+        helpText: "Nadie puede editar este campo a mano en la consola (diálogos, página del registro, cuadrículas, arrastre en kanban, calendario y Gantt, la hoja de horas), mientras que las acciones, las importaciones, la API y los flujos siguen escribiéndolo, y las validaciones del objeto juzgan cada escritura. Déjelo desactivado cuando Solo lectura esté activado: ese ya impide toda escritura de cliente."
       },
       hidden: {
         label: "Oculto",
@@ -1097,7 +1097,7 @@ export const esESMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       },
       uiReadonlyWhen: {
         label: "Condición de solo lectura en la interfaz",
-        helpText: "Predicado CEL sobre el registro (p. ej., record.status != 'draft'): mientras sea TRUE, nadie puede editar el campo de un registro existente en la consola (el diálogo de edición, la página del registro, las cuadrículas y el arrastre en kanban y calendario); el diálogo de creación de un registro nuevo no lo evalúa. Las acciones, las importaciones, la API y los flujos siguen escribiéndolo, juzgados por las validaciones del objeto. Lee las columnas propias del registro, como Solo lectura cuando."
+        helpText: "Predicado CEL sobre el registro (p. ej., record.status != 'draft'): mientras sea TRUE, nadie puede editar el campo de un registro existente en la consola (el diálogo de edición, la página del registro, las cuadrículas y el arrastre en kanban, calendario y Gantt, la hoja de horas); el diálogo de creación de un registro nuevo no lo evalúa. Las acciones, las importaciones, la API y los flujos siguen escribiéndolo, juzgados por las validaciones del objeto. Lee las columnas propias del registro, como Solo lectura cuando."
       },
       requiredWhen: {
         label: "Condición de obligatoriedad",
