@@ -718,9 +718,8 @@ export class ObjectStoreSuspendedRunStore implements SuspendedRunStore {
    * waits for nor rolls back with that unit.
    */
   recordTerminal(record: RunRecord): Promise<void> {
-    const detach = this.engine.runOutsideOpenUnits;
-    return typeof detach === 'function'
-      ? detach.call(this.engine, () => this.writeTerminal(record))
+    return typeof this.engine.runOutsideOpenUnits === 'function'
+      ? this.engine.runOutsideOpenUnits(() => this.writeTerminal(record))
       : this.writeTerminal(record);
   }
 
