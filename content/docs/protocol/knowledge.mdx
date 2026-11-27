@@ -739,16 +739,21 @@ large source of one organization, through an approximate index.
   5 ms; 10,000 take 82 MB and about 50 ms.
 - **Approximate index.** A complete build that completes on a generation of
   `vectorIndexThreshold` passages or more (default 20,000), all of one
-  organization, makes its DiskANN index (`vector_top_k`), copied in 128 rows to
-  a transaction before the switch, never on a search. The vector leg then
-  reads `topK × vectorIndexOverfetch` candidates (default 4, at most 200),
-  runs the same `WHERE` over them, ranks those in scope by their stored
+  organization, makes its approximate index: each passage's vector quantized
+  to one bit a dimension, in a side table kept in step by triggers, copied in
+  2,048 rows to a transaction before the switch, never on a search (200,000
+  passages: 3 s, 54 MB). The vector leg then takes the
+  `topK × vectorIndexOverfetch` passages nearest by that index (default 40 a
+  hit), runs the same `WHERE` over them, ranks those in scope by their stored
   vector, and feeds the fusion as the exact leg does; a leg the filter leaves
   short of `topK` runs again as the exact scan, so a search never answers
-  fewer hits than the exact scan. The index ranks before it filters, so it is
-  never made, or used, over the passages of two organizations (passages of
-  none count as one): each search reads the organization index and takes the
-  exact scan once a second organization's passage is written. TBD_DOCS
+  fewer hits than the exact scan. The candidates are ranked before the
+  filter, so the index is never made, or used, over the passages of two
+  organizations (passages of none count as one): each search reads the
+  organization index and takes the exact scan once a second organization's
+  passage is written. TBD_DOCS libSQL's own DiskANN index (`vector_top_k`)
+  is not used: on the same 200,000 passages it took 24 minutes and 2.2 GB to
+  build and answered a recall@10 of 0.39.
 - **Rebuilds.** A changed fingerprint is refused (§3.6). A complete reindex
   under a new fingerprint builds a new generation table beside the active
   one, which keeps answering its own fingerprint, and switches at the end of

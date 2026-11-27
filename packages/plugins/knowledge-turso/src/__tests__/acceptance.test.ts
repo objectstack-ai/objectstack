@@ -878,8 +878,8 @@ for (const kind of ['memory', 'file'] as StoreKind[]) {
 
 /**
  * A client whose every statement's SQL is recorded, the transaction's too, so
- * a test reads which path a search took: the approximate vector leg names
- * `vector_top_k`, the exact one does not.
+ * a test reads which path a search took: the approximate vector leg ranks
+ * the one-bit side table (`vector1bit`), the exact one does not.
  */
 function recording(client: Client): { client: Client; sql: string[] } {
   const sql: string[] = [];
@@ -904,13 +904,13 @@ function recording(client: Client): { client: Client; sql: string[] } {
 /** The vector legs of the searches recorded since `from`: how many were approximate, how many exact. */
 function vectorLegs(sql: string[], from = 0): { approximate: number; exact: number } {
   const legs = sql.slice(from).filter((s) => s.includes('vec AS ('));
-  const approximate = legs.filter((s) => s.includes('vector_top_k(')).length;
+  const approximate = legs.filter((s) => s.includes('vector1bit(')).length;
   return { approximate, exact: legs.length - approximate };
 }
 
-/** The vector-index objects (side table, DiskANN index and its shadow, organization index, triggers) of a passage table. */
+/** The vector-index objects (side table, organization index, triggers) of a passage table. */
 async function vectorObjects(client: Client, table: string): Promise<string[]> {
-  const names = [`${table}-vec`, `${table}$vec`, `${table}$vec_shadow`, `${table}-org`, `${table}-vec-insert`, `${table}-vec-delete`, `${table}-vec-update`];
+  const names = [`${table}-vec`, `${table}-org`, `${table}-vec-insert`, `${table}-vec-delete`, `${table}-vec-update`];
   const found = await client.execute({
     sql: `SELECT name FROM sqlite_master WHERE name IN (${names.map(() => '?').join(', ')}) ORDER BY name`,
     args: names,
@@ -956,10 +956,10 @@ for (const kind of ['memory', 'file'] as StoreKind[]) {
     const corpus = (s: KnowledgeSource, n: number, extra: (i: number) => Partial<KnowledgeDocument> = () => ({})) =>
       wordsOf(n, 7).map((text, i) => doc(s, String(i).padStart(3, '0'), text, extra(i)));
 
-    it('a source at or above the threshold is searched through vector_top_k; below it, or at Infinity, by the exact scan', async () => {
+    it('a source at or above the threshold is searched through its approximate index; below it, or at Infinity, by the exact scan', async () => {
       const s = source('ann_switch');
       const above = await built(s, corpus(s, 60));
-      expect(await vectorObjects(above.client, `knowledge_${s.name}_g1`)).toHaveLength(7);
+      expect(await vectorObjects(above.client, `knowledge_${s.name}_g1`)).toHaveLength(5);
       const from = above.sql.length;
       const hits = await above.adapter.search('w1x w2x w3x', { source: s, topK: 5, index: { fingerprint: FP_A.fingerprint } });
       expect(hits).toHaveLength(5);
@@ -1011,7 +1011,8 @@ for (const kind of ['memory', 'file'] as StoreKind[]) {
         ...Array.from({ length: 56 }, (_, i) => doc(s, `near_${String(i).padStart(2, '0')}`, `${QUERY} w${(i % 9) + 5}x`)),
         ...['a', 'b', 'c', 'd'].map((n) => doc(s, `far_${n}`, `w1x wqx wrx ws${n}x`, { metadata: { status: 'draft' } })),
       ];
-      const { adapter, sql } = await built(s, docs);
+      // Four candidates a hit, so the candidates are not every row of this small table.
+      const { adapter, sql } = await built(s, docs, { vectorIndexOverfetch: 4 });
       // A filter only the far passages pass: none is among the candidates, so the exact scan answers.
       let from = sql.length;
       const drafts = await adapter.search(QUERY, { source: s, topK: 3, filter: { status: 'draft' } });
@@ -1026,7 +1027,7 @@ for (const kind of ['memory', 'file'] as StoreKind[]) {
         ...Array.from({ length: 6 }, (_, i) => doc(t, `second_${i}`, `${QUERY} w${i + 5}x`)),
         ...wordsOf(52, 11).map((text, i) => doc(t, `rest_${String(i).padStart(2, '0')}`, `w1x ${text}`)),
       ];
-      const over = await built(t, tiers);
+      const over = await built(t, tiers, { vectorIndexOverfetch: 4 });
       from = over.sql.length;
       const scoped = ['second_1', 'second_4'];
       const inScope = await over.adapter.search(QUERY, { source: t, topK: 2, scope: [{ kind: 'record', ids: scoped }] });
@@ -1057,7 +1058,7 @@ for (const kind of ['memory', 'file'] as StoreKind[]) {
       await adapter.completeBuild(ctx(s, FP_B));
       const g2 = `knowledge_${s.name}_g2`;
       expect(await vectorObjects(client, g1)).toEqual([]);
-      expect(await vectorObjects(client, g2)).toHaveLength(7);
+      expect(await vectorObjects(client, g2)).toHaveLength(5);
       expect(await counts(g2)).toMatchObject({ n: 60, v: 60 });
       from = sql.length;
       await adapter.search('w1x w2x', { source: s, topK: 5, index: { fingerprint: FP_B.fingerprint } });
@@ -1065,7 +1066,7 @@ for (const kind of ['memory', 'file'] as StoreKind[]) {
 
       await adapter.dropSource(ctx(s, FP_B));
       expect(await vectorObjects(client, g2)).toEqual([]);
-      const left = await client.execute("SELECT name FROM sqlite_master WHERE name LIKE '%$vec%' OR name LIKE '%-vec%'");
+      const left = await client.execute("SELECT name FROM sqlite_master WHERE name LIKE '%-vec%' OR name LIKE '%-org'");
       expect(left.rows).toEqual([]);
     });
 
@@ -1079,7 +1080,7 @@ for (const kind of ['memory', 'file'] as StoreKind[]) {
       await adapter.beginBuild(ctx(s));
       await adapter.upsert(corpus(s, 60), ctx(s));
       await adapter.completeBuild(ctx(s));
-      expect(await vectorObjects(watched.client, `knowledge_${s.name}_g1`)).toHaveLength(7);
+      expect(await vectorObjects(watched.client, `knowledge_${s.name}_g1`)).toHaveLength(5);
       const from = watched.sql.length;
       await adapter.search('w1x w2x', { source: s, topK: 5 });
       expect(vectorLegs(watched.sql, from)).toEqual({ approximate: 1, exact: 0 });
@@ -1120,7 +1121,7 @@ describe('knowledge-turso approximate vector index: recall and options', () => {
 
   it('recall@10 of the approximate search against the exact-scan search is 0.95 or more on a sample of 40 queries', async () => {
     const s = source('ann_recall');
-    const docs = wordsOf(600, 3).map((text, i) => doc(s, String(i).padStart(3, '0'), text));
+    const docs = wordsOf(2000, 3).map((text, i) => doc(s, String(i).padStart(3, '0'), text));
     const make = async (vectorIndexThreshold: number) => {
       const adapter = new TursoKnowledgeAdapter({ id: 'under_test', client: store.client(), embedder: new FakeEmbedder(), vectorIndexThreshold });
       await adapter.beginBuild(ctx(s));

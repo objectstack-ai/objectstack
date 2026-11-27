@@ -83,9 +83,10 @@ export interface TursoKnowledgeAdapterOptions {
   requestTimeoutMs?: number;
   /**
    * The passage count at or above which a complete build of a source makes
-   * its approximate vector index (libSQL's DiskANN, `vector_top_k`), so its
-   * vector leg reads `topK × vectorIndexOverfetch` candidates instead of
-   * every vector. Counted when the build completes, on the generation it
+   * its approximate vector index (a side table of one-bit vectors, a 32nd of
+   * the float32 ones), so its vector leg ranks `topK × vectorIndexOverfetch`
+   * candidates by that index and reads the float32 vector of those alone,
+   * instead of every one. Counted when the build completes, on the generation it
    * completes; `Infinity` never makes one. A source whose passage table holds
    * more than one organization never gets one, and is never searched through
    * one. @default 20000
@@ -96,7 +97,7 @@ export interface TursoKnowledgeAdapterOptions {
    * index before the organization, record-scope and metadata filter run: the
    * index ranks before the filter, so a filter that removes candidates is
    * answered from what is left, and a leg left with fewer than `topK` is run
-   * again as the exact scan. A whole number, 1 or more. @default 4
+   * again as the exact scan. A whole number, 1 or more. @default 40
    */
   vectorIndexOverfetch?: number;
 }
@@ -104,18 +105,17 @@ export interface TursoKnowledgeAdapterOptions {
 /** The passage count at or above which a complete build makes a source's approximate vector index. */
 export const VECTOR_INDEX_THRESHOLD = 20_000;
 
-/** How many approximate-index candidates the vector leg reads per hit it ranks. */
-export const VECTOR_INDEX_OVERFETCH = 4;
-
 /**
- * The most candidates libSQL's `vector_top_k` answers on one call, measured
- * (a larger `k` answers this many); a vector leg that needs more takes the
- * exact scan.
+ * How many approximate-index candidates the vector leg reads per hit it
+ * ranks. Measured at 200,000 passages of 1,536 dimensions (clustered, topK
+ * 10): 10 candidates a hit gave a recall@10 of 0.90 against the exact scan,
+ * 40 gave 0.99, 100 gave 1.00, at about the same cost — the one-bit scan
+ * reads every row either way.
  */
-export const VECTOR_TOP_K_MAX = 200;
+export const VECTOR_INDEX_OVERFETCH = 40;
 
 /** How many passages one batch of a vector index's copy writes: each batch is a transaction of its own, so a search waits at most one batch. */
-const VECTOR_BACKFILL_BATCH = 128;
+const VECTOR_BACKFILL_BATCH = 2048;
 
 /** The ADR-0112 code of a write or a search refused under another fingerprint (ADR-0161 K7, rules 4 and 5). */
 export const KNOWLEDGE_REBUILD_REQUIRED = 'KNOWLEDGE_REBUILD_REQUIRED';
@@ -247,9 +247,10 @@ function withTimeout<T>(work: Promise<T>, ms: number, commit = false): Promise<T
  *   passage whose cosine similarity is not positive is not ranked by it. An
  *   exact scan of the rows in scope — or, for a generation with an
  *   approximate index ({@link buildVectorIndex}) and passages of one
- *   organization at most, the `topK × vectorIndexOverfetch` nearest
- *   candidates `vector_top_k` answers, of which those in scope are ranked;
- *   a leg the filter leaves short of `topK` is run again exactly.
+ *   organization at most, the `topK × vectorIndexOverfetch` candidates
+ *   nearest by their one-bit vector, of which those in scope are ranked by
+ *   their float32 vector; a leg the filter leaves short of `topK` is run
+ *   again exactly.
  * - The keyword leg: the query's terms ({@link keywordTerms}). A term of three
  *   characters or more is matched as one FTS5 phrase in the passage table's
  *   trigram index (so `X-200` is a phrase, never FTS5 syntax); a shorter one
@@ -260,9 +261,9 @@ function withTimeout<T>(work: Promise<T>, ms: number, commit = false): Promise<T
  *
  * The organization filter (ADR-0161 K8, item 9), the record scope (item 17)
  * and the metadata-equality `filter` are one `WHERE`, run in both legs: before
- * the exact scan and the keyword leg rank, after libSQL's DiskANN index
- * (`vector_top_k`), which ranks first — so the index is never used over the
- * passages of two organizations, and its candidates are over-fetched.
+ * the exact scan and the keyword leg rank, after the approximate index,
+ * which ranks every passage of the table first — so that index is never used
+ * over the passages of two organizations, and its candidates are over-fetched.
  *
  * The keyword index of a passage table is made with the table, and for a
  * table made before it existed, by the first search of that table, from the
@@ -647,7 +648,7 @@ export class TursoKnowledgeAdapter implements IKnowledgeAdapter {
     const inScope = where.length === 0 ? 'TRUE' : where.join(' AND ');
     args.push(topK);
     const limit = `?${args.length}`;
-    args.push(Math.min(VECTOR_TOP_K_MAX, topK * this.vectorIndexOverfetch));
+    args.push(topK * this.vectorIndexOverfetch);
     const candidates = `?${args.length}`;
     const tableName = generationTable(opts.source.name, active.generation);
     const table = quoted(tableName);
@@ -663,8 +664,8 @@ export class TursoKnowledgeAdapter implements IKnowledgeAdapter {
     // the fusion below as they are.
     const vectorCte = (approximate: boolean): string => {
       const near = approximate
-        ? ` AND chunk_id IN (SELECT s.chunk_id FROM vector_top_k('${vectorIndex.index}', vector8(?1), ${candidates}) AS a
-                JOIN ${quoted(vectorIndex.side)} s ON s.id = a.id)`
+        ? ` AND chunk_id IN (SELECT chunk_id FROM ${quoted(vectorIndex.side)}
+                ORDER BY vector_distance_cos(embedding, vector1bit(?1)) LIMIT ${candidates})`
         : '';
       return `vec AS (
         SELECT chunk_id, row_number() OVER (ORDER BY distance, chunk_id) AS pos FROM (
@@ -720,7 +721,7 @@ export class TursoKnowledgeAdapter implements IKnowledgeAdapter {
       const now = await this.generations(opts.source.name);
       if (now.active?.generation !== active.generation) return undefined;
       if (terms.length > 0) await this.ensureKeywordIndex(tableName);
-      if (vectorLeg && topK <= VECTOR_TOP_K_MAX && (await this.approximateSearchable(tableName))) {
+      if (vectorLeg && (await this.approximateSearchable(tableName))) {
         const near = await client.execute(statement(true));
         // A vector leg the filter left with fewer than topK candidates is
         // run again as the exact scan: an answer of fewer than topK says the
@@ -1034,13 +1035,13 @@ export class TursoKnowledgeAdapter implements IKnowledgeAdapter {
 
   /** The shape of the vector index of the passage table `table` (`vectorIndexShape`). */
   private async vectorShapeOf(db: Pick<Client, 'execute'>, table: string): Promise<VectorIndexShape> {
-    const { side, index, shadow, org, triggers } = vectorIndexNames(table);
-    const names = [side, index, shadow, org, ...triggers];
+    const { side, org, triggers } = vectorIndexNames(table);
+    const names = [side, org, ...triggers];
     const rows = await db.execute({
       sql: `SELECT type, name, tbl_name, sql FROM sqlite_master WHERE name IN (${names.map(() => '?').join(', ')})`,
       args: names,
     });
-    const columns = await db.execute({ sql: 'SELECT name FROM pragma_table_info(?)', args: [side] });
+    const columns = await db.execute({ sql: 'SELECT name, type FROM pragma_table_info(?)', args: [side] });
     return vectorIndexShape(table, rows.rows, columns.rows);
   }
 
@@ -1056,8 +1057,8 @@ export class TursoKnowledgeAdapter implements IKnowledgeAdapter {
 
   /**
    * Whether a search of the passage table `table` may rank its vector leg
-   * through the approximate index: its side table and DiskANN index are
-   * there and hold every passage of the table (once true, kept so by the
+   * through the approximate index: its side table and triggers are there and
+   * hold every passage of the table (once true, kept so by the
    * triggers, and remembered), and the table holds passages of one
    * organization at most — read at each search, from the organization index,
    * so a second organization written after the index was made turns the
@@ -1395,10 +1396,10 @@ function switchedDuringSearch(diagnosis: string, detail: string): Error {
 
 /** The refusal of an object under a vector-index name of `table` that the store did not make. */
 function vectorIndexNotOurs(table: string, sourceId: string, generation: number): Error {
-  const { side, index, org } = vectorIndexNames(table);
+  const { side, org } = vectorIndexNames(table);
   return notReady(
     `an object it did not make holds a name of the vector index of generation ${generation} of source '${sourceId}'`,
-    `The database holds a table, index or trigger under '${side}', '${index}', '${org}' or a '${table}-vec-*' trigger ` +
+    `The database holds a table, index or trigger under '${side}', '${org}' or a '${table}-vec-*' trigger ` +
       `that is not this store's vector index, so it is not dropped, and generation ${generation} of source ` +
       `'${sourceId}' cannot be built, replaced or removed. Rename or remove it, or keep the store in a database of its own.`,
   );

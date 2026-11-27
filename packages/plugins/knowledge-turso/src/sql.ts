@@ -254,67 +254,49 @@ export function keywordIndexShape(
 
 /**
  * The names of a passage table's approximate vector index: a side table
- * (`<table>-vec`: an integer key, the chunk id, and the passage's vector in
- * float8), libSQL's DiskANN index on it (`<table>$vec`, which libSQL keeps in
- * a shadow table `<table>$vec_shadow`), an index of the passage table's
- * organization column (`<table>-org`), and the three triggers that keep the
- * side table in step with every write to the passage table. A DiskANN index
- * name cannot hold a hyphen, so it holds a `$`, which no source id, generation
- * table or object name can hold either; the other names hold a hyphen.
+ * (`<table>-vec`: the chunk id and the passage's vector quantized to one bit
+ * a dimension), an index of the passage table's organization column
+ * (`<table>-org`), and the three triggers that keep the side table in step
+ * with every write to the passage table. Each name holds a hyphen, which no
+ * source id, generation table or object name can hold.
  */
 export function vectorIndexNames(table: string): {
   side: string;
-  index: string;
-  shadow: string;
   org: string;
   triggers: [string, string, string];
 } {
   return {
     side: `${table}-vec`,
-    index: `${table}$vec`,
-    shadow: `${table}$vec_shadow`,
     org: `${table}-org`,
     triggers: [`${table}-vec-insert`, `${table}-vec-delete`, `${table}-vec-update`],
   };
 }
 
 /**
- * The settings of the DiskANN index, measured at 1,536 dimensions on 5,000
- * clustered vectors: neighbours compressed to one bit and at most 32 of them
- * cost about 3 ms a vector to insert and about 11 KB a vector on disk (with
- * the float8 side table), with a recall@10 of 0.998 against the exact scan;
- * float8 neighbours cost three times the time and size for no recall gain on
- * clustered vectors (on unstructured random vectors both fall short: 0.94 and
- * 0.75). libSQL's defaults (float32 neighbours) took 329 MB and 21.8 s for
- * 1,000 vectors.
- */
-export const VECTOR_INDEX_SETTINGS = `'metric=cosine', 'compress_neighbors=float1bit', 'max_neighbors=32'`;
-
-/**
- * The statements that make a passage table's approximate vector index ({@link
- * vectorIndexNames}), empty: the side table and its DiskANN index, the
- * organization index of the passage table, and the triggers. The rows the
- * passage table already holds are copied in afterwards, a batch at a time
- * ({@link vectorBackfillSql}); the triggers, made first, keep every row
- * written meanwhile in step, so the side table holds a subset of the passage
- * table's chunks at every moment, and all of them once the copy ends.
+ * The statements that make a passage table's approximate vector index
+ * ({@link vectorIndexNames}), empty: the side table of one-bit vectors
+ * (`F1BIT_BLOB`, `vector1bit`: 192 bytes at 1,536 dimensions, a 32nd of the
+ * float32 vector), the organization index of the passage table, and the
+ * triggers. The rows the passage table already holds are copied in
+ * afterwards, a batch at a time ({@link vectorBackfillSql}); the triggers,
+ * made first, keep every row written meanwhile in step, so the side table
+ * holds a subset of the passage table's chunks at every moment, and all of
+ * them once the copy ends. The organization index, when it is there alone
+ * (made for a table found to hold more than one organization), is kept.
  */
 export function vectorIndexDdl(table: string, dimensions: number): string[] {
   if (!Number.isInteger(dimensions) || dimensions < 1) {
     throw new RangeError(`knowledge-turso: vector dimensions must be a positive integer, got ${String(dimensions)}`);
   }
-  const { side, index, org, triggers } = vectorIndexNames(table);
+  const { side, org, triggers } = vectorIndexNames(table);
   const t = quoted(table);
   const s = quoted(side);
   return [
-    // The organization index is kept: it may be there alone (made for a
-    // table found to hold more than one organization), and serves as it is.
     ...dropVectorIndexDdl(table).filter((statement) => !statement.includes(quoted(org))),
-    `CREATE TABLE ${s} (id INTEGER PRIMARY KEY, chunk_id TEXT NOT NULL UNIQUE, embedding F8_BLOB(${dimensions}) NOT NULL)`,
-    `CREATE INDEX ${quoted(index)} ON ${s} (libsql_vector_idx(embedding, ${VECTOR_INDEX_SETTINGS}))`,
+    `CREATE TABLE ${s} (chunk_id TEXT NOT NULL PRIMARY KEY, embedding F1BIT_BLOB(${dimensions}) NOT NULL)`,
     organizationIndexDdl(table),
     `CREATE TRIGGER ${quoted(triggers[0])} AFTER INSERT ON ${t} BEGIN
-  INSERT INTO ${s} (chunk_id, embedding) VALUES (new.chunk_id, vector8(new.embedding))
+  INSERT INTO ${s} (chunk_id, embedding) VALUES (new.chunk_id, vector1bit(new.embedding))
     ON CONFLICT (chunk_id) DO UPDATE SET embedding = excluded.embedding;
 END`,
     `CREATE TRIGGER ${quoted(triggers[1])} AFTER DELETE ON ${t} BEGIN
@@ -322,7 +304,7 @@ END`,
 END`,
     `CREATE TRIGGER ${quoted(triggers[2])} AFTER UPDATE OF chunk_id, embedding ON ${t}
   WHEN old.chunk_id IS NOT new.chunk_id OR old.embedding IS NOT new.embedding BEGIN
-  UPDATE ${s} SET chunk_id = new.chunk_id, embedding = vector8(new.embedding) WHERE chunk_id = old.chunk_id;
+  UPDATE ${s} SET chunk_id = new.chunk_id, embedding = vector1bit(new.embedding) WHERE chunk_id = old.chunk_id;
 END`,
   ];
 }
@@ -344,18 +326,17 @@ export function vectorBackfillSql(table: string): { last: string; copy: string }
     last: `SELECT max(chunk_id) AS last FROM (SELECT chunk_id FROM ${t} WHERE chunk_id > ?1 ORDER BY chunk_id LIMIT ?2)`,
     copy:
       `INSERT INTO ${quoted(vectorIndexNames(table).side)} (chunk_id, embedding) ` +
-      `SELECT chunk_id, vector8(embedding) FROM ${t} WHERE chunk_id > ?1 AND chunk_id <= ?2 ORDER BY chunk_id ` +
+      `SELECT chunk_id, vector1bit(embedding) FROM ${t} WHERE chunk_id > ?1 AND chunk_id <= ?2 ORDER BY chunk_id ` +
       'ON CONFLICT (chunk_id) DO NOTHING',
   };
 }
 
-/** The statements that drop a passage table's vector index; libSQL drops the DiskANN index and its shadow with the side table. */
+/** The statements that drop a passage table's vector index. */
 export function dropVectorIndexDdl(table: string): string[] {
-  const { side, index, org, triggers } = vectorIndexNames(table);
+  const { side, org, triggers } = vectorIndexNames(table);
   return [
     ...triggers.map((name) => `DROP TRIGGER IF EXISTS ${quoted(name)}`),
     `DROP INDEX IF EXISTS ${quoted(org)}`,
-    `DROP INDEX IF EXISTS ${quoted(index)}`,
     `DROP TABLE IF EXISTS ${quoted(side)}`,
   ];
 }
@@ -366,35 +347,32 @@ export type VectorIndexShape = 'none' | 'complete' | 'partial' | 'other';
 /**
  * Reads the shape of a passage table's vector index, as {@link
  * keywordIndexShape} reads its keyword index: `complete` when the side table
- * (exactly its three columns), its DiskANN index, the organization index and
- * the three triggers are all there and are this module's; `none` when nothing
+ * (exactly its two columns, a one-bit vector), the organization index and the
+ * three triggers are all there and are this module's; `none` when nothing
  * is; `partial` when only some are; `other` when an object under one of those
- * names (or the DiskANN shadow's) is not this module's — never dropped or used.
- * `complete` says the structure is there, not that every row was copied in.
+ * names is not this module's — never dropped or used. `complete` says the
+ * structure is there, not that every row was copied in.
  */
 export function vectorIndexShape(
   table: string,
   rows: ReadonlyArray<Record<string, unknown>>,
   sideColumns: ReadonlyArray<Record<string, unknown>>,
 ): VectorIndexShape {
-  const { side, index, shadow, org, triggers } = vectorIndexNames(table);
-  const byName = new Map(
-    rows.map((r) => [String(r.name), { type: String(r.type), on: String(r.tbl_name), sql: String(r.sql ?? '') }]),
-  );
-  const own = [side, index, org, ...triggers];
+  const { side, org, triggers } = vectorIndexNames(table);
+  const byName = new Map(rows.map((r) => [String(r.name), { type: String(r.type), on: String(r.tbl_name) }]));
+  const own = [side, org, ...triggers];
   const found = own.filter((n) => byName.has(n));
-  if (found.length === 0 && !byName.has(shadow)) return 'none';
+  if (found.length === 0) return 'none';
   const is = (name: string, type: string, on: string) =>
     !byName.has(name) || (byName.get(name)!.type === type && byName.get(name)!.on === on);
+  const columns = new Map(sideColumns.map((c) => [String(c.name), String(c.type).replace(/\s+/g, '')]));
   const sideOk =
     is(side, 'table', side) &&
-    (!byName.has(side) || sideColumns.map((c) => String(c.name)).sort().join(',') === 'chunk_id,embedding,id');
-  const indexOk = is(index, 'index', side) && (!byName.has(index) || /libsql_vector_idx\s*\(/i.test(byName.get(index)!.sql));
-  // The shadow is libSQL's, made with the DiskANN index and dropped with it.
-  const shadowOk = !byName.has(shadow) || (byName.has(index) && byName.get(shadow)!.type === 'table');
+    (!byName.has(side) ||
+      (columns.size === 2 && columns.has('chunk_id') && /^F1BIT_BLOB\(\d+\)$/i.test(columns.get('embedding') ?? '')));
   const orgOk = is(org, 'index', table);
   const triggersOk = triggers.every((n) => is(n, 'trigger', table));
-  if (!sideOk || !indexOk || !shadowOk || !orgOk || !triggersOk) return 'other';
+  if (!sideOk || !orgOk || !triggersOk) return 'other';
   return found.length === own.length ? 'complete' : 'partial';
 }
 

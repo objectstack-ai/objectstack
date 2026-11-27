@@ -221,7 +221,7 @@ describe('KnowledgeTursoPlugin', () => {
     await adapter.completeBuild!(build);
     const { createClient } = await import('@libsql/client');
     const probe = createClient({ url: `file:${join(root, '.objectstack', 'data', 'knowledge.db')}` });
-    expect((await probe.execute("SELECT name FROM sqlite_master WHERE name = 'knowledge_notes_g1$vec'")).rows).toHaveLength(1);
+    expect((await probe.execute("SELECT name FROM sqlite_master WHERE name = 'knowledge_notes_g1-vec'")).rows).toHaveLength(1);
     probe.close();
     await plugin.destroy();
   });
