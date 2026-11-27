@@ -161,8 +161,8 @@ export function storedOverlayEntries(
                 ? JSON.parse(record.metadata)
                 : record.metadata,
         ) as any;
-        // The stored seam yields no item of this row (ADR-0160 D7: a stored `ask_ai`
-        // action row): nothing is registered or served for it.
+        // The stored seam yields no item of this row (ADR-0160 D7: a stored action
+        // row of the retired type): nothing is registered or served for it.
         if (parsed === undefined) return [];
         const recPkg = (record as { package_id?: string | null }).package_id ?? undefined;
         // [#28594] The row's package is its COLUMN's, and only the column's: a

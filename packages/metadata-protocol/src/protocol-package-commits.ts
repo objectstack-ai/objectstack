@@ -547,7 +547,7 @@ export class ProtocolPackageCommitsFacet {
             // renamed objects — or the collision that refuses the item, before
             // anything is written for it.
             // The stored seam yields no item of this row (ADR-0160 D7: a stored
-            // `ask_ai` action row): the copy carries nothing for it.
+            // action row of the retired type): the copy carries nothing for it.
             if (item === undefined) continue;
             const outcome = rename.rewrite(row.type, row.name, item);
             if ('refusal' in outcome) {
@@ -797,7 +797,7 @@ export class ProtocolPackageCommitsFacet {
                 continue;
             }
             // The stored seam yields no item of this body (ADR-0160 D7: an
-            // `ask_ai` action): nothing is imported for it.
+            // action of the retired type): nothing is imported for it.
             if (converted === undefined) continue;
             // [#30808] A seed item's records are data: the plan already named
             // its object as the copy names it, and the free-text rewrite below

@@ -21,7 +21,7 @@
  *   the pane — still carries it.
  *
  * The focus is set from the chip in the composer only. The external setter
- * the retired `ask_ai` action pinned through left with that action type
+ * the retired ask-AI action type pinned through left with that type
  * (ADR-0160 D7, seventh amendment).
  */
 

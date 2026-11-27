@@ -1961,8 +1961,8 @@ export class ProtocolRegistryHydrationFacet {
                 let refused: RegistryHealStop | undefined;
                 for (const row of remainingRows) {
                     const item = host.convertStoredItem(String(row.type ?? canonical), storedRowDocument(row));
-                    // The stored seam yields no item of this row (ADR-0160 D7: a stored `ask_ai`
-                    // action row): nothing is registered or served for it.
+                    // The stored seam yields no item of this row (ADR-0160 D7: a stored action
+                    // row of the retired type): nothing is registered or served for it.
                     if (item === undefined) continue;
                     const refusal = await host.applyRegistryWriteThrough({
                         type: canonical,

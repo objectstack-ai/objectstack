@@ -157,7 +157,7 @@ export interface ConversionContext {
    * data-at-rest doors and the fixture CI pass); `os migrate meta`, which runs
    * over sources, leaves it unset. A conversion whose rewrite of a source
    * depends on what the author can still decide reads it: the retired
-   * `ask_ai` action type (`action-type-ask-ai-removed`, ADR-0160 D7) deletes
+   * action type (`action-type-ask-ai-removed`, ADR-0160 D7) deletes
    * from sources only an action nothing names, and at rest every one.
    */
   atRest?: boolean;

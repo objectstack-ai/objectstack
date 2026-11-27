@@ -2951,7 +2951,7 @@ export class ProtocolSaveFacet {
             ];
 
             // ADR-0160 D7, seventh amendment: the chain yields no item of the
-            // row — a stored `action` row of the retired `ask_ai` type IS the
+            // row — a stored `action` row of the retired action type IS the
             // action the conversion deletes. The reads serve and register
             // nothing for it already; this pass lists it on a preview and an
             // apply run alike and deletes no row, because deleting it is the

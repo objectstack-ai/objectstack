@@ -1406,8 +1406,8 @@ export class ProtocolDiffDeleteLoadFacet {
                             ? JSON.parse(record.metadata)
                             : record.metadata,
                     );
-                    // The stored seam yields no item of this row (ADR-0160 D7: a stored `ask_ai`
-                    // action row): nothing is registered or served for it.
+                    // The stored seam yields no item of this row (ADR-0160 D7: a stored action
+                    // row of the retired type): nothing is registered or served for it.
                     if (data === undefined) continue;
                     const verdict = computeMetadataDiagnostics(normalizedType, data);
                     if (verdict && !verdict.valid) {

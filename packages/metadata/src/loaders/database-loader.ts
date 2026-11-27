@@ -1044,7 +1044,7 @@ export class DatabaseLoader implements MetadataLoader {
   /**
    * The body a row's IDENTITY is read from (its name, its bundle member): the
    * converted body, or the stored one where the conversion chain yields no item
-   * of the row (ADR-0160 D7 — a stored `ask_ai` action row). Such a row is
+   * of the row (ADR-0160 D7 — a stored action row of the retired type). Such a row is
    * served as nothing ({@link rowToData} answers `null`), and it must still be
    * found by name, so the delete door can take it out.
    */

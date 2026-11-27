@@ -145,7 +145,7 @@ export type StoredConversionOptions = Omit<ApplyConversionsOptions, 'includeReti
  *
  * **Answers `undefined` when the row yields no item**: the chain left the
  * collection the row was wrapped in empty, because a conversion deletes what
- * the row is (a stored `action` row of the retired `ask_ai` type, ADR-0160 D7).
+ * the row is (a stored `action` row of the retired action type, ADR-0160 D7).
  * A caller then registers and serves nothing for the row.
  *
  * Deliberately NOT applied to `'flow'` by the metadata-protocol seams: flows
@@ -175,7 +175,7 @@ export function applyConversionsToStoredItem<T>(
   );
   const items = converted[collection];
   // ADR-0160 D7, seventh amendment: a conversion may leave NO item of a row —
-  // a stored `action` row whose type is the retired `ask_ai` IS the action
+  // a stored `action` row whose type is the retired one IS the action
   // the conversion deletes. The seam says so with `undefined`, and its callers
   // register and serve nothing for that row; the row itself stays as stored
   // until it is deleted by name through the metadata API's delete door. A

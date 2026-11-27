@@ -540,7 +540,7 @@ function removeInComponentTree(
  * its other members in order. `shouldRemove` is called once per visited
  * component, so a caller emits its notice there.
  *
- * Written for the retired `ask_ai` action rows (ADR-0160 D7), where the
+ * Written for the rows of the retired action type (ADR-0160 D7, `action-type-ask-ai-removed`), where the
  * smallest part that leaves the page parseable is the row itself.
  */
 export function removePageComponents(
