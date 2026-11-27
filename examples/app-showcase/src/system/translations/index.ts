@@ -383,6 +383,10 @@ export const ShowcaseTranslationBundle = {
     },
   },
   'zh-CN': {
+    // The package's own name, keyed by its manifest id (objectstack#35513).
+    packages: {
+      'com.example.showcase': { name: 'ObjectStack 演示', description: '覆盖全部元数据类型、全部视图类型与主要能力链路的综合演示工作区。' },
+    },
     objects: {
       showcase_project: {
         label: '项目',

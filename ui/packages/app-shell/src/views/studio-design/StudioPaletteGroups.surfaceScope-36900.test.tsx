@@ -260,7 +260,7 @@ describe("on a package, the palette lists the left menu and the package's items 
       'studio-entry type:dashboard',
       'studio-entry type:flow',
       'studio-entry orgFlows',
-      'studio-entry type:datasource',
+      // objectstack#37920 — the menu draws no datasource row, so neither does the palette.
       'studio-entry diagnostics',
       'studio-entry type:permission',
       'studio-entry type:position',

@@ -323,7 +323,7 @@ export { AppContent as DefaultAppContent } from './console/AppContent.js';
 export { MarketplacePage } from './console/marketplace/MarketplacePage.js';
 export { MarketplacePackagePage } from './console/marketplace/MarketplacePackagePage.js';
 export { LoginPage as DefaultLoginPage } from './console/auth/LoginPage.js';
-export { signInRefusalMessages } from './console/auth/signInRefusalMessages.js';
+export { signInRefusalMessages, passwordDoorRefusalMessages } from './console/auth/signInRefusalMessages.js';
 export { RegisterPage as DefaultRegisterPage } from './console/auth/RegisterPage.js';
 export {
   signUpCaptchaFailedMessage,

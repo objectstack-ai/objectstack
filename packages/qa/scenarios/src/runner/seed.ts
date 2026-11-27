@@ -270,6 +270,30 @@ export function derivedFields(artifact: unknown): Map<string, Set<string>> {
   return out;
 }
 
+/**
+ * The roll-ups a built artifact declares (`type: 'summary'`), per object, read
+ * through the scorer's one artifact reader; empty when the artifact cannot be
+ * read. The seed leaves their card values out (`seedApp`): a card states a
+ * roll-up as the total its child rows make, and the seed path stores a value
+ * it is sent as written, so a rule that judges a child against the parent's
+ * total would read the end state before the child that makes it (#35654).
+ * Only roll-ups: a formula has no column, and an autonumber is a name the
+ * card's questions cite (`INV-1058`), which the seed must keep.
+ */
+export function rollupFields(artifact: unknown): Map<string, Set<string>> {
+  const out = new Map<string, Set<string>>();
+  if (artifact === undefined) return out;
+  try {
+    for (const o of artifactToEvalGraph(artifact).objects) {
+      const fields = o.fields.filter((f) => f.type === 'summary').map((f) => f.name);
+      if (fields.length) out.set(o.name, new Set(fields));
+    }
+  } catch {
+    /* unreadable: the score half reports it; nothing is known to be a roll-up */
+  }
+  return out;
+}
+
 /** How one object's rows have moved from the seeded state ({@link rowDrift}). */
 export interface RowDrift {
   object: string;
