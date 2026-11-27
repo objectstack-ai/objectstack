@@ -7,6 +7,12 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { SqlDriver } from '@objectstack/driver-sql';
 import { SchemaRegistry } from '@objectstack/objectql';
+// Paid at collection, not in a case's clocked window: the modules the source
+// under test loads with `await import(…)` (check:test-source-alias).
+import '@objectstack/platform-objects/plugin';
+import '@objectstack/plugin-security';
+import '@objectstack/rest';
+import '@objectstack/runtime';
 import {
   findHostConfig,
   composeForDeclarations,
