@@ -165,7 +165,7 @@ describe('page-header-subtitle-alias reaches every spec-valid header position', 
       const parsed = PageSchema.safeParse(structuredClone(position.page));
       expect(parsed.success, `not a spec-valid page: ${JSON.stringify(parsed.error?.issues)}`).toBe(true);
 
-      const converted = applyConversionsToStoredItem('pages', structuredClone(position.page));
+      const converted = applyConversionsToStoredItem('pages', structuredClone(position.page))!;
       const properties = position.probe(converted);
 
       expect(properties).not.toHaveProperty('description');
