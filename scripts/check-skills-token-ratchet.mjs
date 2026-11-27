@@ -1732,7 +1732,16 @@ export const CEILINGS = new Map([
   // (+4014) -> 4448 tokens, the row's 7 tokens of headroom absorbed, ceiling +997, pinned
   // AT the measurement. Authority as the `rules/actions.md` row above.
   //   ceil($(wc -c < skills/objectstack-ui/rules/list-views.md) / 4) == ceil(17790 / 4)
-  ['skills/objectstack-ui/rules/list-views.md', 4448],
+  // 4448 -> 4510 (#37406): one sentence under Column Features — a `select` badge is coloured
+  // only when its option declares `color` (the nine palette families the renderer's
+  // `BADGE_COLOR_MAP` keys, or a `#` hex), any other option renders neutral. Colour on a
+  // select option was untaught in this skill (0 hits), so no text here restates it and
+  // nothing was cut to fund it. Authority: the ruling of record on #36882 (record
+  // 7178358629, maintainer verbatim 「A 全部去掉，没配就灰」), whose term (5) orders this
+  // line into `skills/objectstack-ui`; it authorises its own measured delta and no more.
+  // 17790 -> 18039 bytes (+249) -> 4510 tokens, ceiling +62, pinned AT the measurement.
+  //   ceil($(wc -c < skills/objectstack-ui/rules/list-views.md) / 4) == ceil(18039 / 4)
+  ['skills/objectstack-ui/rules/list-views.md', 4510],
   // 2273 -> 2196 (#27059): LOWERED. The Surface bullet points at `rules/record-page.md`,
   // says create / edit is a modal or the `editMode: 'page'` route, and the Overlay-width
   // bullet moved there whole (the `size` bucket, the deprecated pixel keys); the ceiling
