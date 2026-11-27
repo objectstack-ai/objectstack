@@ -2335,6 +2335,13 @@ export class ApprovalService implements IApprovalService, ObjectSchemaReadDelega
   private automation?: ApprovalResumeSurface;
   private messaging?: ApprovalMessagingSurface;
   private publicBaseUrl: string;
+  /**
+   * [#37808] Where {@link inspectStrandedRequests}'s walk over every decided
+   * request resumes: the last request id the previous sweep read, `null` to
+   * start from the first. Per process, never persisted: a restart starts the
+   * walk again, which costs a repeat, never a miss.
+   */
+  private strandScanCursor: string | null = null;
   private readonly getConsoleUrl?: ConsolePageComposer;
   private tenancyPosture?: () => string | undefined;
   private fieldVisibility?: FieldVisibilitySource;
@@ -8789,12 +8796,37 @@ export class ApprovalService implements IApprovalService, ObjectSchemaReadDelega
     if (typeof this.automation?.hasSuspendedRun !== 'function') return empty;
     if (typeof this.automation?.getRun !== 'function') return empty;
 
+    // [#37808] Two windows of at most `limit` rows each, both ordered by the
+    // store, never an unordered page of every decided request (which, past
+    // `limit` rows, is an arbitrary page a new strand may never fall into):
+    //  - the NEWEST decisions, by `updated_at` (the `status, updated_at`
+    //    index): a decision whose run could not advance is reported on the
+    //    next sweep;
+    //  - the next page of a WALK over every decided request by id, resumed
+    //    from where the previous sweep stopped and restarted once it runs
+    //    out. A keyset on the primary key skips no row (an id never changes,
+    //    and a row that leaves the set moves no other), so every decided
+    //    request is read at least once every ceil(decided / limit) sweeps,
+    //    whatever the newest window misses: more than `limit` decisions
+    //    between two sweeps, or a run that failed after its decision.
     const limit = options?.limit ?? 500;
+    const strandable = { $in: [...STRANDABLE_REQUEST_STATUSES] };
     let rows: any[] = [];
     try {
-      rows = await this.engine.find('sys_approval_request', {
-        where: { status: { $in: [...STRANDABLE_REQUEST_STATUSES] } }, limit, context: SYSTEM_CTX,
+      const newest: any[] = await this.engine.find('sys_approval_request', {
+        where: { status: strandable },
+        orderBy: [{ field: 'updated_at', order: 'desc' }, { field: 'id', order: 'desc' }],
+        limit, context: SYSTEM_CTX,
       }) ?? [];
+      const cursor = this.strandScanCursor;
+      const walked: any[] = await this.engine.find('sys_approval_request', {
+        where: cursor ? { status: strandable, id: { $gt: cursor } } : { status: strandable },
+        orderBy: [{ field: 'id', order: 'asc' }],
+        limit, context: SYSTEM_CTX,
+      }) ?? [];
+      this.strandScanCursor = walked.length < limit ? null : String(walked[walked.length - 1].id);
+      const seen = new Set(newest.map((r) => String(r?.id)));
+      rows = [...newest, ...walked.filter((r) => !seen.has(String(r?.id)))];
     } catch (err: any) {
       this.logger?.warn?.('[approvals] stranded-request scan failed to list requests', {
         error: err?.message ?? String(err),
