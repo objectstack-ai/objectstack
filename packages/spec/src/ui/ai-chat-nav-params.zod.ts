@@ -32,9 +32,10 @@ export const AI_CHAT_COMPONENT_REF = 'ai:chat' as const;
  * - `agent` — the page always talks to the platform `ask` agent; the agent is
  *   not an app-level choice here (ADR-0063 §1: the platform agents are `ask`
  *   and `build`, and an inquiry page is a data surface).
- * - `scope` — answers PREFER this app's objects and knowledge but are not
- *   limited to them: the active app is a ranking hint to the agent, and
- *   knowledge sources carry no app ownership to filter by, so a strict
+ * - `scope` — answers PREFER this app's objects but are not limited to
+ *   them: the active app is a ranking hint for schema retrieval only, and
+ *   knowledge search has no app filter (knowledge sources carry no app
+ *   ownership), so a strict
  *   "this app only" switch would advertise a limit nothing enforces.
  *
  * Plain strings, not locale maps: per-locale copy goes through the app's
@@ -66,8 +67,8 @@ export const AiChatNavParamsSchema = lazySchema(() => strictObject(
         '`agent` is not configurable here: the AI inquiry page always talks to the platform `ask` agent. '
         + 'Delete the key; to give it deeper capability, author skills that attach to `ask`.',
       scope:
-        '`scope` is not configurable here: answers already prefer this app\'s objects and knowledge, and '
-        + 'nothing can limit them to this app alone yet. Delete the key.',
+        '`scope` is not configurable here: answers already prefer this app\'s objects; nothing can limit them '
+        + 'to this app alone yet. Delete the key.',
     },
   },
   {
