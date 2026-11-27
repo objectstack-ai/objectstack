@@ -114,7 +114,9 @@ an omitted `required` as `true`.
 
 **Import resolves a detail's name within its master** when the row sets that
 master (one reference column to it) or the lookup's `dependsOn` sibling: a tie
-there is `reference_ambiguous`, another master's detail `reference_not_found`.
+there is `reference_ambiguous`, another master's detail `reference_out_of_scope`
+(`scope: [{ field, value }]` names the scoping columns). A name no record
+carries, or a scoping field the caller cannot read, is `reference_not_found`.
 
 ### Many-to-Many: Junction Object
 
@@ -188,13 +190,6 @@ A parent `summary` field aggregates a child collection. The engine recomputes it
 **server-side** on every child insert/update/delete, in the write's
 transaction.
 
-```json
-{
-  "type": "summary",
-  "summaryOperations": { "object": "invoice_line", "field": "amount", "function": "sum" }
-}
-```
-
 `object` is the child object to aggregate, `field` its field (ignored for
 `count`), `function` one of `count` / `sum` / `min` / `max` / `avg`. Optional:
 `filter` (below) and `relationshipField` (omitted: the child's `lookup` /
@@ -219,9 +214,9 @@ operator and compound forms work
 completion rate = a child count ÷ a capacity) is a `formula` over a working
 `summary` — author the summary first; the rate computes only once it does.
 
-**The recompute runs only on a child write.** A `summary` declared after its
-parent rows exist reads `NULL` on every existing parent until a child of it is
-written. The backfill is `os migrate summary-nulls --apply`
+**A `summary` declared after its parent rows exist reads `NULL`** on every
+existing parent until a child of it is written. The backfill is
+`os migrate summary-nulls --apply`
 (`--recompute-undefined-on-empty OBJECT.FIELD` for a `min` / `max` / `avg`
 declared late) — never an edit to a child. Declare the summary with the object
 where you can; declared late, run the migration before you call the number ready.
@@ -258,8 +253,7 @@ The parent's standard create/edit form enters a child's rows where **a
 field group of the parent names that child** (`relatedList`): the group draws
 the child's table at its place in the record's details and in the parent's
 entry form (below the form's fields when its sections name no field group),
-and parent + children save in **one atomic transaction**. Without the group
-nothing changes: the child is a tab and the form has no lines. A parent or child
+and parent + children save in **one atomic transaction**. A parent or child
 declaring `enable.apiMethods` must list `'bulk'`, or that save is refused `405 OBJECT_API_METHOD_NOT_ALLOWED`.
 
 ```typescript
@@ -295,8 +289,7 @@ Omitted (a boolean is refused) — **smart default**: picks `form` when the chil
 rich/form-only fields (textarea, file, image, json, location…) or more than ~8
 editable fields, else `grid`.
 
-**Modeling a `'grid'` line item for the full editor.** The grid lights up extra
-behaviors from how you model the child + parent:
+**Modeling a `'grid'` line item for the full editor:**
 
 ```typescript
 // Parent (a field group names invoice_line, as above)
@@ -366,8 +359,10 @@ audit_ref: { type: 'master_detail', reference: 'invoice', relatedList: false },
   only the named lists show, in order, built-ins by name
   (`sys_attachment`, `sys_approval_request`, `sys_activity`). An entry is the child,
   `object.field` or `{ list, label, columns }`; its `label` translates at
-  `objects.{parent}._relatedLists.{list}.label` (none: nothing to translate).
-  A child in the stack with no inbound FK
+  `objects.{parent}._relatedLists.{list}.label` (none: no key). A `.custom`
+  arrangement re-stating the entry with no `label`, or hiding it, leaves none,
+  and `os validate` refuses the key: drop it, or re-state the entry with the
+  owner's `label`. A child in the stack with no inbound FK
   is refused everywhere; one that exists nowhere is refused by `os validate` /
   `os build` (bar a platform or sibling-artifact name) and by a metadata
   write naming no package (one into a package is stored, placing nothing).
