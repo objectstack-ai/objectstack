@@ -974,9 +974,9 @@ export const DetailSection: React.FC<DetailSectionProps> = ({
     // objectstack#37801 — a WIDE field (long text, markdown, html, rich text,
     // a multi-file list: the one `isWideDetailField` predicate the auto layout
     // spans by, never a second type list) draws its label ABOVE the value
-    // instead, and the value takes the column's whole width. Beside a 112 px
-    // label a long body was set in what was left of a one-column list. The
-    // row keeps its attributes and its click target; only its direction moves.
+    // instead, and the value takes the column's whole width rather than what a
+    // 112 px label column leaves of it. The row keeps its attributes and its
+    // click target; only its direction moves.
     const labelOnTop =
       frameless && isWideDetailField(enrichedField as DetailViewField, objectSchema?.fields);
     return (
