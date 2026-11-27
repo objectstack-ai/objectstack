@@ -667,6 +667,20 @@ describe('admitAuthoredSource — source admission at save, as the authoring pri
     expect((verdict as { message: string }).message).toContain("display field");
   });
 
+  it('a declared `title` that is not the display field is not indexed, so it is not asked at save; the display field still is', async () => {
+    const ACCOUNT: ObjectDef = {
+      name: 'account',
+      fields: { id: { type: 'text' }, name: { type: 'text' }, title: { type: 'text' }, body: { type: 'textarea' } },
+    };
+    const hideTitle = makeSecurity(() => ['id', 'name', 'body']);
+    const admitted = setup({ objects: [ACCOUNT], sources: [], security: hideTitle });
+    expect(await admitted.svc.admitAuthoredSource(item('account', ['body']), MEMBER)).toEqual({ admitted: true });
+    const hideName = makeSecurity(() => ['id', 'title', 'body']);
+    const refused = setup({ objects: [ACCOUNT], sources: [], security: hideName });
+    expect(await refused.svc.admitAuthoredSource(item('account', ['body']), MEMBER))
+      .toMatchObject({ admitted: false, code: 'PERMISSION_DENIED', status: 403, object: 'account', field: 'name' });
+  });
+
   it.each([
     ['an object of a disabled package', { objects: [TICKET], disabled: ['ticket'] }, 'ticket', 'disabled package'],
     ['an object the API does not serve at all', { objects: [sealed] }, 'sealed', 'does not serve object'],
