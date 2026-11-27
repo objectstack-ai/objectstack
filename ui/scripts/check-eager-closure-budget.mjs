@@ -1668,8 +1668,10 @@ export const BASELINE = Object.freeze({
    * objectui#11438, objectui#11717, objectui#11798, objectui#11854,
    * objectui#11939, objectui#12030 and objectui#13410, deliberately; and `null`
    * after objectstack#25925 because its reading was taken on `main` itself,
-   * which a `main` checkout resolves without a handle; `null` after
-   * objectstack#37572 because no squash exists yet. This field can only ever be BACK-FILLED: a squash sha does
+   * which a `main` checkout resolves without a handle. ⭐ Back-filled for
+   * objectstack#37572: `003fde60` above is that pull request's branch commit,
+   * and `50b4bf82` is the squash that landed it on `main` (#37786), the tree a
+   * `main` checkout can build to re-check the reading. This field can only ever be BACK-FILLED: a squash sha does
    * not exist until the pull request merges, so the change that re-pins the
    * field above ⛔ cannot write its own here. ⛔ Do not guess one: a wrong sha in
    * this position is worse than an absent one, because it RESOLVES, and a
@@ -1685,7 +1687,7 @@ export const BASELINE = Object.freeze({
    * that records what this constant carries as data reds on a back-fill, as it
    * was written to, and is re-pinned to two strings when that happens.
    */
-  squashMerge: null,
+  squashMerge: '50b4bf82',
 });
 
 /**
