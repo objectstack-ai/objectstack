@@ -203,8 +203,31 @@ describe('parseAskQuestionEnvelope', () => {
       expect(parseAskQuestionEnvelope({ ...LEGACY, readings: ['Only one'] })).toBeNull();
       expect(parseAskQuestionEnvelope({ ...LEGACY, readings: ['A', 'B', 'C', 'D', 'E'] })).toBeNull();
       expect(parseAskQuestionEnvelope({ ...LEGACY, readings: ['A', 'A'] })).toBeNull();
-      expect(parseAskQuestionEnvelope({ ...LEGACY, readings: ['x'.repeat(ASK_QUESTION_LIMITS.labelMaxLength + 1), 'B'] }))
+      expect(parseAskQuestionEnvelope({ ...LEGACY, readings: ['A', ' A '] })).toBeNull();
+      expect(parseAskQuestionEnvelope({ ...LEGACY, readings: ['A', '   '] })).toBeNull();
+      expect(parseAskQuestionEnvelope({
+        ...LEGACY,
+        readings: ['x'.repeat(ASK_QUESTION_LIMITS.legacyReadingMaxLength + 1), 'B'],
+      })).toBeNull();
+      expect(parseAskQuestionEnvelope({ ...LEGACY, question: 'q'.repeat(ASK_QUESTION_LIMITS.questionMaxLength + 1) }))
         .toBeNull();
+      expect(parseAskQuestionEnvelope({ ...LEGACY, reply: '' })).toBeNull();
+    });
+
+    it('holds a reading to its own limit, longer than the label limit', () => {
+      // Real ask_which readings run past the envelope's 24-character label
+      // (most of them do), so a reading gets the description's length.
+      expect(ASK_QUESTION_LIMITS.legacyReadingMaxLength).toBeGreaterThan(ASK_QUESTION_LIMITS.labelMaxLength);
+      const atEdge = 'r'.repeat(ASK_QUESTION_LIMITS.legacyReadingMaxLength);
+      const overLabel = 'Revenue booked when the deal closed';
+      expect(overLabel.length).toBeGreaterThan(ASK_QUESTION_LIMITS.labelMaxLength);
+      const parsed = parseAskQuestionEnvelope({ ...LEGACY, readings: [atEdge, overLabel] });
+      expect(parsed?.questions[0]?.options).toEqual([{ label: atEdge }, { label: overLabel }]);
+    });
+
+    it('keeps the new envelope at the label limit', () => {
+      const long = 'x'.repeat(ASK_QUESTION_LIMITS.labelMaxLength + 1);
+      expect(parseAskQuestionEnvelope(withQuestion({ options: [{ label: long }, { label: 'B' }] }))).toBeNull();
     });
 
     it('answers null for a malformed legacy result', () => {

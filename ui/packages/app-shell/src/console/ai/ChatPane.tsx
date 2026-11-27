@@ -792,6 +792,8 @@ export function ChatPane({
         // area, in flow above the input.
         promptHeaderSlot={focusRow ?? undefined}
         messages={shownMessages}
+        // Keys the question card's skip marks to this conversation.
+        conversationId={conversationId}
         placeholder={
           activeAgent
             ? agentRouteName(activeAgent) === 'ask'

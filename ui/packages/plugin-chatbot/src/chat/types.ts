@@ -313,6 +313,13 @@ export interface ChatbotEnhancedProps extends React.HTMLAttributes<HTMLDivElemen
    */
   readOnly?: boolean;
   /**
+   * The id of the conversation shown. It keys the question card's skip marks
+   * in localStorage (`QUESTION_SKIP_STORAGE_PREFIX`), so a question the user
+   * skipped stays skipped when the conversation is opened again on this
+   * device. Without it a skip holds for the mounted view only.
+   */
+  conversationId?: string;
+  /**
    * Whether the assistant is currently generating a response. While it is
    * true a message the user sends is queued until the turn ends.
    */

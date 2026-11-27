@@ -438,3 +438,6 @@ export { isHitlContinuation } from './hitlContinuation';
 // decides when the card replaces the composer.
 export { QuestionCard } from './QuestionCard';
 export type { QuestionCardProps, QuestionCardQuestion, QuestionCardOption } from './QuestionCard';
+// ChatbotEnhanced keeps a skipped question skipped per conversation in
+// localStorage under this prefix; a host's sign-out cleanup clears it.
+export { QUESTION_SKIP_STORAGE_PREFIX } from './chat/questionSkip';

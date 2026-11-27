@@ -37,10 +37,12 @@ import { strictObject } from '../shared/strict-object';
  * is `ask_which`'s existing result,
  * `{ success: true, status: 'asked_which', question, readings, reply }`.
  * {@link parseAskQuestionEnvelope} reads it as one question whose options are
- * the readings, with no description, and holds the result to the same
- * {@link AskQuestionEnvelopeSchema} — one contract and one set of limits, so a
- * legacy result the card cannot draw (a reading over the label limit, more
- * than four readings) answers `null` and stays text, as it renders today.
+ * the readings, with no description, under the envelope's limits with one
+ * exception: a reading is a whole sentence-sized phrase, not a short label, so
+ * it is held to its own limit, `ASK_QUESTION_LIMITS.legacyReadingMaxLength`,
+ * and the card wraps it. Every other limit is the envelope's, so a legacy
+ * result the card cannot draw (a reading over its limit, one reading or more
+ * than four, a duplicate) answers `null` and stays text, as it renders today.
  * Stored conversations keep their old results, so this reading stays as long
  * as those rows can be shown.
  */
@@ -70,6 +72,13 @@ export const ASK_QUESTION_LIMITS = {
   questionMaxLength: 120,
   labelMaxLength: 24,
   descriptionMaxLength: 60,
+  /**
+   * A legacy `ask_which` reading, which becomes an option label with no
+   * description. Readings were never held to the label limit, so they get
+   * the description's length instead; the new envelope's labels stay at
+   * `labelMaxLength`.
+   */
+  legacyReadingMaxLength: 60,
 } as const;
 
 /** A non-empty string with at least one non-space character, at most `max` long. */
@@ -126,7 +135,18 @@ export const AskQuestionSchema = lazySchema(() => strictObject(
       .max(ASK_QUESTION_LIMITS.maxOptions)
       .describe('Two to four mutually exclusive options; labels unique, at most one recommended'),
   },
-).superRefine((question, ctx) => {
+).superRefine(refineOptions));
+
+/**
+ * The rules over a question's options that one option alone cannot hold:
+ * labels unique (compared trimmed, since a label is the answer text) and at
+ * most one option recommended. Shared by the envelope's question and the
+ * legacy reading's, so both refuse the same way.
+ */
+function refineOptions(
+  question: { options: ReadonlyArray<{ label: string; recommended?: boolean }> },
+  ctx: z.RefinementCtx,
+) {
   const seen = new Set<string>();
   question.options.forEach((option, index) => {
     const label = option.label.trim();
@@ -147,7 +167,7 @@ export const AskQuestionSchema = lazySchema(() => strictObject(
       message: `${recommended} options are marked recommended: at most one per question`,
     });
   }
-}));
+}
 
 /** The ask-question envelope a question tool's result carries. */
 export const AskQuestionEnvelopeSchema = lazySchema(() => strictObject(
@@ -194,13 +214,26 @@ const AskWhichLegacyResultSchema = z.looseObject({
 });
 
 /**
+ * The one question a legacy `ask_which` result converts to: the envelope's
+ * question rules, with each reading held to `legacyReadingMaxLength` instead
+ * of the label limit. Not exported, for the same reason as the result above.
+ */
+const AskWhichLegacyQuestionSchema = z.object({
+  question: text(ASK_QUESTION_LIMITS.questionMaxLength),
+  options: z.array(z.object({ label: text(ASK_QUESTION_LIMITS.legacyReadingMaxLength) }))
+    .min(ASK_QUESTION_LIMITS.minOptions)
+    .max(ASK_QUESTION_LIMITS.maxOptions),
+}).superRefine(refineOptions);
+
+/**
  * Read a tool result as an ask-question envelope.
  *
  * Takes the already-unwrapped result object (peeling the stream's
  * `{ type: 'text', value }` wrapper stays with the caller). Answers the parsed
  * envelope for a valid {@link AskQuestionEnvelopeSchema} value or a legacy
- * `ask_which` result that converts to one, and `null` for anything else —
- * the caller then shows the result as the text it already is.
+ * `ask_which` result that converts to one (its option labels then run to
+ * `ASK_QUESTION_LIMITS.legacyReadingMaxLength`), and `null` for anything
+ * else — the caller then shows the result as the text it already is.
  */
 export function parseAskQuestionEnvelope(value: unknown): AskQuestionEnvelopeParsed | null {
   if (value === null || typeof value !== 'object') return null;
@@ -211,17 +244,18 @@ export function parseAskQuestionEnvelope(value: unknown): AskQuestionEnvelopePar
   }
   if (status === ASK_WHICH_LEGACY_STATUS) {
     const legacy = AskWhichLegacyResultSchema.safeParse(value);
-    if (!legacy.success) return null;
-    const parsed = AskQuestionEnvelopeSchema.safeParse({
+    if (!legacy.success || legacy.data.reply.length === 0) return null;
+    const question = AskWhichLegacyQuestionSchema.safeParse({
+      question: legacy.data.question,
+      options: legacy.data.readings.map((label) => ({ label })),
+    });
+    if (!question.success) return null;
+    return {
       success: true,
       status: ASK_QUESTION_STATUS,
       reply: legacy.data.reply,
-      questions: [{
-        question: legacy.data.question,
-        options: legacy.data.readings.map((label) => ({ label })),
-      }],
-    });
-    return parsed.success ? parsed.data : null;
+      questions: [question.data],
+    };
   }
   return null;
 }
