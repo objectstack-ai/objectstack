@@ -400,6 +400,29 @@ describe('buildSourcesAtBoot — the first build', () => {
     expect(service.buildRecord('kb')).toMatchObject({ status: 'done' });
   });
 
+  it('[ADR-0161 K4] a source that names no adapter is built at boot on the one it is placed on; one that cannot be placed is left to the reading', async () => {
+    const db = makeEngine(ROWS);
+    const { adapter, calls } = makeAdapter();
+    const { service } = makeService(db.engine, adapter);
+    const { adapter: other } = makeAdapter();
+    const { adapter: unnamed } = makeAdapter();
+    service.registerSource(source({ adapter: undefined }));
+
+    await service.buildSourcesAtBoot();
+    expect(service.adapterIdFor(service.describeSources()[0]!.source)).toBe('memory');
+    expect(service.buildRecord('kb')).toMatchObject({ trigger: 'boot', status: 'done', result: { ok: true, indexed: 3 } });
+    expect(calls.upserted).toBe(3);
+
+    // A second node where two adapters arrived after the source and none is the deployment's:
+    // the pass builds nothing for it, and the reading names it.
+    const second = makeService(db.engine, other);
+    second.service.registerSource(source({ adapter: undefined }));
+    second.service.registerAdapter('app_store', unnamed);
+    await second.service.buildSourcesAtBoot();
+    expect(second.service.buildRecord('kb')).toBeUndefined();
+    expect(second.service.reportUnmountedAdapters()).toEqual(['kb']);
+  });
+
   it('a source with refresh.onRecordChange: false is left to its external indexer', async () => {
     const db = makeEngine(ROWS);
     const { adapter, calls } = makeAdapter();

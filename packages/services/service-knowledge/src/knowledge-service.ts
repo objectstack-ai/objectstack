@@ -1485,8 +1485,12 @@ export class KnowledgeService implements IKnowledgeService {
       // A source whose adapter is not mounted is named once at boot, at
       // `error`, by the boot's reading (`reportUnmountedAdapters`); the pass
       // adds no second line for it. On reload no reading runs, so the line
-      // below is the one that names it.
-      if (trigger === 'boot' && !this.adapters.has(entry.handed.adapter)) return;
+      // below is the one that names it. A source that names no adapter and
+      // cannot be placed is named by the same reading.
+      if (trigger === 'boot') {
+        const adapterId = this.boundAdapterId(entry.handed);
+        if (adapterId === undefined || !this.adapters.has(adapterId)) return;
+      }
       const reading = await this.readIndexStateOf(entry);
       if (reading.due) {
         logger?.info?.(`[knowledge] source '${entry.face}' is built now: ${reading.detail}`);
