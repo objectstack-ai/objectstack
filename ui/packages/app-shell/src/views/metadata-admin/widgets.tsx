@@ -54,9 +54,11 @@ import { toast } from 'sonner';
 import { useObjectTranslation } from '@object-ui/i18n';
 import { createAuthenticatedFetch } from '@object-ui/auth';
 import { useMetadataLocale, t, tFormat } from './i18n.js';
+import type { SupportedLocale } from './i18n.js';
 import { fieldHistoryChoiceOf, fieldHistoryOptions, fieldHistoryValueOf } from './fieldHistoryChoice.js';
 import { isKnownViewType, viewTypeLabel } from './viewTypeLabels.js';
 import type { FormFieldSpec, FormViewSpec, VisibilityPredicate } from './form-spec.js';
+import { positionsReached, type CapabilityAudience } from '../capabilityAudience.js';
 import { usePredicateScope } from '@object-ui/react';
 import { buildPredicateCtx, visibleOptions, type PredicateCtx } from './predicate.js';
 import { foldFilterGroupToSpecRules, FILTER_FOLD_REFUSAL_KEYS } from '../viewFilterFold.js';
@@ -75,6 +77,7 @@ import {
   isLoading,
   loadErrorOf,
   loadedData,
+  mapLoaded,
   NOT_ASKED,
   offeredOptions,
   usePickerLoad,
@@ -320,6 +323,22 @@ export interface WidgetContext {
    * does for a completed load that found no permission sets.
    */
   permissionSets?: LoadState<RegistryItemOption[]>;
+  /**
+   * The capabilities the environment knows, joined with the permission sets
+   * granting each and the positions holding them — fuels the
+   * `ref-multi:capability` picker of an audience gate (`requiredPermissions`
+   * on a list view or a dashboard). Absent reads as {@link NOT_ASKED}, unless
+   * {@link WidgetContext.loadCapabilityAudience} is given.
+   */
+  capabilityAudience?: LoadState<CapabilityAudience>;
+  /**
+   * Reads {@link WidgetContext.capabilityAudience} when it is not given: the
+   * `ref-multi:capability` picker calls it once it is on screen, so a host
+   * whose audience row sits in a closed section sends no request. Keep it
+   * stable (`useCapabilityAudienceLoader`), or the picker reads again on
+   * every render.
+   */
+  loadCapabilityAudience?: () => Promise<CapabilityAudience>;
 }
 
 /* Stable empties for the arms that have no catalog to offer yet — `idle` and
@@ -842,6 +861,18 @@ interface RefMultiRegistry {
   addPlaceholderKey: string;
   /** The add picker's placeholder once every declared item is picked. */
   allAddedKey: string;
+  /** What the picked names mean, drawn under the list (the capability picker's position preview). */
+  footer?: (selected: readonly string[], context: WidgetContext | undefined, locale: SupportedLocale) => React.ReactNode;
+  /** A second line under an offered item (the capability picker: the permission sets granting it). */
+  detail?: (name: string, context: WidgetContext | undefined, locale: SupportedLocale) => string | undefined;
+  /**
+   * A CLOSED list (objectstack#34908): no typed-name box on any arm. A catalog
+   * nobody fed says `unreadKey`, a completed read that found nothing says
+   * `noneKey`, a failed read shows only the failure notice — so a name that
+   * matches nothing can never be added. Names already stored stay listed and
+   * removable on every arm.
+   */
+  closed?: { unreadKey: string; noneKey: string };
 }
 
 /**
@@ -859,6 +890,11 @@ interface RefMultiRegistry {
  *    a text box that adds the typed names. ⛔ Never the raw-JSON face an
  *    unregistered hint falls back to;
  *  - LOADED — an add picker offering the declared items not yet picked.
+ *
+ * A registry declared `closed` (the capability picker, objectstack#34908)
+ * offers no text box on any arm: FAILED shows only its notice, `idle` and an
+ * empty load each say why nothing can be added, LOADING shows a disabled
+ * picker.
  *
  * A stored name the LOADED catalog does not declare stays in the list, flagged
  * `(not found)`, so it is neither dropped nor read as a declared item
@@ -977,17 +1013,39 @@ function RefMultiWidget({
             <SelectContent>
               {remaining.map((o) => (
                 <SelectItem key={o.name} value={o.name}>
-                  <span className="flex items-center gap-2">
-                    {o.label && o.label !== o.name && <span>{o.label}</span>}
-                    <code className="text-xs text-muted-foreground">{o.name}</code>
+                  <span className="flex flex-col">
+                    <span className="flex items-center gap-2">
+                      {o.label && o.label !== o.name && <span>{o.label}</span>}
+                      <code className="text-xs text-muted-foreground">{o.name}</code>
+                    </span>
+                    {registry.detail?.(o.name, context, locale) && (
+                      <span className="text-[11px] text-muted-foreground" data-testid={`${testId}-detail`}>
+                        {registry.detail(o.name, context, locale)}
+                      </span>
+                    )}
                   </span>
                 </SelectItem>
               ))}
             </SelectContent>
           </Select>
+        ) : registry.closed ? (
+          // A closed list offers no typed-name box: say why nothing can be
+          // added (a failed read already shows its notice above).
+          loadError ? null : loading ? (
+            <Select value="" disabled>
+              <SelectTrigger data-testid={`${testId}-add`} aria-label={addLabel}>
+                <SelectValue placeholder={t('engine.form.loadingOptions', locale)} />
+              </SelectTrigger>
+            </Select>
+          ) : (
+            <p className="text-xs text-muted-foreground" data-testid={`${testId}-closed`}>
+              {t(declared ? registry.closed.noneKey : registry.closed.unreadKey, locale)}
+            </p>
+          )
         ) : (
           freeform
         ))}
+      {registry.footer?.(selected, context, locale)}
     </div>
   );
 }
@@ -1003,6 +1061,86 @@ const PERMISSION_REGISTRY: RefMultiRegistry = {
 
 function RefMultiPermissionWidget(props: WidgetProps) {
   return <RefMultiWidget {...props} registry={PERMISSION_REGISTRY} />;
+}
+
+/**
+ * Who an audience gate lets in through a position: the positions whose
+ * permission sets grant every picked capability, read off the same catalog
+ * the picker offers. Advisory — the server's read gate is the authority.
+ */
+function CapabilityAudienceFooter({
+  selected,
+  context,
+  locale,
+}: {
+  selected: readonly string[];
+  context: WidgetContext | undefined;
+  locale: SupportedLocale;
+}) {
+  const state = context?.capabilityAudience ?? NOT_ASKED;
+  if (state.status !== 'loaded') return null;
+  const positions = state.data.positions;
+  let text: string;
+  if (selected.length === 0) text = t('engine.form.audienceEveryone', locale);
+  else if (positions === null) text = t('engine.form.audiencePositionsUnread', locale);
+  else {
+    const reached = positionsReached(selected, positions) ?? [];
+    text = reached.length === 0
+      ? t('engine.form.audienceNoPosition', locale)
+      : tFormat('engine.form.audiencePositions', locale, { positions: reached.map((p) => p.label ?? p.name).join(', ') });
+  }
+  return (
+    <p className="text-xs text-muted-foreground" data-testid="ref-multi-capability-audience">
+      {text}
+    </p>
+  );
+}
+
+/**
+ * The `ref-multi:capability` registration: the capabilities the environment
+ * knows (declared, or granted by a permission set), each offered with the
+ * permission sets granting it, and the positions the picked set reaches. The
+ * list is CLOSED: no arm offers a typed-name box, so a gate cannot name a
+ * capability nothing declares or grants (objectstack#34908).
+ */
+const CAPABILITY_REGISTRY: RefMultiRegistry = {
+  type: 'capability',
+  closed: { unreadKey: 'engine.form.capabilitiesUnread', noneKey: 'engine.form.capabilitiesNone' },
+  detail: (name, context, locale) => {
+    const state = context?.capabilityAudience;
+    if (state?.status !== 'loaded') return undefined;
+    const sets = state.data.capabilities.find((c) => c.name === name)?.grantedBy ?? [];
+    return sets.length > 0 ? tFormat('engine.form.capabilityGrantedBy', locale, { sets: sets.join(', ') }) : undefined;
+  },
+  catalog: (context) =>
+    context?.capabilityAudience
+      ? mapLoaded(context.capabilityAudience, (audience) =>
+          audience.capabilities.map((c) => ({ name: c.name, label: c.label })),
+        )
+      : undefined,
+  addLabelKey: 'engine.form.addCapabilityPlain',
+  addPlaceholderKey: 'engine.form.addCapability',
+  allAddedKey: 'engine.form.allCapabilitiesAdded',
+  footer: (selected, context, locale) => (
+    <CapabilityAudienceFooter selected={selected} context={context} locale={locale} />
+  ),
+};
+
+function RefMultiCapabilityWidget(props: WidgetProps) {
+  const { context } = props;
+  // The host hands down a loader, not a catalog: read it here, once the row is
+  // on screen. A catalog the host already holds wins.
+  const read = usePickerLoad<CapabilityAudience>(
+    context?.capabilityAudience ? null : context?.loadCapabilityAudience ?? null,
+  );
+  const effective = React.useMemo<WidgetContext | undefined>(
+    () =>
+      context?.capabilityAudience || !context?.loadCapabilityAudience
+        ? context
+        : { ...context, capabilityAudience: read },
+    [context, read],
+  );
+  return <RefMultiWidget {...props} context={effective} registry={CAPABILITY_REGISTRY} />;
 }
 
 /* -------------------------------------------------------------------------- */
@@ -3665,6 +3803,7 @@ export const WIDGETS = {
   'ref:component': RefComponentWidget,
   'ref:dataset': RefDatasetWidget,
   'ref-multi:permission': RefMultiPermissionWidget,
+  'ref-multi:capability': RefMultiCapabilityWidget,
   'filter-mode': FilterModeWidget,
   'object-selector': ObjectSelectorWidget,
   'field-selector': FieldSelectorWidget,
@@ -3779,6 +3918,7 @@ export const WIDGET_LABELLING: Record<RegisteredWidgetKey, WidgetLabelling> = {
   'ref:component': 'control',
   'ref:dataset': 'control',
   'ref-multi:permission': 'group',
+  'ref-multi:capability': 'group',
   'filter-mode': 'group',
   'object-selector': 'control',
   'field-selector': 'control',

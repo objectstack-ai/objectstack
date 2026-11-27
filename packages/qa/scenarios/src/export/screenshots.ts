@@ -47,6 +47,7 @@ import { scenarioNamespace } from '../schema.js';
 import type { AppHarness } from '../runner/app.js';
 import { namespacedScenario } from '../runner/namespace.js';
 import { seedApp, type BootedApp, type RunHalf } from '../runner/orchestrate.js';
+import { rollupFields } from '../runner/seed.js';
 import type { ShotKind } from './manifest.js';
 
 /** Where `objectstack dev` serves the Console. */
@@ -233,7 +234,7 @@ export async function captureScreenshots(input: CaptureInput, deps: CaptureDeps)
   try {
     const app = deps.harness(booted.url);
     await app.signInAdmin();
-    const seed = await seedApp(namespacedScenario(input.scenario), app, []);
+    const seed = await seedApp(namespacedScenario(input.scenario), app, [], undefined, undefined, rollupFields(input.artifact));
     const refused = new Set(seed.refused.map((r) => `${r.object}/${r.id}`));
     const shots: PlannedShot[] = [];
     const skipped = [...plan.skipped];

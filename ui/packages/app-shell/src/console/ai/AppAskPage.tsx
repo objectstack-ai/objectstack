@@ -17,6 +17,12 @@
  * conversation that is not the caller's, or not this app's, opens the home
  * state: no error, and nothing of it is shown.
  *
+ * Below the question box the home state lists this app's recent
+ * conversations: of the caller's newest list page, those this page created
+ * for this package (`metadata.activePackageId`), the newest few
+ * (`recentAskPageConversations`). A drawer thread is never one of them. Opening one
+ * writes its `?c=`, so it is restored the way a reload restores it.
+ *
  * The page is the one ask conversation on its screen: while it is the active
  * route the console's drawer stays closed and its triggers are hidden or inert
  * (`useConsoleChatDock`'s `askPageActive`). A build hand-off from here still
@@ -28,10 +34,10 @@
 
 import * as React from 'react';
 import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
-import { ArrowUp, Plus, Sparkles } from 'lucide-react';
+import { ArrowUp, MessageSquare, Plus, Sparkles } from 'lucide-react';
 import { useAuth } from '@object-ui/auth';
 import { Badge, Button, Textarea, cn } from '@object-ui/components';
-import { useObjectTranslation } from '@object-ui/i18n';
+import { useDisplayLocale, useObjectTranslation } from '@object-ui/i18n';
 import { resolveNavItemLabel } from '@object-ui/layout';
 import type { NavigationItem } from '@object-ui/types';
 import { resolveAgentParam, useAgents } from '@object-ui/plugin-chatbot/core';
@@ -40,15 +46,19 @@ import { AiUnavailable } from './AiUnavailable.js';
 import { resolveApiBase } from './resolveApiBase.js';
 import {
   ASK_CONVERSATION_PARAM,
+  ASK_RECENT_FETCH_LIMIT,
   askPageConversationScope,
   askPageCreateMetadata,
   conversationBelongsToAskPage,
   findAiChatNavEntry,
   readAiChatPageCopy,
+  recentAskPageConversations,
 } from './appAskPageModel.js';
 import { useChatConversation, type HydratedUIMessage } from '../../hooks/useChatConversation.js';
 import { fetchConversation } from '../../hooks/useChatConversation.js';
 import { useAiSurfaceEnabled } from '../../hooks/useAiSurface.js';
+import { useConversationList } from '../../hooks/useConversationList.js';
+import { timeAgo } from '../../utils/relativeTime.js';
 import { useHomePath } from '../../hooks/useHomePath.js';
 import { useMetadata } from '../../providers/MetadataProvider.js';
 import { useNavigationContext } from '../../context/NavigationContext.js';
@@ -205,6 +215,18 @@ export function AppAskPage() {
       },
     );
   }, [setSearchParams]);
+  // A recent conversation opens through its `?c=`: the restore path above
+  // judges it like any other address.
+  const openRecent = React.useCallback(
+    (id: string) => {
+      setSearchParams((prev) => {
+        const next = new URLSearchParams(prev);
+        next.set(ASK_CONVERSATION_PARAM, id);
+        return next;
+      });
+    },
+    [setSearchParams],
+  );
 
   // ── What the page draws ─────────────────────────────────────────────────
   const restoring = Boolean(checking) || (Boolean(activeId) && !started && conversationLoading);
@@ -257,6 +279,11 @@ export function AppAskPage() {
         scopeLabel={t('console.ai.askPage.scopeBadge', { defaultValue: 'Answers prefer this app' })}
         sendLabel={t('console.ai.submit', { defaultValue: 'Submit' })}
         onAsk={ask}
+        recent={
+          packageId && userId ? (
+            <RecentAskConversations userId={userId} apiBase={apiBase} packageId={packageId} onOpen={openRecent} />
+          ) : null
+        }
       />
     );
   }
@@ -291,10 +318,12 @@ interface AskHomeProps {
   scopeLabel: string;
   sendLabel: string;
   onAsk: (text: string) => void;
+  /** The recent-conversations section, drawn below the suggestions. */
+  recent?: React.ReactNode;
 }
 
 /** The home state: the welcome, the large question box and the suggested questions. */
-function AskHome({ title, subtitle, placeholder, suggestions, scopeLabel, sendLabel, onAsk }: AskHomeProps) {
+function AskHome({ title, subtitle, placeholder, suggestions, scopeLabel, sendLabel, onAsk, recent }: AskHomeProps) {
   const [text, setText] = React.useState('');
   const submit = () => {
     if (text.trim()) onAsk(text);
@@ -362,8 +391,67 @@ function AskHome({ title, subtitle, placeholder, suggestions, scopeLabel, sendLa
             ))}
           </div>
         ) : null}
+        {recent}
       </div>
     </div>
+  );
+}
+
+interface RecentAskConversationsProps {
+  userId: string;
+  apiBase: string;
+  packageId: string;
+  onOpen: (id: string) => void;
+}
+
+/**
+ * This app's recent conversations on the home state, newest first, each with
+ * its title and when it was last active; an empty state when there are none.
+ * Mounted with the home state, so each return to it reads the list afresh.
+ */
+function RecentAskConversations({ userId, apiBase, packageId, onOpen }: RecentAskConversationsProps) {
+  const { t } = useObjectTranslation();
+  const displayLocale = useDisplayLocale();
+  const { conversations, isLoading, error } = useConversationList({ userId, apiBase, limit: ASK_RECENT_FETCH_LIMIT });
+  const recent = React.useMemo(() => recentAskPageConversations(conversations, packageId), [conversations, packageId]);
+  // A list that has not answered, or failed, draws nothing: never an empty state it cannot vouch for.
+  if (isLoading || error) return null;
+  return (
+    <section className="flex w-full flex-col gap-2" data-testid="app-ask-recent" aria-label={t('console.ai.askPage.recentTitle', { defaultValue: 'Recent conversations' })}>
+      <h2 className="px-1 text-sm font-medium text-muted-foreground">
+        {t('console.ai.askPage.recentTitle', { defaultValue: 'Recent conversations' })}
+      </h2>
+      {recent.length === 0 ? (
+        <p className="px-1 text-sm text-muted-foreground" data-testid="app-ask-recent-empty">
+          {t('console.ai.askPage.recentEmpty', { defaultValue: 'Questions you ask here will appear here.' })}
+        </p>
+      ) : (
+        <ul className="flex flex-col divide-y rounded-xl border" data-testid="app-ask-recent-list">
+          {recent.map((conversation) => {
+            const label =
+              conversation.title?.trim() ||
+              conversation.preview?.trim() ||
+              t('console.ai.newConversation', { defaultValue: 'New conversation' });
+            const when = timeAgo(conversation.updatedAt ?? conversation.createdAt, displayLocale);
+            return (
+              <li key={conversation.id}>
+                <button
+                  type="button"
+                  className="flex w-full items-center gap-3 px-3 py-2 text-left text-sm hover:bg-muted/50 focus-visible:bg-muted/50 focus-visible:outline-none"
+                  onClick={() => onOpen(conversation.id)}
+                  data-testid="app-ask-recent-item"
+                  data-conversation={conversation.id}
+                >
+                  <MessageSquare className="h-4 w-4 shrink-0 text-muted-foreground" aria-hidden="true" />
+                  <span className="min-w-0 flex-1 truncate">{label}</span>
+                  {when ? <span className="shrink-0 text-xs text-muted-foreground">{when}</span> : null}
+                </button>
+              </li>
+            );
+          })}
+        </ul>
+      )}
+    </section>
   );
 }
 

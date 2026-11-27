@@ -43,6 +43,17 @@
  * (objectstack#36538, review N9), since the save could put such an entry
  * nowhere but the end of the stored menu.
  *
+ * The picker's 「AI inquiry」 (objectstack#37832) adds the app's AI inquiry
+ * page, an `ai:chat` component entry (ui ADR-0057 Amendment A4). Like a link
+ * it lists nothing: a small form takes the entry's name and the page's copy,
+ * judged by `AiChatNavParamsSchema` as typed (`aiChatParamsOf`). An app has at
+ * most one, so the kind is not offered once the app has one (`aiChatOffered`).
+ * That entry's 「⋮」 edits the copy again, and 「Set as home」 moves it to the
+ * first place of the top level, and writes no `landing`. The home follows the
+ * app's landing rule (ui ADR-0057 Amendment A4): a declared `landing` comes
+ * first; with none, from 768 px up the first entry shown lands; below 768 px
+ * the app root is the app's menu, where the entry is its first row.
+ *
  * In the picker's 「Dashboards」, the first row is 「New dashboard…」
  * (objectstack#36364): it asks for a name, and on 「Create」 the dashboard is
  * created, empty, where the menu is saved, its entry takes the dashed row's
@@ -104,6 +115,7 @@ import {
   MoreVertical,
   Plus,
   Search,
+  Sparkles,
   Table2,
   BarChart3,
   Database,
@@ -125,6 +137,7 @@ import {
   DropdownMenuTrigger,
   Input,
   Label,
+  Textarea,
   SidebarGroup,
   SidebarGroupContent,
   SidebarGroupLabel,
@@ -154,12 +167,18 @@ import {
 import { useDesignModeChange, useDesignModeOpening } from './designMode.js';
 import {
   MENU_TARGET_KINDS,
+  aiChatFormOf,
+  aiChatOffered,
+  aiChatParamsOf,
+  asHome,
+  canBeHome,
   canMoveBy,
   entryFor,
   entryOf,
   groupsOf,
   inShownOrder,
   insertEntry,
+  isAiChatEntry,
   isGroup,
   menuTargets,
   moveBy,
@@ -175,9 +194,12 @@ import {
   withOwnBeforeForeignRuns,
   type Menu,
   labelGoesToTranslation,
+  type AiChatForm,
+  type AiChatFormIssue,
   type MenuEntry,
   type MenuTargetKind,
 } from './designModeMenuModel.js';
+import type { AiChatNavParams } from '@objectstack/spec/ui';
 import {
   consoleAppMenuDoors,
   fetchDeploymentLocales,
@@ -293,6 +315,8 @@ export default function DesignModeMenu({ app, basePath, resolveTargetLabel, reso
 
   const [addAt, setAddAt] = React.useState<AddAt | null>(null);
   const [renaming, setRenaming] = React.useState<string | null>(null);
+  /** The AI inquiry page entry whose copy is being edited (objectstack#37832). */
+  const [editingCopy, setEditingCopy] = React.useState<string | null>(null);
 
   // The stored menu and the deployment's languages, for where a rename lands
   // (objectstack#36504); both `undefined` while read.
@@ -565,6 +589,15 @@ export default function DesignModeMenu({ app, basePath, resolveTargetLabel, reso
             onAddAfter={() => place && startAdd({ parentId: place.parentId, index: place.index + 1 })}
             onRename={() => setRenaming(id)}
             onRemove={() => update(removeEntry(menu, id))}
+            aiChat={
+              isAiChatEntry(entry)
+                ? {
+                    canBeHome: canBeHome(menu, id),
+                    onEditCopy: () => setEditingCopy(id),
+                    onSetHome: () => update(asHome(menu, id)),
+                  }
+                : undefined
+            }
           />
         }
       />
@@ -611,6 +644,7 @@ export default function DesignModeMenu({ app, basePath, resolveTargetLabel, reso
   };
 
   const renamed = renaming ? entryOf(menu, renaming) : null;
+  const copyEdited = editingCopy ? entryOf(menu, editingCopy) : null;
   /**
    * The language a name typed for the entry `id` is a translation in, or
    * `null` when it is the stored label (objectstack#36504): the save's own
@@ -653,11 +687,24 @@ export default function DesignModeMenu({ app, basePath, resolveTargetLabel, reso
         <MenuItemPicker
           packageId={packageId}
           inMenu={menuTargets(menu)}
+          aiChatOffered={aiChatOffered(menu, served, storedMenu)}
           initialKind={pickerKind}
           onClose={closePicker}
-          onPick={(kind, name, link) => pick(entryFor(kind, name, newEntryId([...menu, ...(storedMenu ?? [])]), link))}
+          onPick={(kind, name, link, params) =>
+            pick(entryFor(kind, name, newEntryId([...menu, ...(storedMenu ?? [])]), link, params))
+          }
           onCreate={createItem}
           language={language}
+        />
+      )}
+      {copyEdited && (
+        <AiChatCopyDialog
+          params={copyEdited.params}
+          onClose={() => setEditingCopy(null)}
+          onDone={(params) => {
+            update(patchEntry(menu, String(copyEdited.id), { params }));
+            setEditingCopy(null);
+          }}
         />
       )}
       {renamed && (
@@ -791,6 +838,7 @@ function EntryActions({
   onAddAfter,
   onRename,
   onRemove,
+  aiChat,
 }: {
   label: string;
   /** Another package's entry: only adding beside it is open. */
@@ -808,6 +856,8 @@ function EntryActions({
   onAddAfter: () => void;
   onRename: () => void;
   onRemove: () => void;
+  /** The AI inquiry page entry's own actions (objectstack#37832); absent for every other entry. */
+  aiChat?: { canBeHome: boolean; onEditCopy: () => void; onSetHome: () => void };
 }) {
   const { t } = useObjectTranslation();
   return (
@@ -863,6 +913,16 @@ function EntryActions({
         <DropdownMenuItem disabled={fixed} onSelect={onRename}>
           {t('designMode.menu.rename', { defaultValue: 'Rename and icon' })}
         </DropdownMenuItem>
+        {aiChat && (
+          <>
+            <DropdownMenuItem disabled={fixed} onSelect={aiChat.onEditCopy}>
+              {t('designMode.menu.aiChatEdit', { defaultValue: 'Edit inquiry page' })}
+            </DropdownMenuItem>
+            <DropdownMenuItem disabled={fixed || !aiChat.canBeHome} onSelect={aiChat.onSetHome}>
+              {t('designMode.menu.setAsHome', { defaultValue: 'Set as home' })}
+            </DropdownMenuItem>
+          </>
+        )}
         <DropdownMenuSeparator />
         <DropdownMenuItem disabled={fixed} onSelect={onRemove} className="text-destructive focus:text-destructive">
           {t('designMode.menu.remove', { defaultValue: 'Remove from menu' })}
@@ -872,8 +932,8 @@ function EntryActions({
   );
 }
 
-/** The metadata type each picked kind lists (a link lists nothing). */
-const KIND_METADATA: Record<Exclude<MenuTargetKind, 'url'>, string> = {
+/** The metadata type each picked kind lists (a link and the AI inquiry page list nothing). */
+const KIND_METADATA: Record<Exclude<MenuTargetKind, 'url' | 'aiChat'>, string> = {
   object: 'object',
   view: 'view',
   dashboard: 'dashboard',
@@ -888,6 +948,7 @@ const KIND_ICON: Record<MenuTargetKind, React.ComponentType<{ className?: string
   report: BarChart3,
   page: FileText,
   url: Link2,
+  aiChat: Sparkles,
 };
 
 interface TargetRow {
@@ -915,7 +976,7 @@ function useTargetRows(packageId: string, language: string): { rows: TargetRow[]
         /* the base's rows alone */
       }
       const rows: TargetRow[] = [];
-      for (const kind of Object.keys(KIND_METADATA) as Array<Exclude<MenuTargetKind, 'url'>>) {
+      for (const kind of Object.keys(KIND_METADATA) as Array<keyof typeof KIND_METADATA>) {
         const seen = new Set<string>();
         for (const pkg of packages) {
           let listed: Array<Record<string, unknown>>;
@@ -947,6 +1008,7 @@ function useTargetRows(packageId: string, language: string): { rows: TargetRow[]
 function MenuItemPicker({
   packageId,
   inMenu,
+  aiChatOffered: aiChatOpen,
   initialKind = null,
   onClose,
   onPick,
@@ -955,10 +1017,12 @@ function MenuItemPicker({
 }: {
   packageId: string;
   inMenu: ReadonlySet<string>;
+  /** Whether 「AI inquiry」 is offered: the app has no AI inquiry page yet (objectstack#37832). */
+  aiChatOffered: boolean;
   /** The kind the picker opens on (objectstack#36907); `null`: the list of kinds. */
   initialKind?: MenuTargetKind | null;
   onClose: () => void;
-  onPick: (kind: MenuTargetKind, name: string, link?: { label: string; url: string }) => void;
+  onPick: (kind: MenuTargetKind, name: string, link?: { label: string; url: string }, params?: AiChatNavParams) => void;
   /** Create a new `kind` named `label`; `taken` is every name of that kind the picker lists. */
   onCreate: (kind: NewMenuItemKind, label: string, taken: readonly string[]) => Promise<boolean>;
   language: string;
@@ -993,6 +1057,7 @@ function MenuItemPicker({
     report: t('designMode.menu.kind.report', { defaultValue: 'Reports' }),
     page: t('designMode.menu.kind.page', { defaultValue: 'Pages' }),
     url: t('designMode.menu.kind.url', { defaultValue: 'Link' }),
+    aiChat: t('designMode.menu.kind.aiChat', { defaultValue: 'AI inquiry' }),
   };
   const kindText = (k: MenuTargetKind) => kindTexts[k];
   const q = query.trim().toLowerCase();
@@ -1009,7 +1074,7 @@ function MenuItemPicker({
         <DialogHeader>
           <DialogTitle>{title}</DialogTitle>
         </DialogHeader>
-        {kind !== 'url' && (
+        {kind !== 'url' && kind !== 'aiChat' && (
           <div className="relative">
             <Search className="pointer-events-none absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" aria-hidden="true" />
             <Input
@@ -1029,7 +1094,14 @@ function MenuItemPicker({
             {kindText(kind)}
           </Button>
         )}
-        {kind === 'url' ? (
+        {kind === 'aiChat' ? (
+          <AiChatCopyForm
+            withName
+            initial={aiChatFormOf(undefined)}
+            submitText={t('designMode.menu.add', { defaultValue: 'Add' })}
+            onSubmit={(name, params) => onPick('aiChat', name, undefined, params)}
+          />
+        ) : kind === 'url' ? (
           <form
             className="flex flex-col gap-3"
             onSubmit={(e) => {
@@ -1053,7 +1125,7 @@ function MenuItemPicker({
           </form>
         ) : kind === null && !q ? (
           <ul className="flex flex-col" data-testid="design-menu-picker-kinds">
-            {MENU_TARGET_KINDS.map((k) => {
+            {MENU_TARGET_KINDS.filter((k) => k !== 'aiChat' || aiChatOpen).map((k) => {
               const Icon = KIND_ICON[k];
               return (
                 <li key={k}>
@@ -1281,3 +1353,131 @@ function RenameDialog({
   );
 }
 
+
+/**
+ * The AI inquiry page's form (objectstack#37832): with `withName`, the menu
+ * entry's name first; then the page's heading, subtitle, question-box hint and
+ * suggested questions (one per line). A field left empty draws the page's
+ * default. What `AiChatNavParamsSchema` refuses is said under its field, and
+ * the form cannot be sent until it is mended (`aiChatParamsOf`).
+ */
+function AiChatCopyForm({
+  withName = false,
+  initial,
+  submitText,
+  onSubmit,
+}: {
+  withName?: boolean;
+  initial: AiChatForm;
+  submitText: string;
+  onSubmit: (name: string, params: AiChatNavParams | undefined) => void;
+}) {
+  const { t } = useObjectTranslation();
+  const [name, setName] = React.useState(() => (withName ? t('designMode.menu.aiChatName', { defaultValue: 'Ask AI' }) : ''));
+  const [form, setForm] = React.useState<AiChatForm>(initial);
+  const verdict = aiChatParamsOf(form);
+  const issueText = (issue: AiChatFormIssue): string => {
+    if (issue.code === 'too_big' && issue.maximum !== undefined) {
+      return issue.origin === 'array'
+        ? t('designMode.menu.aiChatTooMany', { defaultValue: 'At most {{max}} questions.', max: issue.maximum })
+        : t('designMode.menu.aiChatTooLong', { defaultValue: 'At most {{max}} characters.', max: issue.maximum });
+    }
+    return issue.message;
+  };
+  const issuesOf = (field: keyof AiChatForm): string[] =>
+    verdict.ok ? [] : [...new Set(verdict.issues.filter((issue) => issue.field === field).map(issueText))];
+  const field = (key: keyof AiChatForm, label: string, multiline = false, hint?: string) => {
+    const id = `design-menu-ai-chat-${key}`;
+    const issues = issuesOf(key);
+    const describedBy = [hint ? `${id}-hint` : '', issues.length > 0 ? `${id}-issue` : ''].filter(Boolean).join(' ') || undefined;
+    const props = {
+      id,
+      value: form[key],
+      'aria-invalid': issues.length > 0 || undefined,
+      'aria-describedby': describedBy,
+      'data-testid': id,
+    };
+    return (
+      <div className="flex flex-col gap-1.5">
+        <Label htmlFor={id}>{label}</Label>
+        {multiline ? (
+          <Textarea {...props} rows={4} onChange={(e) => setForm({ ...form, [key]: e.target.value })} />
+        ) : (
+          <Input {...props} onChange={(e) => setForm({ ...form, [key]: e.target.value })} />
+        )}
+        {hint && (
+          <p id={`${id}-hint`} className="text-xs text-muted-foreground">
+            {hint}
+          </p>
+        )}
+        {issues.length > 0 && (
+          <p id={`${id}-issue`} className="text-xs text-destructive" data-testid={`${id}-issue`}>
+            {issues.join(' ')}
+          </p>
+        )}
+      </div>
+    );
+  };
+  const canSend = verdict.ok && (!withName || name.trim() !== '');
+  return (
+    <form
+      className="flex flex-col gap-3"
+      data-testid="design-menu-ai-chat-form"
+      onSubmit={(e) => {
+        e.preventDefault();
+        if (verdict.ok && canSend) onSubmit(name.trim(), verdict.params);
+      }}
+    >
+      {withName && (
+        <div className="flex flex-col gap-1.5">
+          <Label htmlFor="design-menu-ai-chat-name">{t('designMode.menu.name', { defaultValue: 'Name' })}</Label>
+          <Input id="design-menu-ai-chat-name" value={name} onChange={(e) => setName(e.target.value)} />
+        </div>
+      )}
+      <p className="text-xs text-muted-foreground">
+        {t('designMode.menu.aiChatDefaults', { defaultValue: "Leave a field empty to show the page's default." })}
+      </p>
+      {field('title', t('designMode.menu.aiChatTitle', { defaultValue: 'Heading' }))}
+      {field('subtitle', t('designMode.menu.aiChatSubtitle', { defaultValue: 'Subtitle' }))}
+      {field('placeholder', t('designMode.menu.aiChatPlaceholder', { defaultValue: 'Question box hint' }))}
+      {field(
+        'suggestions',
+        t('designMode.menu.aiChatSuggestions', { defaultValue: 'Suggested questions' }),
+        true,
+        t('designMode.menu.aiChatSuggestionsHint', { defaultValue: 'One per line, at most 4.' }),
+      )}
+      <DialogFooter>
+        <Button type="submit" disabled={!canSend} data-testid="design-menu-ai-chat-submit">
+          {submitText}
+        </Button>
+      </DialogFooter>
+    </form>
+  );
+}
+
+/** The AI inquiry page's copy, edited again from its entry's 「⋮」 (objectstack#37832). */
+function AiChatCopyDialog({
+  params,
+  onClose,
+  onDone,
+}: {
+  params: unknown;
+  onClose: () => void;
+  onDone: (params: AiChatNavParams | undefined) => void;
+}) {
+  const { t } = useObjectTranslation();
+  return (
+    <Dialog open onOpenChange={(open) => !open && onClose()}>
+      <DialogContent className="sm:max-w-md" data-testid="design-menu-ai-chat-edit">
+        <DialogHeader>
+          <DialogTitle>{t('designMode.menu.aiChatEdit', { defaultValue: 'Edit inquiry page' })}</DialogTitle>
+        </DialogHeader>
+        <AiChatCopyForm
+          initial={aiChatFormOf(params)}
+          submitText={t('designMode.menu.done', { defaultValue: 'Done' })}
+          onSubmit={(_name, next) => onDone(next)}
+        />
+      </DialogContent>
+    </Dialog>
+  );
+}
