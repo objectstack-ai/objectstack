@@ -246,9 +246,16 @@ export function runOutsideOpenUnitsOnCommit<T>(
  * insert. A wake started inside the unit runs its read outside it (a tick must
  * not take the unit's handle), and on a pooled driver that read cannot see the
  * row until the unit commits, so the wake is sent at the commit instead. The
- * unit is the ambient one: a unit the `beginTransaction` trio opened is not
- * published there and does not hold the body back. Fire-and-forget: a throw
- * from `body` after the commit is the body's own, as with every queued run.
+ * unit is the ambient one, which includes a `beginTransaction` trio unit while
+ * an engine call carrying its handle runs (that call publishes the handle with
+ * the trio's queue); a call made outside one, holding the trio handle only
+ * explicitly, does not hold the body back. Errors: with no unit open, a throw
+ * from `body` reaches the caller; at the commit, a synchronous throw is
+ * swallowed with no log (`settleUnitCommitQueue`) and an `async` body's
+ * rejection is unhandled, so `body` handles its own failures. ⛔ Never route
+ * work there that must commit or roll back with the caller's unit: `body` runs
+ * after the commit, outside every unit, and nothing it does is atomic with the
+ * write it follows.
  */
 export function runAfterOpenUnitsCommit(
   txStore: Pick<AsyncLocalStorage<QueuedUnitEntry | undefined>, 'getStore' | 'exit'> | undefined,
