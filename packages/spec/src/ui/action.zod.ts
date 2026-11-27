@@ -835,7 +835,9 @@ const PAGE_PART_LOCATIONS_RETIRED: Readonly<Record<string, string>> = {
     + 'is also on each list row (`list_item` beside it).' + PAGE_PART_LOCATIONS_RETIRED_TAIL,
   record_more: '`record_more` became `record_page` in @objectstack/spec 19 — or `record`, when the action is '
     + 'also on each list row (`list_item` beside it). An action that was only in the record page\'s ⋯ menu '
-    + '(`record_more` without `record_header`) keeps that fold with `component: \'action:menu\'`.'
+    + '(`record_more` without `record_header`) keeps that fold with `component: \'action:menu\'`. A block '
+    + 'whose own `location` is `record_more` (a bar of the ⋯ menu\'s actions) has no replacement word: the ⋯ '
+    + 'menu is no location of its own now, and a bar at `record_page` leaves its actions out.'
     + PAGE_PART_LOCATIONS_RETIRED_TAIL,
 };
 
@@ -868,7 +870,8 @@ const PAGE_PART_LOCATIONS_RETIRED: Readonly<Record<string, string>> = {
  *                       Drawn only by an authored record page block that renders
  *                       it; the standard record page (a phone, the side preview,
  *                       and an object with no authored page) does not draw it, so
- *                       an action that must reach every surface adds `record_page`.
+ *                       an action that must reach every surface adds `record_page`
+ *                       (with `component: 'action:menu'` to sit in the ⋯ menu).
  *
  * Which of an object's record-page actions are buttons and which sit in the
  * page's ⋯ menu, and in what order, is the object's `actionLayout`; without
@@ -1462,7 +1465,7 @@ const actionObject = () => strictObject({
   icon: z.string().optional().describe('Icon name'),
 
   /** Where does this action appear? */
-  locations: z.array(ActionLocationSchema).optional().describe('Locations where this action is visible. `record_section` is drawn only by an authored record page block that renders it; the standard record page (on a phone, in the side preview, and for an object with no authored page) does not draw it, so an action that must reach every surface adds `record_page` as well. `list` acts on no record (the list page toolbar); `record` acts on one record, on the record page and on each list row; `record_page` and `record_row` are one of those two only.'),
+  locations: z.array(ActionLocationSchema).optional().describe('Locations where this action is visible. `record_section` is drawn only by an authored record page block that renders it; the standard record page (on a phone, in the side preview, and for an object with no authored page) does not draw it, so an action that must reach every surface adds `record_page` as well, with `component: \'action:menu\'` to sit in the record page\'s ⋯ menu rather than be a header button. `list` acts on no record (the list page toolbar); `record` acts on one record, on the record page and on each list row; `record_page` and `record_row` are one of those two only.'),
 
   /** 
    * Visual Component Type

@@ -30,11 +30,13 @@ feat(spec)!: an action's `locations` say what it acts on, not the part of the pa
 
 **BREAKING** (19.0.0): `ACTION_LOCATIONS` is `list`, `record`, `record_page`, `record_row`, `record_related`, `record_section`. The four words that named a part of a page are retired: `list_toolbar`, `list_item`, `record_header` and `record_more`. `record` is new: the action acts on one record, so it is drawn on the record page's header and in each list row's menu. Which actions are buttons and in what order stays the object's `actionLayout`.
 
-Clause-②: no (narrowing)
+Clause-②: yes (narrowing)
 Metadata-protocol: narrowed
 Skills-docs: follow-up #37895
 
 <!-- adr-0087: registered action-locations-acted-on -->
+
+A replacement with a registered conversion, so `yes (narrowing)` as on main's precedents (`.changeset/pre/37086-define-metadata-form-rename.md`, `.changeset/pre/37304-knowledge-source-governed-type.md`). Narrowed: the four retired words are refused wherever a location is read. Widened in the same change: the four newly accepted values `list`, `record`, `record_page` and `record_row` at the same positions; the new `@object-ui/types` export `actionFoldedIntoMenu`; and eight new `@object-ui/i18n` Studio keys for the location labels (en, zh), which replace the eight keys of the retired words.
 
 FROM → TO (each action is drawn in exactly the places it was drawn before):
 
@@ -45,7 +47,7 @@ FROM → TO (each action is drawn in exactly the places it was drawn before):
 - `locations: ['record_more']` without `record_header` (the action lived only in the record header's ⋯ menu) → `locations: ['record_page'], component: 'action:menu'`. The fold is the action's `component`, the key that already sends an action into an action bar's overflow menu.
 - A component's single `location` (`record:quick_actions`, `action:group`, `action:bar`): `list_toolbar` → `list`, `list_item` → `record_row`, `record_header` → `record_page`.
 
-An old word is refused at authoring with the word to write instead. `os migrate meta --from 18 --write` rewrites sources (ADR-0087 conversion `action-locations-acted-on`, retired from the load path from day one, as every protocol-19 entry). Stored items (`applyConversionsToStoredItem`, `os migrate meta --stored`) and built artifacts replay the same conversion. It leaves a TODO, and changes nothing, where no lossless rewrite exists: a `record_more`-only action also on `list_toolbar` (the list toolbar folds `action:menu` too), a component whose `location` is `record_more`, and an `action:group` at `record_header` with a `record_more`-only member. The protocol-19 upgrade guide carries the same step as the semantic entry `action-locations-page-parts-retired`.
+An old word is refused at authoring with the word to write instead. `os migrate meta --from 18 --write` rewrites sources (ADR-0087 conversion `action-locations-acted-on`, retired from the load path from day one, as every protocol-19 entry). Stored items (`applyConversionsToStoredItem`, `os migrate meta --stored`) and built artifacts replay the same conversion. It leaves a TODO, and changes nothing, where no lossless rewrite exists: a `record_more`-only action also on `list_toolbar` that does not already carry `component: 'action:menu'` (the list toolbar folds `action:menu` too); an action at `record_header` with an authored `component: 'action:menu'` (the record page header folded it into its ⋯ menu while a `record:quick_actions` bar at `record_header` drew it as a button, and `record_page` has one state for both); a component whose `location` is `record_more`; and an `action:group` at `record_header` with a `record_more`-only member. A site left as stored keeps its old word, which a protocol-19 runtime matches to no surface: that action or block is drawn nowhere until it is rewritten by hand. The protocol-19 upgrade guide carries the same step as the semantic entry `action-locations-page-parts-retired`.
 
 Also in this change:
 
@@ -55,6 +57,6 @@ Also in this change:
 - `@object-ui/core`, `@objectstack/runtime`: the record-scoped checks (`isRecordScopedAction`, `requiresRecord`) accept `record`.
 - `@objectstack/lint`: the record-page header, related-list and action-layout rules read the new words.
 - Studio: the action inspector, the `record:quick_actions` location dropdown and the action preview offer `record` and draw the fold as "record_page · ⋯".
-- `@objectstack/platform-objects`, the examples and every other package: declarations and prose rewritten to the new words. The packages listed as `patch` change comments, test fixtures or authoring copy only.
+- `@objectstack/platform-objects`, the examples and every other package: declarations and prose rewritten to the new words. The packages listed as `patch` change comments, test fixtures or authoring copy, except three that ship rewritten words: `@objectstack/plugin-approvals` and `@objectstack/service-datasource` (their declared actions' `locations`) and `@object-ui/layout` (a location literal it passes at runtime).
 
 Not moved: #37895 (the `skills/**` teaching of the new words; Blocked-by this change).

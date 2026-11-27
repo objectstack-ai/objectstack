@@ -53,7 +53,18 @@ import { ACTION_CONTAINER_BLOCK_TYPES, ACTION_RUNNER_BLOCK_TYPES, type Dict, isD
  * placed at `record_more` only and at `list_toolbar` has no lossless rewrite:
  * the fold would reach the toolbar too. It is left as stored and reported as a
  * structured TODO (ADR-0087 D3); the hand rewrite chooses between the fold on
- * both surfaces and none.
+ * both surfaces and none. When the action already carries `component:
+ * 'action:menu'` the toolbar folded it before, and the rewrite is lossless.
+ *
+ * The other reader of the component is the record page itself. Until 19 an
+ * action at `record_header` with `component: 'action:menu'` had two states:
+ * the header folded it into its ⋯ menu, and a `record:quick_actions` bar at
+ * `record_header` drew it as a button. At `record_page` the fold is one state
+ * for the whole record page, so that bar leaves it out. No rewrite keeps
+ * both: it is left as stored and reported as a TODO.
+ *
+ * Every action left as stored keeps an old word, which a protocol-19 reader
+ * matches to no surface: it is drawn nowhere until it is rewritten by hand.
  *
  * ## Page components
  *
@@ -115,7 +126,9 @@ function isMoreOnly(locations: readonly unknown[]): boolean {
 /**
  * One object action (top-level `actions[]` or `objects[].actions[]`). A
  * `record_more`-only action keeps its fold through `component`, unless it is
- * on the list toolbar too (a TODO, left as stored).
+ * on the list toolbar too without that component already (a TODO, left as
+ * stored). A `record_header` action with an authored `component:
+ * 'action:menu'` is a TODO too, left as stored.
  */
 function convertAction(
   action: Dict,
@@ -128,7 +141,21 @@ function convertAction(
   const next = rewriteLocations(locations);
   if (!next) return action;
   const moreOnly = isMoreOnly(locations);
-  if (moreOnly && locations.includes('list_toolbar')) {
+  if (locations.includes('record_header') && action.component === 'action:menu') {
+    context?.reportTodo?.({
+      path: `${path}.locations`,
+      from: JSON.stringify(locations),
+      reason:
+        'This action is placed at `record_header` with `component: \'action:menu\'`. Until 19 the record page '
+        + 'header folded it into its ⋯ menu while a `record:quick_actions` bar at `record_header` drew it as a '
+        + 'button. Protocol 19 has one state for both: at `record_page` an `action:menu` action is folded '
+        + 'everywhere on the record page, so that bar would leave it out. Left as stored; rewrite it by hand to '
+        + '`record_page` (`record` if it is on `list_item` too), with `component: \'action:menu\'` to keep the '
+        + 'fold and lose the bar button, or without it to draw a button in the header and the bar.',
+    });
+    return action;
+  }
+  if (moreOnly && locations.includes('list_toolbar') && action.component !== 'action:menu') {
     context?.reportTodo?.({
       path: `${path}.locations`,
       from: JSON.stringify(locations),
@@ -308,6 +335,25 @@ const actionLocationsActedOn: MetadataConversion = {
           type: 'script',
           locations: ['list_toolbar', 'record_more'],
         },
+        // ⋯-only and on the toolbar, already folded: the toolbar folded it too, so lossless.
+        {
+          name: 'export_all',
+          label: 'Export all',
+          objectName: 'crm_lead',
+          type: 'script',
+          component: 'action:menu',
+          locations: ['list_toolbar', 'record_more'],
+        },
+        // A header word with an authored fold: a header ⋯ item and a quick-actions button
+        // until 19, one state after it. No lossless rewrite, left as stored (a TODO).
+        {
+          name: 'print_lead',
+          label: 'Print',
+          objectName: 'crm_lead',
+          type: 'script',
+          component: 'action:menu',
+          locations: ['record_header'],
+        },
       ],
       objects: [{
         name: 'crm_account',
@@ -367,6 +413,22 @@ const actionLocationsActedOn: MetadataConversion = {
           type: 'script',
           locations: ['list_toolbar', 'record_more'],
         },
+        {
+          name: 'export_all',
+          label: 'Export all',
+          objectName: 'crm_lead',
+          type: 'script',
+          component: 'action:menu',
+          locations: ['list', 'record_page'],
+        },
+        {
+          name: 'print_lead',
+          label: 'Print',
+          objectName: 'crm_lead',
+          type: 'script',
+          component: 'action:menu',
+          locations: ['record_header'],
+        },
       ],
       objects: [{
         name: 'crm_account',
@@ -394,9 +456,10 @@ const actionLocationsActedOn: MetadataConversion = {
       }],
     },
     // Actions: import, quick view, convert, clone (+ its component), assign,
-    // archive (+ its component), merge = 9. Page: the header bar's location,
-    // the button's locations, the group's location and its member = 4.
-    expectedNotices: 13,
+    // archive (+ its component), export all (already folded), merge = 10.
+    // Page: the header bar's location, the button's locations, the group's
+    // location and its member = 4.
+    expectedNotices: 14,
   },
 };
 

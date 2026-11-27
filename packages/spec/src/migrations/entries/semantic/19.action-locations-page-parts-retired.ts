@@ -4,9 +4,10 @@ import type { SemanticMigration } from '../../types.js';
 
 // #36495 — maintainer rulings 7213534162 and 7213827153 — the D3 entry of the
 // action-location vocabulary move. The data half is mechanical (the D2
-// conversion `action-locations-acted-on` rewrites every location losslessly);
-// what it cannot do is the two sites it leaves as stored, and code: a plugin or
-// a hand-written page that compares a location to an old word.
+// conversion `action-locations-acted-on` rewrites every location it can
+// rewrite losslessly); what it cannot do is the four sites it leaves as stored,
+// and code: a plugin or a hand-written page that compares a location to an old
+// word.
 export const entry: SemanticMigration = {
   id: 'action-locations-page-parts-retired',
   surface: 'action.locations / page component location — `list_toolbar`, `list_item`, `record_header` and '
@@ -21,9 +22,14 @@ export const entry: SemanticMigration = {
     'With the object\'s `actionLayout` deciding which actions are buttons and in what order, a location only '
     + 'says what the action acts on. The D2 conversion `action-locations-acted-on` maps every old word to its new '
     + 'one, in a source the migration edits and in a stored row it reads, and every action is drawn where it '
-    + 'was drawn before. It leaves three sites as stored, each with a TODO: an action in the ⋯ menu only that is on the list toolbar too (the fold would reach the toolbar), '
-    + 'a block whose own `location` is `record_more`, and an `action:group` at `record_header` with a ⋯-only '
-    + 'member (the ⋯ menu has no location of its own now). Code is the other part no conversion reaches: a '
+    + 'was drawn before. It leaves four sites as stored, each with a TODO: an action in the ⋯ menu only that '
+    + 'is on the list toolbar too without `component: \'action:menu\'` (the fold would reach the toolbar), an '
+    + 'action at `record_header` with an authored `component: \'action:menu\'` (the header folded it while a '
+    + '`record:quick_actions` bar drew it as a button, and `record_page` has one state for both), a block whose '
+    + 'own `location` is `record_more`, and an `action:group` at `record_header` with a ⋯-only member (the ⋯ '
+    + 'menu has no location of its own now). A site left as stored keeps its old word, which a protocol-19 '
+    + 'runtime matches to no surface: that action or block draws nothing until it is rewritten by hand. Code '
+    + 'is the other part no conversion reaches: a '
     + 'plugin or a hand-written component that compares a location to an old word no longer matches anything, '
     + 'silently',
   acceptanceCriteria:
