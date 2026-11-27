@@ -4,6 +4,7 @@ import { createHash } from 'node:crypto';
 import type {
   AdapterContext,
   AdapterIndexExpectation,
+  AdapterIndexStatus,
   AdapterScopeTerm,
   IDataEngine,
   IKnowledgeAdapter,
@@ -44,6 +45,7 @@ import {
 import {
   admitObject,
   admitSourceFields,
+  mayServeEarlierRuleTitle,
   declaredFields,
   documentTitleField,
   type KnowledgeAdmissionDeps,
@@ -1553,12 +1555,13 @@ export class KnowledgeService implements IKnowledgeService {
     }
     const byRecord = opts.granularity === 'record' || groupBy !== undefined;
     const ctx = opts.executionContext;
-    let admitted: Array<{ source: KnowledgeSource; organizationIds?: string[]; scope?: AdapterScopeTerm[] }> =
+    let admitted: Array<AdmittedSource & { scope?: AdapterScopeTerm[] }> =
       await this.admitSources(this.resolveSearchTargets(opts.sourceIds), ctx);
     if (scope !== undefined) admitted = this.sourcesInScope(admitted, scope);
     if (groupBy !== undefined) admitted = this.sourcesGroupableBy(admitted, groupBy);
     if (admitted.length === 0) return { hits: [], refused: [] };
-    const sources = await this.planSearches(admitted);
+    const refused: KnowledgeSearchRefusal[] = [];
+    const sources = await this.planSearches(admitted, refused);
 
     const filtered = ctx !== undefined && ctx.isSystem !== true && this.options.dataEngine !== undefined;
     const widened = byRecord || filtered;
@@ -1567,7 +1570,6 @@ export class KnowledgeService implements IKnowledgeService {
     const groupOf = byRecord
       ? (hit: KnowledgeHit): string | undefined => this.groupKeyOf(hit, groupBy)
       : recordKeyOf;
-    const refused: KnowledgeSearchRefusal[] = [];
     const first = await this.searchRound(query, sources, firstAsk, opts.filter, refused);
     if (first.size === 0 && refused.length > 0) throw wholeRefusal(this.facedRefusals(refused));
     const raw = [...first.values()].flatMap((answer) => answer.hits);
@@ -1827,24 +1829,86 @@ export class KnowledgeService implements IKnowledgeService {
    * Each admitted source paired with the fingerprint its search carries
    * ({@link planIndex}); a source whose adapter is not registered carries none
    * (the round skips it, as before).
+   *
+   * A source admitted with `proveIndex` ({@link admitSources}) is searched
+   * only when its index is proven built under the current recipe
+   * ({@link unprovenIndex}); otherwise it is not searched and is added to
+   * `refused` as `KNOWLEDGE_REBUILD_REQUIRED` (409), the operator told why at
+   * `warn`. The boot's build pass, a reload and the operator's rebuild are
+   * what build it; a search never starts one.
    */
   private async planSearches(
-    admitted: Array<{ source: KnowledgeSource; organizationIds?: string[]; scope?: AdapterScopeTerm[] }>,
+    admitted: Array<AdmittedSource & { scope?: AdapterScopeTerm[] }>,
+    refused: KnowledgeSearchRefusal[],
   ): Promise<SearchTarget[]> {
     const out: SearchTarget[] = [];
     // The settings page's chunk target, read at most once for the whole search.
     let target: Promise<number | undefined> | undefined;
     const chunkTarget = (): Promise<number | undefined> => (target ??= this.readChunkTarget());
-    for (const entry of admitted) {
+    for (const { proveIndex, ...entry } of admitted) {
       const adapter = this.adapters.get(entry.source.adapter);
       if (!adapter) {
         out.push(entry);
         continue;
       }
       const plan = await this.planIndex(entry.source, adapter, chunkTarget);
+      if (proveIndex === true) {
+        const why = await this.unprovenIndex(plan);
+        if (why !== undefined) {
+          const label = this.label(entry.source);
+          refused.push({
+            sourceId: entry.source.name,
+            code: INDEX_NOT_PROVEN_CODE,
+            status: 409,
+            message:
+              `Knowledge source '${label}' needs a rebuild: its index is not proven built under the current recipe, ` +
+              'so it is not searched. It answers again once a complete rebuild of the source has completed.',
+          });
+          this.options.logger?.warn?.(
+            `[knowledge] source '${label}' not searched (${INDEX_NOT_PROVEN_CODE}): ${why} Its object declares a field ` +
+              "named 'title' the source does not serve, and a document indexed under the earlier title rule carries " +
+              "that field's value, so the source is searched only once a complete build under the current recipe has " +
+              'completed (os knowledge rebuild).',
+          );
+          continue;
+        }
+      }
       out.push({ ...entry, fingerprint: plan.index.fingerprint });
     }
     return out;
+  }
+
+  /**
+   * Why `plan`'s source is not proven built under the current recipe, or
+   * `undefined` when it is: its adapter's `indexStatus` reports the
+   * fingerprint AND the recipe hash {@link planIndex} computes now. The
+   * recipe hash names the title rule (ADR-0161 K7) and an adapter records it
+   * only at the end of a complete build, which rewrites every document whose
+   * title changed and purges the rest. Read on every search that needs it,
+   * never cached: another node may rebuild, or drop, the index. Fails
+   * closed: an adapter without `indexStatus`, or one that throws, is not
+   * proven.
+   */
+  private async unprovenIndex(plan: IndexPlan): Promise<string | undefined> {
+    const { adapter, index } = plan;
+    if (typeof adapter.indexStatus !== 'function') {
+      return `the adapter '${adapter.id}' reports no index status, so what its index was built under cannot be read.`;
+    }
+    let held: AdapterIndexStatus;
+    try {
+      held = await adapter.indexStatus(plan.context('search'));
+    } catch (err) {
+      return `the adapter's index status could not be read (${operatorText(err)}).`;
+    }
+    if (held?.fingerprint !== index.fingerprint) {
+      return 'the index holds no complete build under the current fingerprint.';
+    }
+    if (held.recipeHash !== index.recipeHash) {
+      return held.recipeHash === undefined
+        ? 'the index records no recipe hash: no complete build of it has completed.'
+        : "the index was last completed under another recipe (the source's where, metadataFields, title rule or withheld fields).";
+    }
+    return undefined;
   }
 
   /**
@@ -2243,6 +2307,11 @@ export class KnowledgeService implements IKnowledgeService {
    * every source over that object, reported once at `error`. The objects'
    * admissions are asked concurrently.
    *
+   * An admitted source over which an index built under the earlier title
+   * rule could serve a field the gate does not ask about
+   * (`mayServeEarlierRuleTitle`) carries `proveIndex`: {@link planSearches}
+   * searches it only once its index is proven built under the current recipe.
+   *
    * Each admitted source carries the organizations its search hands the
    * adapter ({@link scopeByOrganization}, ADR-0161 K8, item 9). The system
    * context's bypass above covers that scope too: the system identity's
@@ -2251,7 +2320,7 @@ export class KnowledgeService implements IKnowledgeService {
   private async admitSources(
     sources: KnowledgeSource[],
     ctx: ExecutionContext | undefined,
-  ): Promise<Array<{ source: KnowledgeSource; organizationIds?: string[] }>> {
+  ): Promise<AdmittedSource[]> {
     if (ctx?.isSystem) return sources.map((source) => ({ source }));
     const engine = this.options.dataEngine;
     if (!ctx || !engine) {
@@ -2279,7 +2348,7 @@ export class KnowledgeService implements IKnowledgeService {
         }),
       );
     }
-    const out: KnowledgeSource[] = [];
+    const out: AdmittedSource[] = [];
     for (const source of sources) {
       const objSource = source.source;
       const objectAdmission = await byObject.get(objSource.object);
@@ -2288,7 +2357,10 @@ export class KnowledgeService implements IKnowledgeService {
         ? { admitted: false, reason: objectAdmission.refused, object: objSource.object }
         : admitSourceFields(objSource, objectAdmission);
       if (verdict.admitted) {
-        out.push(source);
+        // An index built under the earlier title rule could serve a field
+        // the gate no longer asks about: searched only once its index is
+        // proven built under the current recipe ({@link planSearches}).
+        out.push(mayServeEarlierRuleTitle(objSource, objectAdmission.schema) ? { source, proveIndex: true } : { source });
       } else {
         this.options.logger?.debug?.(
           `[knowledge] source '${this.label(source)}' not searched for this caller: ${verdict.reason} ` +
@@ -2465,9 +2537,9 @@ export class KnowledgeService implements IKnowledgeService {
    * reported at `error`, `warn` as the fallback.
    */
   private async scopeByOrganization(
-    sources: KnowledgeSource[],
+    sources: AdmittedSource[],
     ctx: ExecutionContext,
-  ): Promise<Array<{ source: KnowledgeSource; organizationIds?: string[] }>> {
+  ): Promise<AdmittedSource[]> {
     if (sources.length === 0) return [];
     let posture: TenancyPosture | undefined;
     try {
@@ -2480,9 +2552,9 @@ export class KnowledgeService implements IKnowledgeService {
       else this.options.logger?.warn?.(report);
       return [];
     }
-    return sources.map((source) => {
-      const organizationIds = searchOrganizationIds(ctx, posture, this.schemaFor(source.source.object));
-      return organizationIds === undefined ? { source } : { source, organizationIds };
+    return sources.map((entry) => {
+      const organizationIds = searchOrganizationIds(ctx, posture, this.schemaFor(entry.source.source.object));
+      return organizationIds === undefined ? entry : { ...entry, organizationIds };
     });
   }
 
@@ -2640,6 +2712,21 @@ export interface KnowledgeSearchReport {
  * One source a search round asks: its organizations scope, the fingerprint its
  * search carries, and the record scope's terms for it (ADR-0161 K8, item 17).
  */
+/** A source {@link KnowledgeService.admitSources} admitted for a caller. */
+interface AdmittedSource {
+  source: KnowledgeSource;
+  organizationIds?: string[];
+  /** Searched only once its index is proven built under the current recipe (`mayServeEarlierRuleTitle`). */
+  proveIndex?: true;
+}
+
+/**
+ * The code of a source refused because its index is not proven built under
+ * the current recipe: the one a generation-keeping adapter answers for an
+ * index built under another fingerprint, as the remedy is the same rebuild.
+ */
+const INDEX_NOT_PROVEN_CODE = 'KNOWLEDGE_REBUILD_REQUIRED';
+
 interface SearchTarget {
   source: KnowledgeSource;
   organizationIds?: string[];

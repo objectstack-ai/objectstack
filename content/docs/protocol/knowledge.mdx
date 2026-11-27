@@ -329,8 +329,14 @@ credential-class or `internal` field, when the value is empty, and when
 the object resolves no display field. A source over an object with no
 registered definition reads a field named `title`. Documents indexed
 before this rule carry the value of a field named `title` until a complete
-reindex writes them again, so the source admission below still asks about a
-declared `title` field as well as the display field.
+reindex writes them again. So a source over an object that declares a
+`title` field it does not serve is searched for a caller only once its
+adapter's index status reports the fingerprint and the recipe hash the
+service computes now (the recipe hash names the title rule, and is recorded
+only when a complete build completes); until then the search refuses it
+`KNOWLEDGE_REBUILD_REQUIRED` (409), and the boot's build pass or
+`os knowledge rebuild` builds it. An adapter that reports no index status
+cannot prove it, so such a source on it is refused until it can.
 
 ### 3.3 `IKnowledgeService` (consumed by the ObjectOS AI runtime, REST, Console)
 
@@ -871,8 +877,7 @@ searched for a non-system caller, the service asks, once per object per search:
   `enable.aiReadable: true` (the AI read tools' posture).
 - **Field-level rules** — every field the source serves (each `content`
   member; each `metadataFields`
-  member; the display field the title is read from, and a declared `title`
-  field), less the credential-class and `internal: true` fields an
+  member; the display field the title is read from), less the credential-class and `internal: true` fields an
   index never carries, must be one the caller may **query**, per the `security`
   service's `getQueryableFields`. Without that answer: its `getReadableFields`
   less every field declaring a `maskingRule`; with no `security` service at
