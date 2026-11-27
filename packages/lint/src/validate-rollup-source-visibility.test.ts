@@ -591,10 +591,11 @@ describe('the verdict text (the rule the author is told)', () => {
     }
   });
 
-  it('the registry entry is advisory and declares why it is off the runtime door', () => {
+  it('the registry entry is advisory and runs at the runtime door on `permission` writes alone', () => {
     const entry = AUTHORING_RULES.find((r) => r.name === 'validateRollupSourceVisibility');
     expect(entry?.tier).toBe('advisory');
-    expect(entry?.surfaces).toEqual(['cli']);
-    expect((entry?.surfaceReason ?? '').length).toBeGreaterThan(0);
+    expect(entry?.surfaces).toEqual(['cli', 'runtime-publish']);
+    expect(entry?.runtimeTypes).toEqual(['permission']);
+    expect(entry?.surfaceReason).toBeUndefined();
   });
 });
