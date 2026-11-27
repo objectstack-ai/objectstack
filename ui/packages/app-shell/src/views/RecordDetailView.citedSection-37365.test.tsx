@@ -239,8 +239,8 @@ describe('a record opened at a cited section (objectstack#37365)', () => {
     const field = () => dup.container.querySelector<HTMLElement>('[data-detail-field="content"]');
     await waitFor(() => expect(field()?.querySelectorAll('h1')).toHaveLength(2), { timeout: 4000 });
     // Both drawn headings read `Scope`; the outline lists one. Nothing is
-    // marked, and once the settle (RECORD_SECTION_SETTLE_MS) passes the field
-    // is scrolled to.
+    // marked, and the field is scrolled to: at once, since the face's parse
+    // draws a same-titled heading the outline does not list (objectstack#37562 N3).
     expect(marked(dup.container)).toHaveLength(0);
     await waitFor(() => expect(scrolled).toEqual([field()]), { timeout: 7000 });
     expect(marked(dup.container)).toHaveLength(0);

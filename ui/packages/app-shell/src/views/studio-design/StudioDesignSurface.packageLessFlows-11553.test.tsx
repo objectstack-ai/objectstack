@@ -335,7 +335,7 @@ describe('the package-less scope lists a package-less flow and opens it editable
     expect(saved!.options?.packageId).toBeUndefined();
   });
 
-  it('offers its one page, no Create app, no package copilot, and names the scope beside 「‹ Back to app」', async () => {
+  it('offers its one page, no Create app, no package copilot, and names the scope beside the way back', async () => {
     renderAt(ORG_CLONE);
     await openedFlow('qa_urgent_alert_clone');
 
@@ -354,8 +354,14 @@ describe('the package-less scope lists a package-less flow and opens it editable
     expect(screen.queryByRole('button', { name: /Create app/ })).not.toBeInTheDocument();
     expect(chatDock.mounts).toBe(0);
     // objectstack#36501, decision 5 (objectstack#36899) — no app owns the
-    // scope, so the name slot names the scope, as for a package with no app.
-    expect(screen.getByTestId('studio-back')).toHaveTextContent(/^Back to app·Organization flows·App Studio$/);
+    // scope, so it is named, as a package with no app is: objectstack#37456 —
+    // by the package row's switcher, beside the way back to the apps home.
+    const row = within(screen.getByTestId('studio-package-row'));
+    // Named for what it holds, not after its one flow entry (the menu row keeps that name).
+    expect(row.getByTestId('studio-pkg-switcher-name')).toHaveTextContent(/^Organization metadata$/);
+    expect(screen.getByTestId('studio-menu-entry-orgFlows')).toHaveTextContent('Organization flows');
+    expect(row.getByTestId('studio-package-back')).toHaveAccessibleName('Leave Studio and go back to your apps');
+    expect(screen.getByTestId('studio-brand-name')).toHaveTextContent(/^App Studio$/);
     // No "New" flow here: authoring stays package-first.
     expect(screen.queryByTitle('New automation')).not.toBeInTheDocument();
   });
@@ -439,10 +445,30 @@ describe('the package-less scope reviews and publishes exactly its own drafts (o
     );
   });
 
-  it('counts only package-less flow drafts', async () => {
+  // objectstack#37456 — the top bar's Changes moved to 概览's Pending tab, and
+  // the scope has no 概览: its Changes is a row of the left column's top.
+  it('counts only package-less flow drafts, in the left column\'s Changes row', async () => {
     renderAt(ORG_CLONE);
     await openedFlow('qa_urgent_alert_clone');
-    await waitFor(() => expect(screen.getByRole('button', { name: /Changes · 1$/ })).toBeInTheDocument());
+    const changes = await screen.findByRole('button', { name: /Changes · 1$/ }, { timeout: 8000 });
+    expect(screen.getByTestId('studio-top-left')).toContainElement(changes);
+  });
+
+  it('the Changes row opens the sheet, to review, and the sheet carries the scope\'s Publish', async () => {
+    renderAt(ORG_CLONE);
+    await openedFlow('qa_urgent_alert_clone');
+    fireEvent.click(await screen.findByTestId('studio-scope-changes', undefined, { timeout: 8000 }));
+    await waitFor(() => expect(panelProps()?.open).toBe(true));
+    // To review: no door sets the confirm posture any more (objectstack#37456).
+    expect(panelProps()?.posture).not.toBe('confirm');
+    expect(panelProps()?.onPublish).toBeTypeOf('function');
+  });
+
+  it('CONTROL: a package draws no Changes row; its count is 概览\'s badge', async () => {
+    renderAt(`/studio/${SHOWCASE}/metadata/flow/showcase_urgent_task_alert`);
+    await openedFlow('showcase_urgent_task_alert');
+    await waitFor(() => expect(screen.getByTestId('studio-menu-overview-pending')).toHaveTextContent('1'));
+    expect(screen.queryByTestId('studio-scope-changes')).toBeNull();
   });
 
   it('hands the sheet a filter that keeps only package-less flow drafts', async () => {

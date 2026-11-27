@@ -279,10 +279,10 @@ describe('the area\'s form editor in the builder (objectstack#28569)', () => {
     renderAt(`/studio/${PACKAGE_ID}/metadata/translation/ui_en?package=${PACKAGE_ID}`);
     const editor = await screen.findByTestId('form-editor', undefined, { timeout: 8000 });
     expect(editor).toHaveAttribute('data-customization', 'null');
-    expect(screen.queryByTestId('studio-changes-count')).toBeNull();
+    expect(screen.queryByTestId('studio-menu-overview-pending')).toBeNull();
     fireEvent.click(within(editor).getByRole('button', { name: 'save a draft' }));
     // The header counts the draft the save wrote, before its own re-read answers.
-    expect(await screen.findByTestId('studio-changes-count')).toHaveTextContent('1');
+    expect(await screen.findByTestId('studio-menu-overview-pending')).toHaveTextContent('1');
   });
 });
 
@@ -390,7 +390,7 @@ describe('⌘K and the header ask before they drop edits the item page holds (ob
     servePackages();
     renderAt(ITEM_URL);
     expect((await areaPage()).page).toBe('item');
-    fireEvent.click(await screen.findByTestId('studio-back-to-app'));
+    fireEvent.click(await screen.findByTestId('studio-package-back'));
     expect(confirmSpy).toHaveBeenCalledWith(ITEM_QUESTION);
     expect(where()).toBe(ITEM_URL);
   });

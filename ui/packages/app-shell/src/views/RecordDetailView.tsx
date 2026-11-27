@@ -4324,6 +4324,10 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
             { method: 'DELETE', credentials: 'include' },
           );
           if (!res.ok) throw new Error(`The comment was not deleted (HTTP ${res.status}).`);
+          // objectstack#36423 — the own-comment door is not the data source,
+          // so no mutation event carries this delete: announce it, for a
+          // reader that counts this record's threads (a board card's footer).
+          notifyDataChanged({ objectName: COMMENT_OBJECT, recordId: String(itemId) });
         }
       } catch (err) {
         toast.error(
@@ -4383,6 +4387,9 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
           },
         );
         if (!res.ok) throw new Error(`The thread was not updated (HTTP ${res.status}).`);
+        // objectstack#36423 — the resolution door is not the data source
+        // either (see the own-comment delete): announce the stored write.
+        notifyDataChanged({ objectName: COMMENT_OBJECT, recordId: String(itemId) });
         const envelope = (await res.json().catch(() => null)) as { data?: unknown } | null;
         stored = envelope && typeof envelope.data === 'object' ? (envelope.data as Record<string, unknown> | null) : null;
       } catch (err) {

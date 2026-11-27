@@ -8,8 +8,8 @@
  * screen reader announced two unlabeled edit fields and `getByLabelText`
  * found nothing. The component is shared by every Studio create dialog
  * (package, app, object, flow, permission set), so the fix is there and this
- * suite drives two real openers: the Data pillar's New object, and the
- * toolbar's Create app.
+ * suite drives a real opener: the object list's New object. (The toolbar's
+ * Create app, the second, went with Studio's top bar: objectstack#37456.)
  *
  * Label strings are read by their catalog key, so the pin is on the binding,
  * not on the copy.
@@ -20,8 +20,8 @@ import '@objectstack/lint';
 import '@object-ui/plugin-detail';
 import '@testing-library/jest-dom/vitest';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
-import { MemoryRouter, Route, Routes } from 'react-router-dom';
+import { cleanup, fireEvent, render, screen, within } from '@testing-library/react';
+import { MemoryRouter } from 'react-router-dom';
 
 let clientImpl: any;
 
@@ -47,8 +47,6 @@ vi.mock('./packages-io', async (importOriginal) => {
 vi.mock('./StudioAiCopilot', () => ({ StudioChatDock: () => null }));
 vi.mock('../../preview/DraftChangesPanel', () => ({ DraftChangesPanel: () => null }));
 
-import { StudioDesignSurface } from './StudioDesignSurface';
-import { StudioPillarRedirect } from './StudioPillarRedirect';
 import { MetadataListCreateDialog } from '../metadata-admin/MetadataListCreateDialog';
 import { t } from '../metadata-admin/i18n';
 
@@ -115,24 +113,4 @@ describe('Studio create dialogs bind each label to its input (objectui#13128)', 
     expect(idInput.value).toBe('repair_ticket');
   });
 
-  it('Create app (a sibling dialog on the same component): "App name" and "Identifier" each find their input', async () => {
-    // objectstack#36903 — the Automations pillar is retired; the sharing overview's page hosts the toolbar.
-    render(
-      <MemoryRouter initialEntries={['/studio/app.a/owd']}>
-        <Routes>
-          <Route path="/studio/:packageId/:tab" element={<StudioPillarRedirect><StudioDesignSurface /></StudioPillarRedirect>} />
-        </Routes>
-      </MemoryRouter>,
-    );
-    const toolbar = await screen.findByTestId('studio-shell-header');
-    await waitFor(() =>
-      expect(within(toolbar).getByRole('button', { name: 'Create app' })).toBeInTheDocument(),
-    );
-    fireEvent.click(within(toolbar).getByRole('button', { name: 'Create app' }));
-    const dialog = await screen.findByRole('dialog');
-
-    const nameInput = expectBound(dialog, t('engine.studio.app.nameLabel', 'en'));
-    const idInput = expectBound(dialog, t('engine.studio.app.idLabel', 'en'));
-    expect(nameInput).not.toBe(idInput);
-  });
 });

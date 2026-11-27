@@ -13,7 +13,32 @@ export {
   withAiEmbedderSection,
   aiTestActionHandler,
   aiTestEmbedderActionHandler,
+  aiProviderTestActionHandler,
+  aiProviderTestActionHandlers,
 } from './ai.manifest.js';
+export {
+  AI_PROVIDERS,
+  AI_MODEL_RULE_KEYS,
+  AI_MODEL_RULE_COPY,
+  aiModelRuleCopy,
+  aiModelRuleBreaches,
+  aiModelRuleRefusal,
+  aiModelRulePredicate,
+  aiProviderModels,
+  isAiProviderEnabled,
+  parseAiModelList,
+  registerAiModelRules,
+  resolveAiModelConfiguration,
+  type AiProviderId,
+  type AiProviderModels,
+  type AiModelChoice,
+  type AiModelConfiguration,
+  type AiModelRule,
+  type AiModelRuleBreach,
+  type AiModelRuleCopy,
+  type AiModelRuleHost,
+  type AiSettingReader,
+} from './ai-models.js';
 export { knowledgeSettingsManifest, knowledgeTestActionHandler } from './knowledge.manifest.js';
 export { localizationSettingsManifest } from './localization.manifest.js';
 export { companySettingsManifest } from './company.manifest.js';

@@ -368,7 +368,10 @@ describe("requires: ['knowledge'] — the knowledge service and one store", () =
     ).map((p) => (p as { name?: string }).name);
     expect(served).toEqual(expect.arrayContaining([KNOWLEDGE, TURSO]));
     expect(served).not.toContain(PGVECTOR);
-  });
+    // Budget, as the last case's: 111-114 ms in file order, 431 ms run alone on a cold module cache
+    // (local, three runs); the full run's last shard read this file at 3.3x local, so 1.4 s cold —
+    // the file's 120_000 keeps it off vitest's 5000 ms default on a loaded runner.
+  }, 120_000);
 
   // The arm `os dev` and `os serve` mount on SQLite: a FILE database, so the
   // store is a libSQL file whose URL the operator may save in Settings. On a
@@ -463,5 +466,10 @@ describe("requires: ['knowledge'] — the knowledge service and one store", () =
       vi.doUnmock('@objectstack/knowledge-turso');
       vi.resetModules();
     }
-  });
+    // Budget: the module cache was just cleared, so constructServedProviders re-imports the provider
+    // graph — 1138-1365 ms locally (three runs, verbose reporter). The scheduled full run's last Test
+    // Core shard (run 45888214247) took this file at 3.3x local (52.8 s of tests outside this case vs
+    // 16.2 s) and ran this case past vitest's 5000 ms default; 1365 ms x 3.3 = 4.5 s leaves no margin
+    // there, so it takes the file's per-case 120_000 like every boot above.
+  }, 120_000);
 });

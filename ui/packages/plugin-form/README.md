@@ -545,7 +545,10 @@ The view's `columns` wins; without it the grid takes the widest section's
 density. Every sectioned host resolves it through the same rule
 (`sectionedGridLayout`) — `ObjectForm` (simple), `ModalForm`, `TabbedForm`,
 `WizardForm`. (`WizardForm` has no widest-section fallback: its steps never share
-a viewport, so each step keeps its own authored width.)
+a viewport, so each step keeps its own authored width.) The console's named and
+public form page (`/forms/:name`, `/f/:slug`) draws each section on a grid of its
+own and reads the same rule's per-section count, `sectionColumns(declared)`: the
+view's `columns` caps a section, and an undeclared section takes it.
 
 A declared `columns` — on the view or on a section, `1` included — is drawn as
 written on every host. Where neither the view nor a section declares one, the

@@ -48,10 +48,35 @@ import { enMessages, type ApprovalMessageId } from './translations/messages.js';
  * back to, or [#35384] an object's label by the object's name with the text it
  * falls back to (the messaging service's `NotificationObjectLabelParam`).
  */
-export type ApprovalTextParam =
+export type ApprovalTextParam = ApprovalScalarParam | ApprovalListParam;
+
+/** [#36853] A value that fills one hole by itself (the messaging service's `NotificationScalarParam`). */
+export type ApprovalScalarParam =
   | string
   | { readonly key: string; readonly fallback: string }
   | ApprovalObjectLabelParam;
+
+/**
+ * [#36853] The structural mirror of the messaging service's
+ * `NotificationListParam`: a list of catalog sentences, each with its own
+ * params, rendered per recipient and joined by the `separator` entry.
+ */
+export interface ApprovalListParam {
+  readonly list: readonly {
+    readonly key: string;
+    readonly params?: Readonly<Record<string, ApprovalScalarParam>>;
+    readonly fallback: string;
+  }[];
+  readonly separator: { readonly key: string; readonly fallback: string };
+}
+
+/**
+ * [#36853] The mirror of the messaging service's
+ * `NOTIFICATION_LIST_PARAM_MAX_ITEMS`: the most items an emit takes in one
+ * list param. A longer list is refused there (and `notify` only logs it), so a
+ * producer with more items must not send them as a list.
+ */
+export const APPROVAL_LIST_PARAM_MAX_ITEMS = 100;
 
 /** [#35384] The structural mirror of the messaging service's `NotificationObjectLabelParam`. */
 export interface ApprovalObjectLabelParam {
@@ -123,7 +148,10 @@ export function interpolate(template: string, params: Readonly<Record<string, Ap
   return template.replace(HOLE, (hole, name: string) => {
     const param = params[name];
     if (param === undefined) return hole;
-    return typeof param === 'string' ? param : param.fallback;
+    if (typeof param === 'string') return param;
+    // [#36853] A list's literal is its items' fallbacks, joined by the separator's.
+    if ('list' in param) return param.list.map((item) => item.fallback).join(param.separator.fallback);
+    return param.fallback;
   });
 }
 

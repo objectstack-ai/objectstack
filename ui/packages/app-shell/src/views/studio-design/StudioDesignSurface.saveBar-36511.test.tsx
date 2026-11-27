@@ -5,13 +5,15 @@
  * Publish only for drafts. objectstack#37455 — Cancel and Save moved from the
  * top bar to the page's item header, behaviour unchanged.
  *
- * - With no draft pending, the top bar draws neither Changes nor Publish.
+ * - With no draft pending, 概览's menu row carries no count.
  * - An edit on the object page draws Cancel and Save at the end of the item
- *   header's actions, not in the top bar; Save is the last action, and only
- *   the assistant (behind its hairline) follows it.
- * - With a draft pending (the copilot's), Changes and Publish are drawn in the
- *   top bar, and a publish is refused while the page holds edits Save has not
- *   sent: the publish re-reads the page and would drop them.
+ *   header's actions, and nowhere else (objectstack#37456: Studio has no top
+ *   bar); Save is the last action, and only the assistant (behind its
+ *   hairline) follows it.
+ * - With a draft pending (the copilot's), 概览's row counts it (its Pending tab
+ *   holds Changes and Publish, objectstack#37454), and a publish is refused
+ *   while the page holds edits Save has not sent: the publish re-reads the
+ *   page and would drop them.
  *
  * Real: the surface, the Data pillar, the coordinator and `usePendingDrafts`.
  * Doubles: the metadata client's reads and transport, the `_drafts` ledger
@@ -129,10 +131,7 @@ afterEach(() => {
   vi.mocked(toast.error).mockClear();
 });
 
-const CHANGES = new RegExp(`^${t('engine.studio.changes', 'en')}`);
-const PUBLISH = new RegExp(`^${t('engine.studio.publish', 'en')}$`);
-
-async function mountAndEdit(): Promise<{ header: HTMLElement; itemHeader: HTMLElement }> {
+async function mountAndEdit(): Promise<{ topLeft: HTMLElement; itemHeader: HTMLElement }> {
   render(
     <MemoryRouter initialEntries={[`/studio/${PACKAGE_ID}/metadata/object/a_task`]}>
       <Routes>
@@ -143,23 +142,23 @@ async function mountAndEdit(): Promise<{ header: HTMLElement; itemHeader: HTMLEl
   );
   fireEvent.click(await screen.findByRole('button', { name: 'Field layout' }, { timeout: 4000 }));
   await addFieldFromFormToolbar(undefined, { label: 'Due' });
-  return { header: screen.getByTestId('studio-shell-header'), itemHeader: screen.getByTestId('data-object-header') };
+  return { topLeft: screen.getByTestId('studio-top-left'), itemHeader: screen.getByTestId('data-object-header') };
 }
 
 /** The item header's action slot: the right-aligned box of its title row. */
 const actionSlot = (save: HTMLElement): HTMLElement => save.parentElement as HTMLElement;
 
 describe('the Studio page\'s Save and Cancel, Changes and Publish for drafts (objectstack#36511, objectstack#37455)', () => {
-  it('with no draft pending: no Changes, no Publish; an edit draws Cancel and Save at the end of the item header', async () => {
-    const { header, itemHeader } = await mountAndEdit();
+  it('with no draft pending: no count; an edit draws Cancel and Save at the end of the item header, and only there', async () => {
+    const { topLeft, itemHeader } = await mountAndEdit();
     const save = await within(itemHeader).findByTestId('studio-save');
     const cancel = within(itemHeader).getByTestId('studio-cancel');
-    // objectstack#37455 — nothing of the pair is left in the top bar.
-    expect(within(header).queryByTestId('studio-save')).toBeNull();
-    expect(within(header).queryByTestId('studio-cancel')).toBeNull();
+    // objectstack#37455, objectstack#37456 — one Save, one Cancel, none in the left column.
+    expect(within(topLeft).queryByTestId('studio-save')).toBeNull();
+    expect(within(topLeft).queryByTestId('studio-cancel')).toBeNull();
     expect(screen.getAllByTestId('studio-save')).toHaveLength(1);
-    expect(within(header).queryByRole('button', { name: CHANGES })).toBeNull();
-    expect(within(header).queryByRole('button', { name: PUBLISH })).toBeNull();
+    expect(screen.getAllByTestId('studio-cancel')).toHaveLength(1);
+    expect(screen.queryByTestId('studio-menu-overview-pending')).toBeNull();
     // Cancel, then Save: the last of the item header's actions; only the
     // assistant follows it, behind the hairline.
     expect(cancel.compareDocumentPosition(save) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
@@ -170,16 +169,14 @@ describe('the Studio page\'s Save and Cancel, Changes and Publish for drafts (ob
     expect(writes).toEqual([]);
   });
 
-  it('with a draft pending: Changes and Publish in the top bar, Cancel and Save in the item header; Publish waits for Save', async () => {
+  it('with a draft pending: 概览 counts it, Cancel and Save in the item header; Publish waits for Save', async () => {
     ledger.drafts = [{ type: 'flow', name: 'a_notify', packageId: PACKAGE_ID }];
-    const { header, itemHeader } = await mountAndEdit();
-    const changes = await within(header).findByRole('button', { name: CHANGES }, { timeout: 4000 });
-    const publish = within(header).getByRole('button', { name: PUBLISH });
+    const { topLeft, itemHeader } = await mountAndEdit();
+    await waitFor(() => expect(screen.getByTestId('studio-menu-overview-pending')).toHaveTextContent('1'), { timeout: 4000 });
     const cancel = await within(itemHeader).findByTestId('studio-cancel');
     const save = within(itemHeader).getByTestId('studio-save');
-    expect(changes.compareDocumentPosition(publish) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     expect(cancel.compareDocumentPosition(save) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
-    expect(within(header).queryByTestId('studio-save')).toBeNull();
+    expect(within(topLeft).queryByTestId('studio-save')).toBeNull();
 
     await act(async () => {
       fireEvent.click(screen.getByTestId('sheet-publish-all'));

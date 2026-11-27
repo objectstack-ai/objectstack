@@ -989,7 +989,14 @@ describe('ObjectView.readersRetired-6152', () => {
       expect(node.hideEmptyFields).toBe(false);
       // CONTROL: a block without them emits none of the three.
       const bare = await generatedNode('kanban', { kanban: { groupByField: 'stage' } });
-      for (const key of ['summary', 'showFieldLabels', 'hideEmptyFields']) expect(bare).not.toHaveProperty(key);
+      for (const key of ['summary', 'showFieldLabels', 'hideEmptyFields', 'cardFooter']) expect(bare).not.toHaveProperty(key);
+    });
+
+    it('kanban: `cardFooter` reaches the board when declared (objectstack#36423)', async () => {
+      const node = await generatedNode('kanban', {
+        kanban: { groupByField: 'stage', cardFooter: { comments: true, attachments: true } },
+      });
+      expect(node.cardFooter).toEqual({ comments: true, attachments: true });
     });
 
     it('calendar: the five declared keys reach the calendar, `defaultView` does not', async () => {

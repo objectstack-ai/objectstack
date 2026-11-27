@@ -20,7 +20,7 @@
  * The strings belong to the spec, and the platform already declares how they
  * are translated: `metadataForms.<type>.{label,description}`,
  * `.sections.<section>.{label,description}`,
- * `.fields.<dot.path>.{label,helpText,placeholder}` — resolved by
+ * `.fields.<dot.path>.{label,helpText,placeholder,options}` — resolved by
  * `resolveMetadataFormLabels` from `@objectstack/spec/system`, which the
  * framework's own `/meta/types` handler calls to localize the very same forms
  * before serving them. This module supplies a bundle to THAT function rather
@@ -135,7 +135,13 @@ const METADATA_FORM_BUNDLE: TranslationBundle = {
           dateRange: { label: '日期范围', helpText: '打开仪表盘时默认的时间段，以及查看者能否自选日期。' },
           // All three children of the `dateRange` composite — see the ⛔ note above.
           'dateRange.field': { label: '日期字段', helpText: '时间段筛选所依据的日期字段。留空则按创建日期筛选。' },
-          'dateRange.defaultRange': { label: '默认时间段', helpText: '打开仪表盘时显示的时间段。' },
+          'dateRange.defaultRange': {
+            label: '默认时间段',
+            helpText: '打开仪表盘时显示的时间段。',
+            // Option names: the platform pack's map, pinned byte-equal by
+            // `metadata-form-option-names.test.ts`.
+            options: { today: '今天', yesterday: '昨天', this_week: '本周', last_week: '上周', this_month: '本月', last_month: '上月', next_month: '下月', this_quarter: '本季度', last_quarter: '上季度', next_quarter: '下季度', this_year: '今年', last_year: '去年', last_7_days: '近 7 天', last_30_days: '近 30 天', last_90_days: '近 90 天', next_30_days: '未来 30 天', custom: '自定义…' },
+          },
           'dateRange.allowCustomRange': { label: '允许自定义范围', helpText: '允许查看者自己选择开始和结束日期。' },
           globalFilters: { label: '全局筛选', helpText: '查看者可用来一次筛选全部组件，或只筛选你指定组件的筛选条件。' },
         },
