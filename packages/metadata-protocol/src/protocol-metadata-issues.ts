@@ -20,6 +20,24 @@ export interface MetadataIssueEntry {
     path: string;
     message: string;
     code: string | undefined;
+    /**
+     * The zod issue's own `params`, copied verbatim when the issue carries
+     * them — absent otherwise, never an empty placeholder.
+     *
+     * A spec refinement that has a registered refusal code stamps it here
+     * (`params.code`, ADR-0112), beside the fields that say which fix applies:
+     * `CONTROLLED_BY_PARENT_MASTER_INVALID` with its `shape`,
+     * `PLUGIN_UI_REQUIRED_KEY_MISSING` with its `key`. zod raises every such
+     * refinement with its own issue code `'custom'`, so without this member a
+     * client of the save door's `422 INVALID_METADATA` had only that `'custom'`
+     * and the English `message` to go on, while a local `safeParse` (Studio's
+     * path) saw the registered code.
+     *
+     * Additive on purpose: `code` above stays zod's own issue code, so a client
+     * that matches `'custom'` today still matches it. Read the registered
+     * refusal code from `params.code`.
+     */
+    params?: Record<string, unknown>;
 }
 
 /**
@@ -121,6 +139,18 @@ interface ZodIssueLike {
     code?: unknown;
     errors?: unknown;
     issues?: unknown;
+    params?: unknown;
+}
+
+/**
+ * The issue's `params`, copied onto its entry, or `undefined` when it carries
+ * none: zod sets `params` only where a refinement passed one (`code: 'custom'`
+ * issues), and a non-object value there is not a params bag.
+ */
+function issueParamsOf(issue: ZodIssueLike): Record<string, unknown> | undefined {
+    const params = issue?.params;
+    if (params === null || typeof params !== 'object' || Array.isArray(params)) return undefined;
+    return { ...(params as Record<string, unknown>) };
 }
 
 /** A zod issue path, normalised to the array zod always produces. */
@@ -302,6 +332,8 @@ function collectMetadataIssues(
         message: String(issue?.message ?? 'Invalid value'),
         code: issue?.code === undefined ? undefined : String(issue.code),
     };
+    const params = issueParamsOf(issue);
+    if (params !== undefined) entry.params = params;
 
     if (!expandable) {
         const key = JSON.stringify([entry.path, entry.code, entry.message]);
@@ -367,6 +399,10 @@ function collectMetadataIssues(
  * entry below explains it (#35400, on {@link collectMetadataIssues}), so
  * `issues[0]` of a refused view save is the first located cause, not that
  * rootless line. Read entries by `path` and `code`, never by index.
+ *
+ * Each entry also carries its issue's `params` when zod's issue has them
+ * ({@link MetadataIssueEntry.params}): that is where a spec refusal with a
+ * registered code says which one it is, since `code` is zod's `'custom'`.
  */
 export function zodIssuesToMetadataIssues(issues: unknown): MetadataIssueEntry[] {
     if (!Array.isArray(issues)) return [];

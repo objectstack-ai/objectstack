@@ -1959,10 +1959,12 @@ export const ERROR_CODE_LEDGER = {
     // `ObjectSchema`'s refinement and `defineStack`'s extension-merge gate, never
     // on a thrown error, and not in the `message`; no `status` of its own.
     // Visible on the zod issue itself (any `safeParse`, the Studio settings
-    // tab's path, which keys its localized wording on it) and on `defineStack`'s
-    // `STACK_SCHEMA_INVALID` refusal, whose `issues` are the raw zod issues. NOT
+    // tab's path, which keys its localized wording on it), on `defineStack`'s
+    // `STACK_SCHEMA_INVALID` refusal, whose `issues` are the raw zod issues, and
     // on the metadata save door's `422 INVALID_METADATA`: `zodIssuesToMetadataIssues`
-    // keeps `path`, `message` and zod's `code` ('custom'), never `params`.
+    // copies the issue's `params` onto its entry, where this code is
+    // `params.code` beside `params.shape`; the entry's own `code` stays zod's
+    // issue code ('custom').
     'CONTROLLED_BY_PARENT_MASTER_INVALID',
     'EXTERNAL_SCHEMA_MISMATCH',
     'EXTERNAL_SCHEMA_MODE_VIOLATION',
