@@ -172,6 +172,22 @@ function isTriviallyPure(node: ts.Expression): boolean {
   return false;
 }
 
+/**
+ * A call of one of {@link PURE_CONSTRUCTORS} whose arguments are trivially
+ * pure (`lazySchema(() => …)`): its own annotation already covers it whole.
+ */
+function isMarkedConstructorCall(node: ts.Expression): boolean {
+  const n = unwrapTypeOnly(node);
+  if (!ts.isCallExpression(n)) return false;
+  const callee = n.expression;
+  const name = ts.isIdentifier(callee)
+    ? callee.text
+    : ts.isPropertyAccessExpression(callee) && ts.isIdentifier(callee.name)
+      ? callee.name.text
+      : undefined;
+  return name !== undefined && PURE_CONSTRUCTORS.has(name) && n.arguments.every((a) => isTriviallyPure(a));
+}
+
 /** A first argument this call created itself: a write to it reaches nothing else. */
 function isFreshValue(node: ts.Expression | undefined): boolean {
   if (node === undefined) return true;
@@ -258,7 +274,9 @@ export function wrapModuleScopeInitializers(source: string, fileName: string): s
     if (statement.modifiers?.some((m) => m.kind === ts.SyntaxKind.DeclareKeyword)) continue;
     for (const declaration of statement.declarationList.declarations) {
       const init = declaration.initializer;
-      if (init === undefined || isTriviallyPure(init) || writesToAnExistingObject(init)) continue;
+      if (init === undefined || isTriviallyPure(init) || isMarkedConstructorCall(init) || writesToAnExistingObject(init)) {
+        continue;
+      }
       spans.push([init.getStart(file), init.end]);
     }
   }
@@ -272,10 +290,10 @@ export function wrapModuleScopeInitializers(source: string, fileName: string): s
   return out + source.slice(from);
 }
 
-/** Both passes, in order: mark the constructor calls, then wrap the initializers. */
+/** Both passes: wrap the initializers, then mark the constructor calls inside and outside them. */
 export function markPureConstruction(source: string, fileName: string): string | undefined {
-  const annotated = annotatePureCalls(source, fileName);
-  return wrapModuleScopeInitializers(annotated ?? source, fileName) ?? annotated;
+  const wrapped = wrapModuleScopeInitializers(source, fileName);
+  return annotatePureCalls(wrapped ?? source, fileName) ?? wrapped;
 }
 
 /**

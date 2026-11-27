@@ -11,13 +11,14 @@
 // `./migrations` entry built with the package's own main options, and a fixture
 // that quotes every marked name in every place that is not a call.
 
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { build } from 'tsup';
+import ts from 'typescript';
 import { afterAll, describe, expect, it } from 'vitest';
 
-import { annotatePureCalls, mainConfig, pureSchemaConstruction } from '../tsup.config';
+import { annotatePureCalls, mainConfig, markPureConstruction, pureSchemaConstruction, wrapModuleScopeInitializers } from '../tsup.config';
 import { ALL_CONVERSIONS } from '../src/conversions/registry';
 import * as sourceMigrations from '../src/migrations/index';
 
@@ -195,5 +196,218 @@ describe('annotatePureCalls — where the annotation goes', () => {
   it('is the transform the plugin applies', () => {
     expect(pureSchemaConstruction.name).toBe('pure-schema-construction');
     expect(mainConfig.esbuildPlugins).toContain(pureSchemaConstruction);
+  });
+});
+
+describe('wrapModuleScopeInitializers — which initializers are wrapped', () => {
+  const OPEN = `${PURE}(() => (`;
+  const CLOSE = '))()';
+
+  it('wraps a derived constant whole, and leaves literals, names and functions alone', () => {
+    const text = [
+      "const A = 'text';",
+      'const B = 42;',
+      'const C = OtherSchema;',
+      'const D = (x: number) => x + 1;',
+      "const E = { kind: 'k', list: ['a', 'b'], nested: { flag: true } } as const;",
+      'const F = new Set([...Kind.options, ...Object.keys(PropsMap)]);',
+      'export const G = z.string().min(1).describe(`d`);',
+      'let H: string[] | undefined;',
+      '',
+    ].join('\n');
+    expect(wrapModuleScopeInitializers(text, 'a.ts')).toBe(
+      [
+        "const A = 'text';",
+        'const B = 42;',
+        'const C = OtherSchema;',
+        'const D = (x: number) => x + 1;',
+        "const E = { kind: 'k', list: ['a', 'b'], nested: { flag: true } } as const;",
+        `const F = ${OPEN}new Set([...Kind.options, ...Object.keys(PropsMap)])${CLOSE};`,
+        `export const G = ${OPEN}z.string().min(1).describe(\`d\`)${CLOSE};`,
+        'let H: string[] | undefined;',
+        '',
+      ].join('\n'),
+    );
+  });
+
+  it('does not wrap an initializer that writes to an object it did not create', () => {
+    // `Object.assign(TaskSchema, …)` adds `create` to `TaskSchema` itself, which
+    // stays reachable by its own name: dropping `Task` would drop the write.
+    const text = [
+      'export const Task = Object.assign(TaskSchema, { create: (t: unknown) => t });',
+      'export const Frozen = Object.freeze(Object.keys(Shape));',
+      'export const Merged = Object.assign({}, Defaults, { extra: 1 });',
+      "export const Defined = Object.defineProperty(Target, 'x', { value: 1 });",
+      '',
+    ].join('\n');
+    expect(wrapModuleScopeInitializers(text, 'a.ts')).toBe(
+      [
+        'export const Task = Object.assign(TaskSchema, { create: (t: unknown) => t });',
+        `export const Frozen = ${OPEN}Object.freeze(Object.keys(Shape))${CLOSE};`,
+        `export const Merged = ${OPEN}Object.assign({}, Defaults, { extra: 1 })${CLOSE};`,
+        "export const Defined = Object.defineProperty(Target, 'x', { value: 1 });",
+        '',
+      ].join('\n'),
+    );
+  });
+
+  it('touches nothing inside a function body, and hands back a file with nothing to wrap', () => {
+    const text = ['export function f() {', '  const local = new Set(Object.keys(Shape));', '  return local;', '}', ''].join('\n');
+    expect(wrapModuleScopeInitializers(text, 'a.ts')).toBeUndefined();
+  });
+
+  it('leaves a marked constructor of pure arguments to its own mark, and marks calls inside a wrapper', () => {
+    const out = markPureConstruction(
+      'export const S = lazySchema(() => z.object({}));\nexport const K = Object.keys(S);\nexport const T = strictObject({ a: z.string() });\n',
+      'a.ts',
+    );
+    expect(out).toBe(
+      `export const S = ${PURE}lazySchema(() => z.object({}));\n` +
+        `export const K = ${OPEN}Object.keys(S)${CLOSE};\n` +
+        `export const T = ${OPEN}${PURE}strictObject({ a: z.string() })${CLOSE};\n`,
+    );
+  });
+});
+
+describe('a consumer keeps a module-scope constant only when it reads it', () => {
+  it('drops a derived Set and the schemas it names for a consumer of a sibling helper', async () => {
+    const fixtureDir = path.join(WORK_DIR, 'derived', 'src');
+    mkdirSync(fixtureDir, { recursive: true });
+    const fixture = path.join(fixtureDir, 'derived.ts');
+    writeFileSync(
+      fixture,
+      [
+        "import { z } from 'zod';",
+        "export const WidgetPropsMap = { chart: z.object({ marker_chart_schema: z.string() }), table: z.object({ marker_table_schema: z.number() }) };",
+        'export const KNOWN_WIDGET_TYPES = new Set([...Object.keys(WidgetPropsMap)]);',
+        "export function helper(label: string): string { return label.trim(); }",
+        '',
+      ].join('\n'),
+    );
+    const { file } = await buildEntry(fixture, 'derived-out');
+    const consume = async (names: string, outName: string): Promise<string> => {
+      const consumer = path.join(WORK_DIR, `${outName}.ts`);
+      writeFileSync(consumer, `export { ${names} } from ${JSON.stringify(file)};\n`);
+      return (await buildEntry(consumer, outName)).text;
+    };
+    // The control: the instrument sees the schemas when the consumer reads them.
+    expect(await consume('KNOWN_WIDGET_TYPES', 'derived-reader')).toContain('marker_chart_schema');
+    const helperOnly = await consume('helper', 'derived-helper');
+    expect(helperOnly).toContain('trim()');
+    expect(helperOnly).not.toContain('marker_chart_schema');
+    expect(helperOnly).not.toContain('marker_table_schema');
+  });
+});
+
+/**
+ * Every module-level binding a source of this package writes from inside a
+ * function, with the reason that write cannot be lost when a bundler drops an
+ * unused module-scope declaration (`wrapModuleScopeInitializers`). A write that
+ * a module-scope initializer performs and some other code later reads — a
+ * registration — would be lost; none of these is one. A new entry fails this
+ * test until it is read and added here with its reason.
+ */
+const MODULE_STATE_WRITTEN_IN_FUNCTIONS: Record<string, string> = {
+  'ai/dataset-tools.zod.ts cachedDatasetToolJsonSchemas': 'lazy cache, filled on first call',
+  'ai/record-context-tools.zod.ts cachedRecordContextToolJsonSchemas': 'lazy cache, filled on first call',
+  'automation/approval.zod.ts cachedApprovalNodeConfigJsonSchema': 'lazy cache, filled on first call',
+  'automation/flow-bound-variable-name.ts RULE_BY_KEY': 'memo of built rules, read-through',
+  'automation/flow-node-config-refusals.ts cachedBuiltinNodeConfigContracts': 'lazy cache, filled on first call',
+  'automation/flow-node-config-refusals.ts cachedDeclaredPluginNodeConfigContracts': 'lazy cache, filled on first call',
+  'automation/flow.zod.ts cachedFlowNodeSiblingBlockJsonSchemas': 'lazy cache, filled on first call',
+  'automation/schemaless-node-config.zod.ts cachedSchemalessNodeConfigJsonSchemas': 'lazy cache, filled on first call',
+  'data/datasource.zod.ts parsedEmptyExternal': 'lazy cache, filled on first call',
+  'data/field.zod.ts multiDeclarableRemedyTypes': 'lazy cache, filled on first call',
+  'data/field.zod.ts multiDeclarableTypes': 'lazy cache, filled on first call',
+  'data/object.zod.ts warnedLegacyApiMethods': 'log-once set, written while parsing',
+  'data/object.zod.ts warnedPasswordObjects': 'log-once set, written while parsing',
+  'integration/connector-credential-redaction.ts declaredAuthKinds': 'lazy cache, filled on first call',
+  'integration/connector-credential-redaction.ts declaredEntryKeys': 'lazy cache, filled on first call',
+  'integration/connector-credential-redaction.ts declaredNestedKeys': 'lazy cache, filled on first call',
+  'kernel/metadata-credential-fields.ts DERIVED': 'WeakMap memo keyed by the schema it derives from',
+  'kernel/metadata-type-redaction.ts EXTRA_METADATA_TYPE_REDACTORS': 'runtime registration API, called from a plugin init, never at module scope',
+  'kernel/metadata-type-schemas.ts EXTRA_METADATA_TYPE_ACTIONS': 'runtime registration API, called from a plugin init, never at module scope',
+  'kernel/metadata-type-schemas.ts EXTRA_METADATA_TYPE_SCHEMAS': 'runtime registration API, called from a plugin init, never at module scope',
+  'shared/refinement-projection.ts DECLARED': 'WeakMap keyed by a rule the module-scope caller just built (`declare`): no other code holds the key',
+  'stack.zod.ts cachedPackageOwnedKeys': 'lazy cache, filled on first call',
+  'stack.zod.ts objectUnmergeableKeysCache': 'lazy cache, filled on first call',
+  'stack.zod.ts warnedAddressLiteralNamespaces': 'log-once set, written while composing',
+  'stack.zod.ts warnedConversionNotices': 'log-once set, written while composing',
+  'stack.zod.ts warnedEmailTemplateFloors': 'log-once set, written while composing',
+  'stack.zod.ts warnedMalformedCollectionEntries': 'log-once set, written while composing',
+  'stack.zod.ts warnedUncomposedStackKeys': 'log-once set, written while composing',
+  'stack.zod.ts warnedUnknownAuthoringKeys': 'log-once set, written while composing',
+  'ui/component.zod.ts COMPONENT_SLOT_DECLARATIONS': 'WeakMap keyed by a schema the module-scope caller just built (`componentSlot`): no other code holds the key',
+  'ui/component.zod.ts actionGroupMemberOnce': 'lazy cache, filled on first call',
+  'ui/component.zod.ts actionMenuMemberOnce': 'lazy cache, filled on first call',
+  'ui/component.zod.ts objectFormRuntimeFieldOnce': 'lazy cache, filled on first call',
+  'ui/component.zod.ts objectFormSectionFieldEntryOnce': 'lazy cache, filled on first call',
+  'ui/component.zod.ts objectFormSectionOnce': 'lazy cache, filled on first call',
+  'ui/component.zod.ts objectTimelineItemOnce': 'lazy cache, filled on first call',
+  'ui/view.zod.ts viewVocabularyCache': 'lazy cache, filled on first call',
+};
+
+/** Array and collection methods that write to their receiver. */
+const WRITING_METHODS = new Set(['set', 'add', 'push', 'delete', 'clear', 'splice', 'unshift', 'pop', 'shift', 'sort', 'reverse', 'fill', 'copyWithin']);
+
+function sourceFiles(dir: string): string[] {
+  const out: string[] = [];
+  for (const entry of readdirSync(dir, { withFileTypes: true })) {
+    const full = path.join(dir, entry.name);
+    if (entry.isDirectory()) {
+      if (entry.name !== '__tests__') out.push(...sourceFiles(full));
+    } else if (/\.m?ts$/.test(entry.name) && !/\.(test|spec|bench)\.ts$/.test(entry.name) && !entry.name.endsWith('.d.ts')) {
+      out.push(full);
+    }
+  }
+  return out;
+}
+
+/** `file binding` for every module-level or imported binding a function in `file` writes to. */
+function moduleStateWrittenInFunctions(file: string): string[] {
+  const sf = ts.createSourceFile(file, readFileSync(file, 'utf8'), ts.ScriptTarget.Latest, true);
+  const bindings = new Set<string>();
+  for (const st of sf.statements) {
+    if (ts.isVariableStatement(st)) {
+      for (const d of st.declarationList.declarations) if (ts.isIdentifier(d.name)) bindings.add(d.name.text);
+    } else if (ts.isImportDeclaration(st) && st.importClause && !st.importClause.isTypeOnly) {
+      const clause = st.importClause;
+      if (clause.name) bindings.add(clause.name.text);
+      const named = clause.namedBindings;
+      if (named && ts.isNamespaceImport(named)) bindings.add(named.name.text);
+      if (named && ts.isNamedImports(named)) for (const el of named.elements) if (!el.isTypeOnly) bindings.add(el.name.text);
+    }
+  }
+  const root = (e: ts.Expression): ts.Expression => {
+    let n = e;
+    while (ts.isPropertyAccessExpression(n) || ts.isElementAccessExpression(n) || ts.isParenthesizedExpression(n) || ts.isNonNullExpression(n)) n = n.expression;
+    return n;
+  };
+  const written = new Set<string>();
+  const visit = (n: ts.Node, inFunction: boolean): void => {
+    const inside = inFunction || ts.isFunctionLike(n);
+    if (inside) {
+      if (ts.isCallExpression(n) && ts.isPropertyAccessExpression(n.expression) && WRITING_METHODS.has(n.expression.name.text)) {
+        const r = root(n.expression.expression);
+        if (ts.isIdentifier(r) && bindings.has(r.text)) written.add(r.text);
+      }
+      if (ts.isBinaryExpression(n) && n.operatorToken.kind >= ts.SyntaxKind.FirstAssignment && n.operatorToken.kind <= ts.SyntaxKind.LastAssignment) {
+        const r = root(n.left);
+        if (ts.isIdentifier(r) && bindings.has(r.text)) written.add(r.text);
+      }
+    }
+    ts.forEachChild(n, (c) => visit(c, inside));
+  };
+  visit(sf, false);
+  const rel = path.relative(path.join(PKG_DIR, 'src'), file).split(path.sep).join('/');
+  return [...written].map((b) => `${rel} ${b}`);
+}
+
+describe('no module-scope initializer registers into module state', () => {
+  it('every module-level binding a function writes to is a cache, a log-once set or a runtime API, and is listed', () => {
+    const found = sourceFiles(path.join(PKG_DIR, 'src')).flatMap(moduleStateWrittenInFunctions).sort();
+    // Anti-vacuity floor: the scan reads real files and finds the known caches.
+    expect(found.length).toBeGreaterThan(20);
+    expect(found).toEqual(Object.keys(MODULE_STATE_WRITTEN_IN_FUNCTIONS).sort());
   });
 });
