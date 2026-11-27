@@ -97,7 +97,7 @@ import { automationAddressRegistryOf } from './automation-address.js';
 import type { ITriggerApiService } from '@objectstack/spec/contracts';
 import type { HttpProtocolContext, HttpDispatcherResult } from '../http-dispatcher.js';
 import type { DomainHandlerDeps } from '../domain-handler-registry.js';
-import { catalogNotImplemented } from './own-door-bridge.js';
+import { catalogNotImplemented, readDoorSlot } from './own-door-bridge.js';
 
 /** The slot the member lives on — the trigger package's own name (ADR-0041 §2). */
 const TRIGGER_API_SLOT = 'trigger-api';
@@ -181,8 +181,8 @@ export async function handleInboundHookRequest(
     context: HttpProtocolContext,
     hook: InboundHookRouteMatch,
 ): Promise<HttpDispatcherResult> {
-    const service = await deps.resolveService(context, TRIGGER_API_SLOT, context.environmentId) as
-        Pick<ITriggerApiService, 'handleInboundHook'> | undefined;
+    // The request's own kernel serves the door, and only it (`readDoorSlot`).
+    const service = await readDoorSlot<Pick<ITriggerApiService, 'handleInboundHook'>>(deps, context, TRIGGER_API_SLOT);
     // [#37662] The `501` is the operation-message catalog's, in the request's
     // top `Accept-Language` tag, as the own-door bridge answers its own.
     if (!service) {

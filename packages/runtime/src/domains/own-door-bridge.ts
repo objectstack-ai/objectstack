@@ -50,7 +50,8 @@
  *
  * ## The slot is the REQUEST kernel's, read per request
  *
- * The member is looked up with `getRequestKernelService`: the request's own
+ * The member is looked up with {@link readDoorSlot} (`getRequestKernelService`,
+ * which every dispatcher door bridge reads its member through): the request's own
  * resolved kernel, never the host kernel's scoped fallback. Each of these
  * doors writes a row through the engine of the kernel whose member serves it,
  * so a tenant kernel that lacks the member must answer `501`, ⛔ never be
@@ -184,13 +185,7 @@ export async function handleOwnDoorBridgeRequest(
         return { handled: true, response: deps.routeNotFound(req.path) };
     }
 
-    // A kernel that throws for an unregistered name reads as an empty slot.
-    let service: Record<string, unknown> | null | undefined;
-    try {
-        service = await deps.getRequestKernelService(context, bridge.slot) as Record<string, unknown> | null | undefined;
-    } catch {
-        service = undefined;
-    }
+    const service = await readDoorSlot<Record<string, unknown>>(deps, context, bridge.slot);
     if (!service) {
         return localizedNotImplemented(deps, notImplementedSentence(bridge, context, 'own_door_service_unregistered', { producer: bridge.producer }));
     }
@@ -225,6 +220,34 @@ export async function handleOwnDoorBridgeRequest(
             err instanceof Error ? err : new Error(String(err)),
         );
         return { handled: true, response: deps.error(INTERNAL_ERROR_MESSAGE, 500) };
+    }
+}
+
+/**
+ * The service on a door's slot, read off the REQUEST's own kernel and nowhere
+ * else. Every dispatcher door bridge reads the member it forwards to through
+ * this, and only through this (pinned by `own-door-bridge.test.ts`): a door is
+ * served only by the request's own kernel.
+ *
+ * A door member is closed over the kernel that registered it, so a request
+ * kernel without the slot is the door's typed not-available answer (`501`),
+ * ⛔ never a member found on another kernel: a door's slot is ⛔ never read
+ * through `deps.resolveService` / `deps.resolveServiceOrLoud`, whose chains
+ * also consult the host kernel. On a host with one kernel the request's kernel
+ * IS that kernel, so the answer there is the one it always was.
+ *
+ * A kernel that throws for an unregistered name reads as an empty slot. Read
+ * on every request, never recorded (AGENTS.md, "Startup registry reads").
+ */
+export async function readDoorSlot<T>(
+    deps: DomainHandlerDeps,
+    context: HttpProtocolContext,
+    slot: string,
+): Promise<T | undefined> {
+    try {
+        return ((await deps.getRequestKernelService(context, slot)) ?? undefined) as T | undefined;
+    } catch {
+        return undefined;
     }
 }
 

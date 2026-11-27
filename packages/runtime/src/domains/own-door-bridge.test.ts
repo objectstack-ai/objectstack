@@ -573,3 +573,126 @@ describe('[#37662] every own-door bridge is tied to the catalog', () => {
         }
     });
 });
+
+/**
+ * A dispatcher door is served only by the request's own kernel. Every door
+ * bridge forwards to one member on one slot; on a host that routes a request
+ * to a kernel of its own, that member is read off the request's kernel alone.
+ * A request kernel without the slot answers the door's typed not-available
+ * `501`, and a member registered on the host kernel is never called.
+ *
+ * Driven through the REAL `HttpDispatcher.dispatch()`, with a `kernel-resolver`
+ * that places the request on its own kernel and names its environment.
+ */
+describe('a dispatcher door is served only by the request\'s own kernel', () => {
+    interface Door {
+        name: string;
+        slot: string;
+        member: string;
+        method: string;
+        path: string;
+        query?: Record<string, string>;
+        body?: unknown;
+    }
+    const ownDoor = (bridge: OwnDoorBridge): Door => ({
+        name: bridge.tag,
+        slot: bridge.slot,
+        member: bridge.member,
+        method: bridge.doors[0]!.method,
+        path: bridge.doors[0]!.pattern.replace(/:[a-z]+/gi, 'id_1'),
+    });
+    const DOORS: Door[] = [
+        { name: 'comments', slot: 'comments', member: 'handleCommentDoor', method: 'DELETE', path: '/comments/c_1' },
+        { name: 'approvals', slot: 'approvals', member: 'handleActionPage', method: 'GET', path: '/approvals/act', query: { token: 't_1' } },
+        { name: 'webhooks', slot: 'webhooks', member: 'handleRedeliver', method: 'POST', path: '/webhooks/redeliver', body: { deliveryId: 'd_1' } },
+        { name: 'automation-hooks', slot: 'trigger-api', member: 'handleInboundHook', method: 'POST', path: '/automation/hooks/flow_x/default', body: { event: 'e' } },
+        ownDoor(PERSONAL_VIEWS_BRIDGE),
+        ownDoor(ATTACHMENTS_BRIDGE),
+        ownDoor(PRINT_BRIDGE),
+    ];
+
+    const served = () => vi.fn(async () => new Response(JSON.stringify({ success: true }), { status: 200, headers: JSON_HEADERS }));
+
+    /** A host whose resolver places every request on `requestKernel`, in its own environment. */
+    function hostWith(hostKernel: any, requestKernel: any) {
+        const resolver: KernelResolver = {
+            resolveKernel: async (context: HttpProtocolContext) => {
+                context.environmentId = 'env_request';
+                return requestKernel;
+            },
+        };
+        return new HttpDispatcher(hostKernel, undefined, { kernelResolver: resolver, enforceProjectMembership: false });
+    }
+
+    async function knock(dispatcher: HttpDispatcher, door: Door) {
+        const search = door.query ? `?${new URLSearchParams(door.query)}` : '';
+        const request = wire(door.method, `${door.path}${search}`, door.body);
+        return dispatcher.dispatch(door.method, door.path, door.body ?? {}, door.query ?? {}, ctx(request));
+    }
+
+    for (const door of DOORS) {
+        for (const [variant, throwing] of [['throws', [door.slot]], ['answers nothing', []]] as const) {
+            it(`${door.name}: a request kernel without the slot (its lookup ${variant}) answers 501, and the host kernel's member is never called`, async () => {
+                const hostMember = served();
+                const dispatcher = hostWith(kernelWith({ [door.slot]: { [door.member]: hostMember } }), kernelWith({}, throwing));
+
+                const result = await knock(dispatcher, door);
+
+                expect(envelope(result), JSON.stringify(result.response?.body)).toEqual({ status: 501, code: 'NOT_IMPLEMENTED' });
+                expect(hostMember).not.toHaveBeenCalled();
+            });
+        }
+
+        it(`${door.name}: the request kernel's member serves the door`, async () => {
+            const hostMember = served();
+            const ownMember = served();
+            const dispatcher = hostWith(
+                kernelWith({ [door.slot]: { [door.member]: hostMember } }),
+                kernelWith({ [door.slot]: { [door.member]: ownMember } }),
+            );
+
+            const result = await knock(dispatcher, door);
+
+            expect(result.response, JSON.stringify(result.response?.body)).toBeUndefined();
+            expect((result.result as Response).status).toBe(200);
+            expect(ownMember).toHaveBeenCalledTimes(1);
+            expect(hostMember).not.toHaveBeenCalled();
+        });
+    }
+
+    /**
+     * Found rather than listed: every module of this directory that answers a
+     * door's not-available `501` (a `*_service_unregistered` catalog sentence)
+     * is held to reading the slot that answer guards through `readDoorSlot`,
+     * the request-kernel-only reader. The read nearest before each such answer
+     * must be that reader, so a new bridge that reads its member any other way
+     * fails here the day it lands.
+     */
+    it('every door bridge reads the member it forwards to through the request-kernel-only reader', () => {
+        const here = dirname(fileURLToPath(import.meta.url));
+        const READ = /\b(readDoorSlot|deps\.getRequestKernelService|deps\.resolveServiceOrLoud|deps\.resolveService|deps\.getService|deps\.getObjectQL)\s*(?:<[^(]*>)?\(/g;
+        const ABSENT = /,\s*'([a-z_]+_service_unregistered)'/g;
+        const found: string[] = [];
+        for (const name of readdirSync(here).filter((n) => n.endsWith('.ts') && !n.endsWith('.test.ts'))) {
+            const source = readFileSync(join(here, name), 'utf8');
+            for (const answer of source.matchAll(ABSENT)) {
+                const reads = [...source.slice(0, answer.index).matchAll(READ)];
+                expect(reads.at(-1)?.[1], `${name}: the read its ${answer[1]} answer guards`).toBe('readDoorSlot');
+                found.push(`${name} ${answer[1]}`);
+            }
+        }
+        expect(found).toEqual(expect.arrayContaining([
+            'own-door-bridge.ts own_door_service_unregistered',
+            'comments.ts comment_doors_service_unregistered',
+            'approvals.ts approvals_act_service_unregistered',
+            'webhooks.ts webhook_redeliver_service_unregistered',
+            'automation-hooks.ts automation_hooks_service_unregistered',
+        ]));
+
+        // The reader itself reads the request kernel's slot and nothing else.
+        const bridge = readFileSync(join(here, 'own-door-bridge.ts'), 'utf8');
+        const body = bridge.slice(bridge.indexOf('export async function readDoorSlot'));
+        const reader = body.slice(0, body.indexOf('\n}\n'));
+        expect([...reader.matchAll(READ)].map((m) => m[1])).toEqual(['readDoorSlot', 'deps.getRequestKernelService']);
+    });
+});
