@@ -2253,6 +2253,8 @@ const de = {
       // ui ADR-0057 Amendment A4 — the app's AI inquiry page: its static scope badge.
       askPage: {
         scopeBadge: "Diese App zuerst",
+        recentTitle: "Letzte Unterhaltungen",
+        recentEmpty: "Fragen, die Sie hier stellen, erscheinen hier.",
       },
       renameConversation: "Unterhaltung umbenennen",
       deleteConversation: "Unterhaltung löschen",

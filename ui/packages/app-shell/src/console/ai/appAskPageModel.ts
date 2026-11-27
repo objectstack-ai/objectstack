@@ -126,3 +126,23 @@ export function conversationBelongsToAskPage(
 ): boolean {
   return conversation?.metadata?.activePackageId === packageId;
 }
+
+/** How many of the caller's newest conversations the home state reads (the list route's page). */
+export const ASK_RECENT_FETCH_LIMIT = 50;
+
+/** How many of this app's conversations the home state lists. */
+export const MAX_ASK_RECENT = 5;
+
+/**
+ * The home state's recent conversations: of the caller's newest list rows, in
+ * the order given, the ones this page created for this package, at most
+ * {@link MAX_ASK_RECENT}. A drawer thread records no `activePackageId`, and a
+ * row whose `metadata` is not a record (`AiConversationSchema.metadata`) reads
+ * as having none, so neither is listed.
+ */
+export function recentAskPageConversations<T extends { metadata?: Record<string, unknown> }>(
+  rows: readonly T[],
+  packageId: string,
+): T[] {
+  return rows.filter((row) => conversationBelongsToAskPage(row, packageId)).slice(0, MAX_ASK_RECENT);
+}
