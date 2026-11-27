@@ -2519,12 +2519,8 @@ const ru = {
       },
       discussing: "Просмотр: {{target}}",
       focus: {
-        pin: "Продолжать спрашивать об этой записи",
         pinned: "Вопросы о записи: {{target}}",
         remove: "Больше не спрашивать об этой записи",
-        switchPrompt: "Спрашивать вместо этого о «{{target}}»?",
-        switchAccept: "Переключить",
-        switchDecline: "Оставить",
       },
       // objectui#3546 slice four — the AI console surfaces: the /ai chat page's app switcher,
       // connection banner and plan/publish cards, the ChatDock chrome, and the

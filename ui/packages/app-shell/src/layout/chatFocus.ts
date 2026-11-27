@@ -1,46 +1,55 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 /**
- * objectstack#36999 — the conversation's FOCUS: the record a user pinned the
- * chat to, sent as `context.focus` on every turn (the spec's
+ * objectstack#36999 — the conversation's FOCUS: the record a conversation is
+ * about, sent as `context.focus` on every turn (the spec's
  * `ToolExecutionContext.focus`) and shown as a chip in the composer.
  *
- * Three rules shape this module (topic #36996's rulings and the card's):
+ * objectstack#37861 (framework ADR-0160 D6, seventh amendment, "The focus of a
+ * conversation") — a conversation's state is `{ focus, dismissed }`:
  *
- * - Per conversation, one record in phase 1, client-reported and advisory:
+ * - **Before the first send, the focus is the record on the page** (the
+ *   console's `surfaceRecord()`), unless the user removed it with ×
+ *   (`dismissed`). It follows the page with no prompt: another record is that
+ *   record, a page with no record is no focus.
+ * - **× removes it.** Nothing adds a focus to that conversation again.
+ * - **The first send fixes both.** The focus the conversation has at its first
+ *   send rides that turn and every later one; navigation no longer moves it.
+ *   After the first send × is the one change left.
+ *
+ * Three rules from topic #36996 still shape this module:
+ *
+ * - One record per conversation in phase 1, client-reported and advisory:
  *   never an access decision. The server re-reads the record as the caller.
- * - The request body is the authority. What is stored here only restores the
- *   chip of a conversation the host shows again (another page, the drawer
- *   closed and reopened, a reload of the tab). The stored copy is per tab
- *   (`sessionStorage`, like the drawer's own target), so the chip is never
- *   shown where the key would not also be sent.
+ * - The request body is the authority. What is stored only restores the chip
+ *   of a conversation the host shows again: this tab's copy (`sessionStorage`,
+ *   like the drawer's own target) and, for a conversation this tab never held
+ *   (another tab, a history row), the conversation's own `metadata.focus`,
+ *   which the in-app assistant writes from the turns it served.
  * - A focus rides on its conversation and never re-keys it: the dock resolves
  *   the same thread with or without one (ADR-0057 as amended for
  *   objectui#10926). The state is held by the HOST, above the pane it keys on
  *   the conversation id, so the first send — which mints that id and remounts
  *   the pane — still carries it.
- *
- * Kept free of chat code: `setChatFocus` is exported from the package root, so
- * the record drawer and the `ask_ai` action can call it from the eager console
- * graph (objectui#13410).
  */
 
 import * as React from 'react';
+import type { ChatSurfaceContext } from './chatSurfaceContext.js';
 
-/** One pinned record: the object's machine name and the record id. */
+/** One focused record: the object's machine name and the record id. */
 export interface ChatFocus {
   object: string;
   id: string;
 }
 
-/** A conversation's focus and whether the user declined the 「ask about this one instead?」 offer. */
+/** A conversation's stored focus state (ADR-0160 D6, seventh amendment). */
 export interface ChatFocusEntry {
   focus: ChatFocus | null;
-  /** Remembered for the conversation: once declined, opening another record asks no more. */
-  declined: boolean;
+  /** The user removed the focus with ×: nothing adds one to this conversation again. */
+  dismissed: boolean;
 }
 
-const EMPTY_ENTRY: ChatFocusEntry = Object.freeze({ focus: null, declined: false }) as ChatFocusEntry;
+const EMPTY_ENTRY: ChatFocusEntry = Object.freeze({ focus: null, dismissed: false }) as ChatFocusEntry;
 
 /** sessionStorage key prefix; the conversation id follows. */
 export const CHAT_FOCUS_STORAGE_PREFIX = 'ai-chat-focus:';
@@ -51,39 +60,82 @@ function isChatFocus(value: unknown): value is ChatFocus {
   return typeof v.object === 'string' && v.object !== '' && typeof v.id === 'string' && v.id !== '';
 }
 
+/**
+ * The record a surface shows on its own (a record page, a record open in a
+ * list's drawer), or null: a list or a dashboard has none. An unsent
+ * conversation's focus (ADR-0160 D6, seventh amendment).
+ */
+export function surfaceRecord(surface: ChatSurfaceContext | undefined): ChatFocus | null {
+  const object = surface?.artifact?.type === 'object' ? surface.artifact.name : undefined;
+  const id = surface?.selection?.kind === 'record' ? surface.selection.id : undefined;
+  return object && id ? { object, id } : null;
+}
+
 /** Two foci name the same record. */
 export function sameChatFocus(a: ChatFocus | null | undefined, b: ChatFocus | null | undefined): boolean {
   if (!a || !b) return !a && !b;
   return a.object === b.object && a.id === b.id;
 }
 
-/** The stored entry of `conversationId`, or the empty one. Never throws. */
-export function readStoredChatFocus(conversationId: string | undefined): ChatFocusEntry {
-  if (!conversationId) return EMPTY_ENTRY;
+/** A conversation's focus as its `metadata.focus` carries it, with the record's label when the server read one. */
+export interface ChatFocusFromMetadata extends ChatFocus {
+  label?: string;
+}
+
+/**
+ * The focus a conversation's `metadata` records, or null. The in-app
+ * assistant stores `focus` in the shape the request sends (`context.focus`):
+ * an array whose first entry is the record, with an optional display `label`.
+ * It deletes the key when a turn carries no focus. Anything else (a bare
+ * object, an entry without a string `object` and `id`) reads as no focus.
+ */
+export function chatFocusFromMetadata(metadata: Readonly<Record<string, unknown>> | undefined): ChatFocusFromMetadata | null {
+  const raw = metadata?.focus;
+  if (!Array.isArray(raw)) return null;
+  const first: unknown = raw[0];
+  if (!isChatFocus(first)) return null;
+  const label = (first as { label?: unknown }).label;
+  return {
+    object: first.object,
+    id: first.id,
+    ...(typeof label === 'string' && label.trim() !== '' ? { label: label.trim() } : {}),
+  };
+}
+
+/** The stored entry of `conversationId` in this tab, or null when there is none. Never throws. */
+function readStoredEntry(conversationId: string | undefined): ChatFocusEntry | null {
+  if (!conversationId) return null;
   try {
     const raw = window.sessionStorage.getItem(`${CHAT_FOCUS_STORAGE_PREFIX}${conversationId}`);
-    if (!raw) return EMPTY_ENTRY;
-    const parsed = JSON.parse(raw) as { focus?: unknown; declined?: unknown };
-    return { focus: isChatFocus(parsed.focus) ? parsed.focus : null, declined: parsed.declined === true };
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as { focus?: unknown; dismissed?: unknown };
+    const focus = isChatFocus(parsed.focus) ? { object: parsed.focus.object, id: parsed.focus.id } : null;
+    const dismissed = parsed.dismissed === true;
+    return focus || dismissed ? { focus, dismissed } : null;
   } catch {
-    return EMPTY_ENTRY;
+    return null;
   }
+}
+
+/** The stored entry of `conversationId` in this tab, or the empty one. Never throws. */
+export function readStoredChatFocus(conversationId: string | undefined): ChatFocusEntry {
+  return readStoredEntry(conversationId) ?? EMPTY_ENTRY;
 }
 
 function writeStoredChatFocus(conversationId: string, entry: ChatFocusEntry): void {
   try {
     const key = `${CHAT_FOCUS_STORAGE_PREFIX}${conversationId}`;
-    if (!entry.focus && !entry.declined) window.sessionStorage.removeItem(key);
+    if (!entry.focus && !entry.dismissed) window.sessionStorage.removeItem(key);
     else window.sessionStorage.setItem(key, JSON.stringify(entry));
   } catch {
-    /* private mode / quota — the chip simply is not restored */
+    /* private mode / quota — the chip is restored from the conversation's metadata, or not at all */
   }
 }
 
 /**
  * The `context` keys a turn adds for the focus: `{ focus: [record] }` while
- * one is pinned AND the agent honours it, else nothing at all — so a turn
- * without a focus is byte-identical to a turn before this key existed.
+ * the conversation has one AND the agent honours it, else nothing at all — so
+ * a turn without a focus is byte-identical to a turn before this key existed.
  */
 export function buildFocusContext(
   focus: ChatFocus | null | undefined,
@@ -92,219 +144,158 @@ export function buildFocusContext(
   return honoured && focus ? { focus: [{ object: focus.object, id: focus.id }] } : {};
 }
 
-// ── The one setter ─────────────────────────────────────────────────────────
-// Every entry point pins through `setChatFocus`: the pin on the page chip, the
-// record drawer and the `ask_ai` action. It applies to the chat host on
-// screen; with none mounted (the drawer is closed) it waits, and the next host
-// to mount takes it, so "pin, then open the drawer" lands on the drawer's
-// conversation.
-//
-// objectstack#37142 — a caller that MOVES the chat in the same event (the
-// `ask_ai` action opens a fresh thread) says so with `follow`: the focus is the
-// next conversation's, so a host that shows one now leaves it untouched and
-// hands the focus to the conversation it moves to.
-
-/** How `setChatFocus` lands. */
-export interface SetChatFocusOptions {
-  /**
-   * The caller is moving the chat to another conversation in this same event:
-   * the focus belongs to that one, not to the conversation on screen. A host
-   * with no conversation id yet takes it at once; a host showing one keeps
-   * that conversation's focus and gives this one to the next it shows.
-   */
-  follow?: boolean;
-}
-
-type ChatFocusHost = (focus: ChatFocus | null, follow: boolean) => void;
-const hosts: ChatFocusHost[] = [];
-let pending: { focus: ChatFocus | null; follow: boolean } | null = null;
-
-/**
- * Pins `focus` to the conversation the chat shows (or clears it with `null`).
- * A new focus starts with a fresh 「ask about this one instead?」 offer.
- */
-export function setChatFocus(focus: ChatFocus | null, options?: SetChatFocusOptions): void {
-  const next = focus && isChatFocus(focus) ? { object: focus.object, id: focus.id } : null;
-  const follow = options?.follow === true;
-  const host = hosts[hosts.length - 1];
-  if (host) host(next, follow);
-  else pending = { focus: next, follow };
-}
-
-function registerChatFocusHost(host: ChatFocusHost): () => void {
-  hosts.push(host);
-  if (pending) {
-    const { focus, follow } = pending;
-    pending = null;
-    host(focus, follow);
-  }
-  return () => {
-    const at = hosts.lastIndexOf(host);
-    if (at >= 0) hosts.splice(at, 1);
-  };
-}
-
-/** Test seam: forget every host and a waiting request. */
-export function resetChatFocusForTests(): void {
-  hosts.length = 0;
-  pending = null;
-}
-
 /** What a chat host hands its pane. */
-export interface ConversationFocus extends ChatFocusEntry {
-  /** Pin (or clear) the focus of the conversation on screen. */
-  setFocus: (focus: ChatFocus | null) => void;
-  /** Decline the offer to switch; remembered for the conversation. */
-  decline: () => void;
+export interface ConversationFocus {
+  /** The conversation's focus now: the page's record while it has sent nothing (unless dismissed), else the one it was sent with. */
+  focus: ChatFocus | null;
+  /** The user removed the focus with ×. */
+  dismissed: boolean;
+  /** The conversation has sent nothing yet, so its focus follows the page. */
+  unsent: boolean;
+  /** The record's display name as the conversation's metadata stored it, when the chip was restored from there. */
+  label?: string;
+  /** × on the focus chip: clears the focus and sets `dismissed`. */
+  dismiss: () => void;
   /**
    * The host is creating the conversation for a first send (it calls this
    * beside `ensureConversation`, and only while it has a user to create it
-   * for): the id that arrives next is the one that send goes to, so a focus
-   * pinned before it is carried onto it. A create that fails spends the mark
-   * (see the hook's `createError`).
+   * for): the id that arrives next is the one that send goes to, so it takes
+   * the focus the conversation had at this moment. A create that fails spends
+   * the mark (see the hook's `createError`).
    */
   markSending: () => void;
 }
 
 interface FocusState {
+  /** The conversation the state is for; `undefined` is one with no id yet (unsent). */
   key: string | undefined;
+  /** A sent conversation's entry; for an unsent one only `dismissed` is read. */
   entry: ChatFocusEntry;
-  /**
-   * The id that arrives next takes this conversation's focus: set by a
-   * `setChatFocus` hand-off that landed before the host had an id ("pin, then
-   * open the drawer"); a first send says the same through `markSending`. Any
-   * other arrival of an id — a resumed thread resolving, a history row, the
-   * scope blanking the id between apps — reads that conversation's own stored
-   * focus instead. Only the hand-off's own focus is carried: the chip's pin,
-   * remove or decline drops the flag, and so does any change of what the host
-   * was asked to show ({@link FocusState.target}): an id that arrives for a
-   * history row picked, or an app moved to, before the first send is that
-   * conversation's own (objectstack#37142).
-   */
-  carry: boolean;
-  /**
-   * What the host was asked to show when the state last moved (a key of the
-   * dock's target). A change drops the hand-off's carry.
-   */
-  target: string | undefined;
-  /**
-   * A `follow` hand-off that landed while this host showed a conversation
-   * (objectstack#37142): the focus of the NEXT conversation the host shows,
-   * applied when the id changes (and carried, as a hand-off is, when that
-   * next one has no id yet). The chip's own moves drop it.
-   */
-  follow?: { focus: ChatFocus | null };
+  /** The metadata label of a focus restored from the conversation's metadata. */
+  label?: string;
+  /** What the host was asked to show when the state last moved (see `origin`). */
+  origin: string | undefined;
+}
+
+/** The entry a conversation the host arrives at restores: this tab's copy, else its metadata's. */
+function restoredState(
+  key: string | undefined,
+  origin: string | undefined,
+  fromMetadata: ChatFocusFromMetadata | null,
+): FocusState {
+  const stored = readStoredEntry(key);
+  if (stored) return { key, entry: stored, origin };
+  if (key !== undefined && fromMetadata) {
+    return {
+      key,
+      entry: { focus: { object: fromMetadata.object, id: fromMetadata.id }, dismissed: false },
+      label: fromMetadata.label,
+      origin,
+    };
+  }
+  return { key, entry: EMPTY_ENTRY, origin };
 }
 
 /**
  * The focus of the conversation `conversationId` names, held by the chat
- * host. `undefined` is a conversation the host has no id for yet. A focus
- * pinned there reaches an id only on a CARRY (see {@link FocusState.carry}):
- * the first send minting it, or the setter's hand-off — and then in the same
- * render, so the first turn, sent by the pane that remounts on that id,
- * already carries it. Every other move to a conversation restores that one's
- * chip from storage.
+ * host. `undefined` is a conversation the host has no id for yet: it has sent
+ * nothing, so its focus is `pageRecord` unless the user dismissed it. The
+ * first send fixes that focus onto the id it mints, in the same render, so the
+ * first turn, sent by the pane that remounts on that id, already carries it.
+ * Every other arrival of an id (a resumed thread resolving, a history row, the
+ * scope blanking the id between apps) restores that conversation's own focus:
+ * this tab's stored copy, else `metadata.focus` from the conversation's row.
  */
 export function useConversationFocus(
   conversationId: string | undefined,
   /** The host's `createError`: a first send whose create failed minted nothing. */
   createError?: unknown,
+  /** The record on the page in view (`surfaceRecord()`), or null on a page that shows no one record. */
+  pageRecord?: ChatFocus | null,
+  /** The `metadata` of the conversation `conversationId` names, as its row returned it. */
+  conversationMetadata?: Readonly<Record<string, unknown>>,
   /**
-   * A key of what the host was asked to show (the dock's target): while it
-   * holds, an id the host resolves takes a hand-off's carry; once it changes,
-   * the next id is the conversation's own. A host that passes none keeps the
-   * carry until an id arrives.
+   * A key of what the host was asked to show (the dock's target). While the
+   * conversation is unsent, a change starts another one: its `dismissed` is
+   * dropped. A host that passes none keeps it until an id arrives.
    */
-  target?: string,
+  origin?: string,
 ): ConversationFocus {
-  const [state, setState] = React.useState<FocusState>(() => ({
-    key: conversationId,
-    entry: readStoredChatFocus(conversationId),
-    carry: false,
-    target,
-  }));
-  // A first send in flight: a ref, not state, so marking it re-renders
-  // nothing while the pane holds the message it is creating the row for.
-  const sendingRef = React.useRef(false);
+  const fromMetadata = React.useMemo(() => chatFocusFromMetadata(conversationMetadata), [conversationMetadata]);
+  const [state, setState] = React.useState<FocusState>(() => restoredState(conversationId, origin, fromMetadata));
+  // The focus a first send in flight fixes: a ref, not state, so marking it
+  // re-renders nothing while the pane holds the message it is creating the
+  // row for.
+  const sendingRef = React.useRef<ChatFocusEntry | null>(null);
   let current = state;
-  // The host was asked for something else (a history row, another app): a
-  // hand-off's carry does not go with it. A pending `follow` does — the caller
-  // that moved the target set it for exactly that move.
-  if (current.target !== target) current = { ...current, target, carry: false };
   if (current.key !== conversationId) {
-    const carried =
-      current.key === undefined &&
-      conversationId !== undefined &&
-      (current.carry || sendingRef.current) &&
-      current.entry.focus !== null;
-    current = current.follow
-      ? {
-          key: conversationId,
-          entry: { focus: current.follow.focus, declined: false },
-          carry: conversationId === undefined,
-          target,
-        }
-      : {
-          key: conversationId,
-          entry: carried ? current.entry : readStoredChatFocus(conversationId),
-          carry: false,
-          target,
-        };
+    const sending = current.key === undefined && conversationId !== undefined ? sendingRef.current : null;
+    current = sending
+      ? { key: conversationId, entry: sending, origin }
+      : restoredState(conversationId, origin, fromMetadata);
+  } else if (current.origin !== origin) {
+    // Another target while unsent is another conversation: × on the last one
+    // does not carry over. A sent conversation keeps its own entry.
+    current = current.key === undefined ? { key: undefined, entry: EMPTY_ENTRY, origin } : { ...current, origin };
+  } else if (
+    current.key !== undefined &&
+    fromMetadata &&
+    !current.entry.focus &&
+    !current.entry.dismissed &&
+    readStoredEntry(current.key) === null
+  ) {
+    // The conversation's row arrived after its id: its metadata restores the
+    // chip this tab never held.
+    current = restoredState(current.key, origin, fromMetadata);
   }
   // Derived state set during render: React re-renders before committing, so
   // no child of this commit sees the previous conversation's focus.
   if (current !== state) setState(current);
-  const { key, entry } = current;
+  const { key, entry, label } = current;
 
   React.useEffect(() => {
     if (key !== undefined) writeStoredChatFocus(key, entry);
   }, [key, entry]);
   // The send's id has arrived (or another one did): the mark is spent.
   React.useEffect(() => {
-    if (key !== undefined) sendingRef.current = false;
+    if (key !== undefined) sendingRef.current = null;
   }, [key]);
   // The send's create failed: no id is coming for it, so the mark is spent
-  // and the next id to arrive (a history row) reads its own focus. A send
+  // and the next id to arrive (a history row) restores its own focus. A send
   // made while the host is still resolving is not spent: the resolve fulfils
   // it, and the id that arrives is the one that send goes to.
   React.useEffect(() => {
-    if (createError) sendingRef.current = false;
+    if (createError) sendingRef.current = null;
   }, [createError]);
 
-  // The chip's own moves drop a hand-off's carry: what the user pins (or
-  // keeps) here is this conversation's, and follows no other one.
-  const setFocus = React.useCallback((focus: ChatFocus | null) => {
-    setState((s) =>
-      sameChatFocus(s.entry.focus, focus) && !s.follow
-        ? s
-        : { ...s, entry: { focus, declined: false }, carry: false, follow: undefined },
-    );
-  }, []);
-  const decline = React.useCallback(() => {
-    setState((s) =>
-      s.entry.declined && !s.carry && !s.follow
-        ? s
-        : { ...s, entry: { ...s.entry, declined: true }, carry: false, follow: undefined },
-    );
+  const unsent = key === undefined;
+  const page = pageRecord && isChatFocus(pageRecord) ? pageRecord : null;
+  const pageObject = page?.object;
+  const pageId = page?.id;
+  const effective = React.useMemo<ChatFocus | null>(() => {
+    if (!unsent) return entry.focus;
+    if (entry.dismissed || !pageObject || !pageId) return null;
+    return { object: pageObject, id: pageId };
+  }, [unsent, entry, pageObject, pageId]);
+  const effectiveRef = React.useRef({ focus: effective, dismissed: entry.dismissed });
+  effectiveRef.current = { focus: effective, dismissed: entry.dismissed };
+
+  const dismiss = React.useCallback(() => {
+    setState((s) => (s.entry.dismissed && !s.entry.focus ? s : { ...s, entry: { focus: null, dismissed: true }, label: undefined }));
   }, []);
   const markSending = React.useCallback(() => {
-    sendingRef.current = true;
+    sendingRef.current = { ...effectiveRef.current };
   }, []);
-  // The setter's hand-off: applied here, and carried onto the id the host
-  // resolves next when it has none yet. A `follow` hand-off to a host showing
-  // a conversation waits for the next one instead (see `FocusState.follow`).
-  const handOff = React.useCallback((focus: ChatFocus | null, follow: boolean) => {
-    setState((s) =>
-      follow && s.key !== undefined
-        ? { ...s, follow: { focus } }
-        : { ...s, entry: { focus, declined: false }, carry: s.key === undefined, follow: undefined },
-    );
-  }, []);
-
-  React.useEffect(() => registerChatFocusHost(handOff), [handOff]);
 
   return React.useMemo(
-    () => ({ focus: entry.focus, declined: entry.declined, setFocus, decline, markSending }),
-    [entry, setFocus, decline, markSending],
+    () => ({
+      focus: effective,
+      dismissed: entry.dismissed,
+      unsent,
+      ...(label && effective ? { label } : {}),
+      dismiss,
+      markSending,
+    }),
+    [effective, entry.dismissed, unsent, label, dismiss, markSending],
   );
 }

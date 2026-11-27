@@ -33,9 +33,9 @@ export interface AgentCapabilities {
   resume: boolean;
   /**
    * Honours a conversation focus — the chat request's `context.focus`, the
-   * record the user pinned the conversation to (`AiAgentCapabilitiesSchema`
-   * in `@objectstack/spec`). Hosts draw the pin and send the key only when it
-   * is true; a server that omits it does not honour it.
+   * record the conversation is about (`AiAgentCapabilitiesSchema` in
+   * `@objectstack/spec`). Hosts draw the focus chip and send the key only
+   * when it is true; a server that omits it does not honour it.
    */
   focus: boolean;
 }

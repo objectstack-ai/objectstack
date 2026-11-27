@@ -2377,12 +2377,8 @@ const ko = {
       },
       discussing: "보는 중: {{target}}",
       focus: {
-        pin: "이 레코드에 대해 계속 질문",
         pinned: "질문 대상: {{target}}",
         remove: "이 레코드에 대한 질문 중지",
-        switchPrompt: "대신 \"{{target}}\"에 대해 질문할까요?",
-        switchAccept: "전환",
-        switchDecline: "유지",
       },
       // objectui#3546 slice four — the AI console surfaces: the /ai chat page's app switcher,
       // connection banner and plan/publish cards, the ChatDock chrome, and the

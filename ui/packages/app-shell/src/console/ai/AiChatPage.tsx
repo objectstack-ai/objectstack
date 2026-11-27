@@ -213,6 +213,7 @@ export function AiChatPage({ apiBase: apiBaseProp, defaultAgent: defaultAgentPro
     initialMessages,
     ensureConversation,
     createError: conversationCreateError,
+    conversationMetadata,
   } = useChatConversation({
     // Gate resolution on the agent being known: resolving while `activeAgent`
     // is still undefined (catalog loading) would bind a SCOPELESS conversation
@@ -250,10 +251,18 @@ export function AiChatPage({ apiBase: apiBaseProp, defaultAgent: defaultAgentPro
   const [selectedModelId, setSelectedModelId] = useState<string | undefined>(undefined);
   // objectstack#36999 — the conversation's focus, held here for the same
   // reason: the keyed pane remounts when the first send mints the id, and that
-  // first turn must still carry the record the user pinned.
-  const conversationFocus = useConversationFocus(paneConversationId, conversationCreateError);
+  // first turn must still carry the conversation's record. This page shows no
+  // record of its own, so a new conversation here has none (ADR-0160 D6,
+  // seventh amendment); one opened from history restores its own from this
+  // tab or from its row's metadata (objectstack#37861).
+  const conversationFocus = useConversationFocus(
+    paneConversationId,
+    conversationCreateError,
+    null,
+    scopeMatched ? conversationMetadata : undefined,
+  );
   // A first send creates the conversation: the id it mints takes the focus
-  // pinned before it (and no other arriving id does).
+  // the conversation had at that send (and no other arriving id does).
   const { markSending: markFocusSending } = conversationFocus;
   const ensureConversationForSend = useCallback(() => {
     // With no user there is nothing to create: no mark, so no id that

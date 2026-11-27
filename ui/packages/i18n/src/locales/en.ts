@@ -3180,14 +3180,10 @@ const en = {
       hideChats: 'Hide chats',
       showChats: 'Show chats',
       discussing: 'Viewing: {{target}}',
-      // objectstack#36999 — the conversation focus: the record the chat is pinned to.
+      // objectstack#36999 — the conversation focus: the record the conversation is about.
       focus: {
-        pin: 'Keep asking about this record',
         pinned: 'Asking about: {{target}}',
         remove: 'Stop asking about this record',
-        switchPrompt: 'Ask about "{{target}}" instead?',
-        switchAccept: 'Switch',
-        switchDecline: 'Keep',
       },
       justNow: 'just now',
       minutesAgo: '{{count}}m ago',

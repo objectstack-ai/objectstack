@@ -134,6 +134,13 @@ export interface UseChatConversationReturn {
    */
   conversationScope: string | undefined;
   initialMessages: HydratedUIMessage[];
+  /**
+   * objectstack#37861 — the `metadata` of the row `conversationId` names, as
+   * the conversation routes returned it when the hook read or created that
+   * row (`AiConversationSchema.metadata`, `@objectstack/spec/api`). `undefined`
+   * while no conversation is held, or for a row served without one.
+   */
+  conversationMetadata: Readonly<Record<string, unknown>> | undefined;
   isLoading: boolean;
   /**
    * Create the conversation on the FIRST SEND. The hook never mints a row on
@@ -752,6 +759,11 @@ export function useChatConversation(
   adoptLegacyRef.current = adoptLegacy;
   const [conversationId, setConversationId] = useState<string | undefined>(undefined);
   const [initialMessages, setInitialMessages] = useState<HydratedUIMessage[]>([]);
+  // The metadata of the row last read or created, tagged with its id so a
+  // stale row never answers for another conversation.
+  const [heldMetadata, setHeldMetadata] = useState<
+    { id: string; metadata: Readonly<Record<string, unknown>> | undefined } | undefined
+  >(undefined);
   const [isLoading, setIsLoading] = useState<boolean>(Boolean(userId));
   const [createError, setCreateError] = useState<Error | undefined>(undefined);
   const mountedRef = useRef(true);
@@ -811,6 +823,7 @@ export function useChatConversation(
             resolvedForUserRef.current = forUser;
             resolvedScopeRef.current = forScope;
             setConversationId(fresh.id);
+            setHeldMetadata({ id: fresh.id, metadata: fresh.metadata });
             setInitialMessages(toUIMessages(fresh.messages));
           }
           return fresh.id;
@@ -928,6 +941,7 @@ export function useChatConversation(
           if (existing) {
             writeCache(key, existing.id);
             setConversationId(existing.id);
+            setHeldMetadata({ id: existing.id, metadata: existing.metadata });
             const messages = toUIMessages(existing.messages);
             const next = messages.length > 0 ? messages : readMessageCache(existing.id);
             // A re-resolve of the conversation we ALREADY hold (e.g. the scope
@@ -979,6 +993,7 @@ export function useChatConversation(
                   if (adoptLegacyRef.current?.(judged)) {
                     writeCache(key, legacy.id);
                     setConversationId(legacy.id);
+                    setHeldMetadata({ id: legacy.id, metadata: legacy.metadata });
                     setInitialMessages(judged);
                     resolvedForUserRef.current = userId;
                     resolvedScopeRef.current = scope;
@@ -1005,6 +1020,7 @@ export function useChatConversation(
               const reuse = resumeMode !== 'fresh' || messages.length === 0;
               if (reuse) {
                 setConversationId(existing.id);
+                setHeldMetadata({ id: existing.id, metadata: existing.metadata });
                 setInitialMessages(
                   resumeMode === 'fresh'
                     ? []
@@ -1207,6 +1223,8 @@ export function useChatConversation(
     conversationId,
     conversationScope: resolvedScopeRef.current,
     initialMessages,
+    conversationMetadata:
+      conversationId && heldMetadata?.id === conversationId ? heldMetadata.metadata : undefined,
     isLoading,
     ensureConversation,
     createError: conversationId ? undefined : createError,

@@ -2443,12 +2443,8 @@ const fr = {
       },
       discussing: "Affiché : {{target}}",
       focus: {
-        pin: "Continuer à poser des questions sur cet enregistrement",
         pinned: "Questions sur : {{target}}",
         remove: "Ne plus poser de questions sur cet enregistrement",
-        switchPrompt: "Poser plutôt des questions sur « {{target}} » ?",
-        switchAccept: "Changer",
-        switchDecline: "Conserver",
       },
       // objectui#3546 slice four — the AI console surfaces: the /ai chat page's app switcher,
       // connection banner and plan/publish cards, the ChatDock chrome, and the

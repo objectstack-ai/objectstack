@@ -216,6 +216,7 @@ const ChatbotEnhanced = React.forwardRef<HTMLDivElement, ChatbotEnhancedProps>(
       onOpenList,
       surfaceContextLabel,
       surfaceContextTitle,
+      promptInputHeaderSlot,
       processVisibility = 'summary',
       surface = 'card',
       ...props
@@ -997,7 +998,13 @@ const ChatbotEnhanced = React.forwardRef<HTMLDivElement, ChatbotEnhancedProps>(
             {/* objectstack#35445 — the page in view sits on the input's top
                 edge, inside its frame: it belongs to what the next message
                 carries, and it never lies over the conversation. */}
-            {surfaceContextLabel ? (
+            {/* objectstack#37861 — the host's own context row takes that
+                place, at the start of the line inside the frame. */}
+            {promptInputHeaderSlot ? (
+              <PromptInputHeader className="px-3 pt-2 pb-0" data-testid="prompt-input-header-slot">
+                {promptInputHeaderSlot}
+              </PromptInputHeader>
+            ) : surfaceContextLabel ? (
               <PromptInputHeader className="px-3 pt-2 pb-0" data-testid="surface-context-chip">
                 <span
                   className="inline-flex min-w-0 max-w-full items-center gap-1 truncate rounded-full border bg-muted/40 px-2 py-0.5 text-[11px] text-muted-foreground"
