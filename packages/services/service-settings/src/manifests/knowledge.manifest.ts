@@ -10,18 +10,12 @@ import type { SettingsActionHandler } from '../settings-service.types.js';
  * needs to embed ad-hoc inputs.
  *
  * Every key here has a reader (ADR-0049 enforce-or-remove: a setting nothing
- * reads is not offered):
+ * reads is not offered). The Turso group (`turso_url`, `turso_auth_token`) is
+ * not declared here: its one reader, `@objectstack/knowledge-turso`, adds it
+ * to this page when it reads them (`contributeKnowledgeTursoSettings`), so a
+ * deployment whose store is `@objectstack/knowledge-pgvector` shows no Turso
+ * fields.
  *
- *   - `turso_url`, `turso_auth_token` — `@objectstack/knowledge-turso`
- *     (`readStoreSettings` in its `plugin.ts`), at `kernel:bootstrapped`, when
- *     the runtime mounts it for `requires: ['knowledge']` (#37102): the store
- *     a platform database other than PostgreSQL gets. A `file:` URL saved
- *     there is held to the data directory of the platform's state directory
- *     (`<OS_HOME>/data/`, else the project's `.objectstack/data/`), and a URL
- *     with a control character in it, written out or percent-encoded, or a
- *     token with one, is refused before it reaches the libSQL client. On
- *     PostgreSQL the store is `@objectstack/knowledge-pgvector`, in the
- *     platform database, and neither key is read; the group says so.
  *   - `chunk_target` — the knowledge service's splitter (#37098), read through
  *     `KnowledgeServicePlugin` each time it splits: the longest passage, in
  *     characters, beneath a knowledge source's own `split.maxChars`, and
@@ -46,6 +40,10 @@ import type { SettingsActionHandler } from '../settings-service.types.js';
  *     setting. And every search re-checks each hit as the asking user
  *     (`applyPermissionFilter`), with no switch: a toggle that appeared to
  *     turn that off must not exist.
+ *   - 5: `turso_url` and `turso_auth_token`, with the Turso group, leave this
+ *     declaration for the store that reads them, which contributes them where
+ *     it does (above). A row saved for either is kept: where the store is
+ *     mounted it is read as before, elsewhere it is not served.
  *
  * The spec's `SettingsManifest.version` contract is "increment when keys are
  * renamed/removed". A `sys_setting` row stored for a removed key is kept,
@@ -55,7 +53,7 @@ import type { SettingsActionHandler } from '../settings-service.types.js';
  */
 const manifest = {
   namespace: 'knowledge',
-  version: 4,
+  version: 5,
   label: 'Knowledge',
   icon: 'BookOpen',
   description:
@@ -67,23 +65,6 @@ const manifest = {
   category: 'Infrastructure',
   order: 35,
   specifiers: [
-    // ── Turso / libSQL ────────────────────────────────────────────
-    // No `visible` predicate: the group is read wherever the store is libSQL,
-    // and the page cannot tell which store the runtime mounted, so its
-    // description says when the fields apply.
-    { type: 'group', id: 'turso', label: 'Turso / libSQL', required: false,
-      description:
-        'Used only when the platform database is not PostgreSQL: the knowledge store is then a Turso database, ' +
-        'by default a file of its own. On PostgreSQL the store lives in the platform database and these fields are not read. ' +
-        'Works against managed Turso (libsql://…), local file (file:./knowledge.db), ' +
-        'or in-memory (:memory:). In a cloud deployment with a database per organization, leave blank to ' +
-        'reuse that organization\'s own database connection.' },
-    { type: 'text', key: 'turso_url', label: 'Connection URL', required: false,
-      description: 'Examples: libsql://your-tenant.turso.io · file:./.objectstack/data/knowledge.db · :memory:' },
-    { type: 'password', key: 'turso_auth_token', label: 'Auth token',
-      required: false, encrypted: true,
-      description: 'Only required for managed Turso URLs. Leave blank for local file / :memory:.' },
-
     // ── Indexing defaults ─────────────────────────────────────────
     { type: 'group', id: 'indexing', label: 'Indexing defaults', required: false,
       description: 'A value set on a knowledge source itself wins over these defaults.' },

@@ -558,15 +558,9 @@ export const ko: PlatformTranslationData = {
       title: '지식',
       description: 'RAG / 지식 소스용 벡터 저장소 백엔드입니다.',
       groups: {
-        turso: { title: 'Turso / libSQL', description: '플랫폼 데이터베이스가 PostgreSQL이 아닐 때만 사용됩니다. PostgreSQL에서는 지식 저장소가 플랫폼 데이터베이스 안에 있으며 이 필드는 읽히지 않습니다. 관리형 Turso, 로컬 파일, 인메모리 모두에서 동작합니다.' },
         indexing: { title: '인덱싱 기본값', description: '지식 소스 자체에 설정한 값이 이 기본값보다 우선합니다.' },
       },
       keys: {
-        turso_url: {
-          label: '연결 URL',
-          help: '예: libsql://your-tenant.turso.io · file:./.objectstack/data/knowledge.db · :memory:',
-        },
-        turso_auth_token: { label: '인증 토큰', help: '관리형 Turso URL에만 필요합니다.' },
         chunk_target: { label: '목표 청크 크기(자)', help: '지식 서비스가 문서를 나눌 때 구절 하나의 최대 문자 수입니다. 지식 소스 자체에 설정한 크기가 우선하며, 임베딩 모델의 입력 한도에 따라 더 작아질 수 있습니다.' },
       },
       actions: {
