@@ -315,6 +315,20 @@ export const viewForm = defineForm({
             { field: 'lockedBy', helpText: 'User who locked the view configuration' },
           ],
         },
+        // The audience gate (#34908, ruling 7103739693 letter B): the existing,
+        // server-enforced `requiredPermissions`, given an authoring row — no
+        // second audience key. The hint restates the clauses of
+        // `AUDIENCE_REQUIRED_PERMISSIONS_DESCRIPTION` (all of them, no any-of
+        // form, enforced by the server) for the administrator who sets it.
+        {
+          field: 'requiredPermissions',
+          widget: 'string-tags',
+          helpText: 'Who sees this view: the capabilities a person must hold, every one listed. Permission sets grant '
+            + 'capabilities, and a position passes on the ones its permission sets grant. Leave it empty and everyone '
+            + 'who can see the list sees this view. To show it to several groups, pick one capability and grant it to '
+            + 'each group\'s permission set. The server enforces it: anyone else does not find the view in the list and '
+            + 'is refused if they open it directly.',
+        },
       ],
     },
   ],

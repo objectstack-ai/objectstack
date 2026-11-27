@@ -111,6 +111,7 @@ const METADATA_FORM_BUNDLE: TranslationBundle = {
           layout: { label: '布局', description: '栅格尺寸与刷新频率。' },
           widgets: { label: '组件', description: '放在栅格上的卡片与图表。' },
           filters: { label: '筛选', description: '应用到全部组件的默认筛选与全局筛选。' },
+          access: { label: '访问权限', description: '谁可以查看此仪表盘。' },
           advanced: { label: '高级', description: '无障碍与性能调优。' },
         },
         fields: {
@@ -144,6 +145,7 @@ const METADATA_FORM_BUNDLE: TranslationBundle = {
           },
           'dateRange.allowCustomRange': { label: '允许自定义范围', helpText: '允许查看者自己选择开始和结束日期。' },
           globalFilters: { label: '全局筛选', helpText: '查看者可用来一次筛选全部组件，或只筛选你指定组件的筛选条件。' },
+          requiredPermissions: { label: '所需权限', helpText: '谁能看此仪表盘：查看者必须持有的能力，列出的每一项都要具备。能力由权限集授予，岗位通过其权限集获得这些能力。留空则所有人都能看到此仪表盘。要给多类人看，请选一个能力并授予每类人的权限集。由服务器强制执行：其他人在列表中看不到此仪表盘，直接打开也会被拒绝。' },
         },
       },
     },
