@@ -4791,6 +4791,7 @@ const ru = {
       add_field: "Добавить поле в объект",
       apply_blueprint: "Собрать приложение по плану",
       apply_edit: "Применить это изменение",
+      ask_which: "Уточнить вопрос",
       create_metadata: "Создать элемент метаданных",
       create_object: "Создать новый объект",
       create_package: "Создать новый пакет",

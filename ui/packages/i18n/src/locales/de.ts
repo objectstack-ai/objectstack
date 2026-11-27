@@ -4594,6 +4594,7 @@ const de = {
       add_field: "Dem Objekt ein Feld hinzufügen",
       apply_blueprint: "Die App nach dem Plan erstellen",
       apply_edit: "Die Änderung übernehmen",
+      ask_which: "Die Frage klären",
       create_metadata: "Einen Metadateneintrag anlegen",
       create_object: "Ein Objekt anlegen",
       create_package: "Ein Paket anlegen",

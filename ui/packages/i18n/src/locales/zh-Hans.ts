@@ -4848,6 +4848,7 @@ const zh = {
       add_field: '给对象添加字段',
       apply_blueprint: '按方案搭建应用',
       apply_edit: '应用这次修改',
+      ask_which: '确认问题含义',
       create_metadata: '新建一项元数据',
       create_object: '新建一个对象',
       create_package: '新建一个应用包',

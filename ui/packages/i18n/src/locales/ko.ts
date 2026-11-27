@@ -4593,6 +4593,7 @@ const ko = {
       add_field: "오브젝트에 필드 추가하기",
       apply_blueprint: "설계안대로 앱 만들기",
       apply_edit: "이번 변경 적용하기",
+      ask_which: "질문 의도 확인",
       create_metadata: "메타데이터 새로 만들기",
       create_object: "오브젝트 새로 만들기",
       create_package: "패키지 새로 만들기",

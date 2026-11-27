@@ -4968,6 +4968,7 @@ const ar = {
       add_field: "إضافة حقل إلى الكائن",
       apply_blueprint: "بناء التطبيق وفق الخطة",
       apply_edit: "تطبيق هذا التغيير",
+      ask_which: "توضيح السؤال",
       create_metadata: "إنشاء عنصر بيانات وصفية",
       create_object: "إنشاء كائن جديد",
       create_package: "إنشاء حزمة جديدة",

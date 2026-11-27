@@ -4848,6 +4848,7 @@ const zhHant = {
       add_field: '給物件新增欄位',
       apply_blueprint: '按方案搭建應用',
       apply_edit: '應用這次修改',
+      ask_which: '確認問題含義',
       create_metadata: '新建一項中繼資料',
       create_object: '新建一個物件',
       create_package: '新建一個應用包',
