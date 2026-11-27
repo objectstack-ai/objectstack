@@ -5118,6 +5118,12 @@ export class ObjectStackProtocolImplementation implements
      * caller may not read already answers this position with a refusal. The
      * decision takes no caller. The target is named, as the `internal: true`
      * refusal at this hop names it: it is the lookup's declared target.
+     *
+     * [#35427] Asked FIRST, before the exposure decision: a target that
+     * belongs to a disabled package (the registry's `isObjectPackageDisabled`,
+     * the data route's predicate) is refused `404 OBJECT_PACKAGE_DISABLED`,
+     * the answer its own route gives. A target both disabled and unexposed
+     * therefore answers the package refusal, in the direct route's order.
      */
     private refuseUnservedRelationTarget(target: string, param: string): void {
         // [#25467 cut 3] The body moved to `protocol-query-validation.ts` (see `QueryValidationHost`).
@@ -5141,7 +5147,9 @@ export class ObjectStackProtocolImplementation implements
      * spec's one decision, `canServeApiOperation(enable, 'get')`
      * ({@link EXPANSION_TARGET_OPERATION} says why `get`), against that level's
      * own target, and the decision takes no caller, so an administrator and a
-     * member get the same tree.
+     * member get the same tree. [#35427] A target of a disabled package is
+     * withheld the same way ({@link servesExpansionTarget} asks both
+     * predicates), as its own route answers `404 OBJECT_PACKAGE_DISABLED`.
      *
      * Withheld, not refused, and that is the precedent measured on this door: a
      * related record the caller may not READ is answered by the engine's
@@ -5172,7 +5180,10 @@ export class ObjectStackProtocolImplementation implements
         return servedExpand.call(host, source, expand, depth);
     }
 
-    /** [#22661] Does the target's declared exposure serve an expansion read of it? */
+    /**
+     * [#22661] Does the target's declared exposure serve an expansion read of
+     * it, and [#35427] does its package serve it (not disabled)? Both must hold.
+     */
     private servesExpansionTarget(target: string): boolean {
         // [#25467 cut 3] The body moved to `protocol-query-validation.ts` (see `QueryValidationHost`).
         const readEngine = () => this.engine;
