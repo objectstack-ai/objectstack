@@ -270,6 +270,27 @@ describe('[#35005] initialize instructions — the ask-back is scoped in the sam
     expect(text).not.toContain('A word with no match but with candidates in the answer');
     expect(list.description).not.toContain('possible readings: ask the same way');
   });
+
+  it('[#34996] both doors say the question is for the user\'s own word, and a cut or reworded one is sent again', async () => {
+    const runtime = new MCPServerRuntime({ name: 't', version: '1.0.0' });
+    const text = await instructionsOf(runtime, makeBridge());
+    const list = getDatasetToolDefinitions().find((d) => d.name === LIST_DATASETS_TOOL_NAME)!;
+    const OWN_WORD = (tool: string) =>
+      'Only the user\'s own word is asked about: one you cut out of a longer phrase of the question, or reworded, '
+      + `is sent to ${tool} once more as the user wrote it instead, never the whole question; if that phrase `
+      + 'matches nothing and has no candidate, the word is asked about after all.';
+    expect(text).toContain(OWN_WORD('list_datasets'));
+    expect(list.description).toContain(OWN_WORD('`list_datasets`'));
+    // Each follows the question it conditions, and comes before the grouping sentence.
+    for (const door of [text, list.description]) {
+      const at = door.indexOf('Only the user\'s own word is asked about');
+      expect(door.indexOf('ask the same way')).toBeLessThan(at);
+      expect(door.indexOf(SCOPED)).toBeGreaterThan(at);
+    }
+    // The words are asked for whole, as written.
+    expect(text).toContain('with the question\'s business words, each phrase whole as the user wrote it.');
+    expect(list.description).toContain('each copied whole as the user wrote it');
+  });
 });
 
 /**

@@ -1639,6 +1639,42 @@ describe('[#35005] list_datasets nextStep — a grouping or time word with a can
     }
   });
 
+  it('[#34996] before either question the note sends a word that is not the user\'s own again, and the question is for the user\'s own word', async () => {
+    /** The re-send sentence, by the locale the context names. */
+    const OWN_PHRASE_FIRST: Record<string, string> = {
+      en: 'a word you cut out of a longer phrase the user wrote, or reworded, is not asked about; call list_datasets once more with that phrase exactly as written, never the whole question. If that phrase matches nothing and has no possible reading, the word is asked about after all.',
+      'zh-CN': '如果某个词是你从用户写的更长词组里截出来的，或是你改写过的，就不要就它提问，改用用户原话里的完整词组（不是整句问题）再调用一次 list_datasets；如果那个词组既没有匹配也没有候选，仍然就原来的词提问。',
+      'zh-TW': '如果某個詞是你從使用者寫的更長詞組裡截出來的，或是你改寫過的，就不要就它提問，改用使用者原話裡的完整詞組（不是整句問題）再呼叫一次 list_datasets；如果那個詞組既沒有符合也沒有候選，仍然就原來的詞提問。',
+      'ja-JP': 'ユーザーが書いたより長い語句から切り出した語や、言い換えた語については確認せず、ユーザーが書いたとおりの語句（質問文全体ではなく）でもう一度だけ list_datasets を呼び出してください。その語句に一致も候補もなければ、元の語について確認してください。',
+    };
+    /** What conditions each question: the word is the user's own. */
+    const USERS_OWN: Record<string, readonly [alone: string, beside: string]> = {
+      en: ['For a word that is the user\'s own, ask the user which one they mean', 'that is the user\'s own, ask the user which one is meant'],
+      'zh-CN': ['如果这个词就是用户的原话，先问用户指的是哪一个', '如果就是用户的原话，先问用户指的是哪一个再使用'],
+      'zh-TW': ['如果這個詞就是使用者的原話，先問使用者指的是哪一個', '如果就是使用者的原話，先問使用者指的是哪一個再使用'],
+      'ja-JP': ['ユーザー自身が書いた語については、どれを指しているかユーザーに確認し', 'ユーザー自身の書いた語であれば、使う前にどれを指しているかユーザーに確認してください'],
+    };
+    for (const ctx of FOUR_LOCALES) {
+      // Reported candidates_only, and left out beside a matched measure: the same sentence, before the question.
+      const alone = await ask(['销售'], ctx);
+      const beside = await ask(['revenue', 'churn'], ctx);
+      const cases = [[alone.nextStep!.note, USERS_OWN[loc(ctx)][0]], [beside.nextStep!.note, USERS_OWN[loc(ctx)][1]]] as const;
+      for (const [note, question] of cases) {
+        const resend = note.indexOf(OWN_PHRASE_FIRST[loc(ctx)]);
+        expect(resend, `${loc(ctx)} ⇒ re-send sentence`).toBeGreaterThan(-1);
+        expect(note.indexOf(question), `${loc(ctx)} ⇒ the conditioned question follows it`).toBeGreaterThan(resend);
+      }
+      // The answer is what it was: the word is still a candidate, never a match, and the case does not move.
+      expect(alone.nextStep).toMatchObject({ decision: 'candidates_only', terms: ['销售'] });
+      expect(alone.datasets.flatMap((d) => d.matches ?? [])).toEqual([]);
+      expect(beside.nextStep).toMatchObject({ decision: 'one_measure', terms: ['revenue'] });
+      // No question owed, no re-send sentence: a grouping candidate, a match, an unknown word.
+      for (const terms of [['按行业', '销售额'], ['revenue'], ['库存周转']]) {
+        expect((await ask(terms, ctx)).nextStep!.note, `${loc(ctx)} ${terms.join('+')}`).not.toContain(OWN_PHRASE_FIRST[loc(ctx)]);
+      }
+    }
+  });
+
   it('a matched measure beside a word with a measure candidate still asks about that word (营收 + churn)', async () => {
     for (const ctx of FOUR_LOCALES) {
       const out = await ask(['revenue', 'churn'], ctx);
