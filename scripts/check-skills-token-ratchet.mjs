@@ -447,7 +447,10 @@ export const CEILINGS = new Map([
   // with `main`. Two retired-key rows name their replacements; one sample
   // instruction line left the skill example and over-paid by 4 tokens.
   // 6795 -> 6791 (#37782): the `agent.tools` row no longer teaches an aged-out migration; LOWERED to the measurement.
-  ['skills/objectstack-ai/SKILL.md', 6791], //          -18 (was 6824), then -5 A2′ (was 6806)
+  // 6791 -> 6609: the section that taught an authored AI button on a record
+  // page is replaced by one sentence (ADR-0160 D6, "Entry point": the shell's
+  // entry is the only one); the row follows the measurement down.
+  ['skills/objectstack-ai/SKILL.md', 6609], //          -18 (was 6824), then -5 A2′ (was 6806)
   // -12 (was 6331): the `http.server` decision-table row dropped a trailing
   // clause that taught `contributes.routes` as a key that "parses but serves
   // nothing". The key is retired — an authored entry is now REFUSED, carrying
@@ -1087,7 +1090,9 @@ export const CEILINGS = new Map([
   // (-41 bytes). Net shrink, so no raise: the ceiling follows the file down to the
   // measurement, 9133 bytes (9113 priced) -> 9107 (9087 priced) -> 2272 tokens.
   //   ceil(($(wc -c < skills/objectstack-ui/SKILL.md) - 20) / 4) == ceil(9087 / 4)
-  ['skills/objectstack-ui/SKILL.md', 2264], // -8 to the measurement (was 2272)
+  // 2264 -> 2256: the Actions JSON fence drops its `locations` key (32 bytes), so it parses
+  // under both action location vocabularies; the row follows the measurement down.
+  ['skills/objectstack-ui/SKILL.md', 2256], // -8 to the measurement (was 2264)
   // 8333 -> 6193: RE-LOCK at the landed count after the #19715 split (decision
   // batch #213 item 1, maintainer 「1 2 4 同意」): the worked R1, the report
   // template and the v17-canonical shapes block moved VERBATIM into
@@ -1656,7 +1661,10 @@ export const CEILINGS = new Map([
   // measured remainder only. Same ruling (2026-10-27, tap A): 「A:先削重复,余额按实测提高」
   // (ruling record 6513306068, letter B).
   //   ceil($(wc -c < skills/objectstack-ui/rules/actions.md) / 4) == ceil(15559 / 4)
-  ['skills/objectstack-ui/rules/actions.md', 3890],
+  // 3890 -> 3844: five checked examples drop their `locations` line (186 bytes), so each
+  // compiles under both action location vocabularies; the row follows the measurement down.
+  //   ceil($(wc -c < skills/objectstack-ui/rules/actions.md) / 4) == ceil(15373 / 4)
+  ['skills/objectstack-ui/rules/actions.md', 3844],
   // 6090 -> 6252 (#19715, card item 4): a 5-line table of contents at the top,
   // anchors to the file's existing headings, nothing else changed. +162 tokens,
   // zero headroom to absorb any of it, ceiling +162. Maintainer ruling
@@ -1733,7 +1741,16 @@ export const CEILINGS = new Map([
   // (+4014) -> 4448 tokens, the row's 7 tokens of headroom absorbed, ceiling +997, pinned
   // AT the measurement. Authority as the `rules/actions.md` row above.
   //   ceil($(wc -c < skills/objectstack-ui/rules/list-views.md) / 4) == ceil(17790 / 4)
-  ['skills/objectstack-ui/rules/list-views.md', 4448],
+  // 4448 -> 4510 (#37406): one sentence under Column Features — a `select` badge is coloured
+  // only when its option declares `color` (the nine palette families the renderer's
+  // `BADGE_COLOR_MAP` keys, or a `#` hex), any other option renders neutral. Colour on a
+  // select option was untaught in this skill (0 hits), so no text here restates it and
+  // nothing was cut to fund it. Authority: the ruling of record on #36882 (record
+  // 7178358629, maintainer verbatim 「A 全部去掉，没配就灰」), whose term (5) orders this
+  // line into `skills/objectstack-ui`; it authorises its own measured delta and no more.
+  // 17790 -> 18039 bytes (+249) -> 4510 tokens, ceiling +62, pinned AT the measurement.
+  //   ceil($(wc -c < skills/objectstack-ui/rules/list-views.md) / 4) == ceil(18039 / 4)
+  ['skills/objectstack-ui/rules/list-views.md', 4510],
   // 2273 -> 2196 (#27059): LOWERED. The Surface bullet points at `rules/record-page.md`,
   // says create / edit is a modal or the `editMode: 'page'` route, and the Overlay-width
   // bullet moved there whole (the `size` bucket, the deprecated pixel keys); the ceiling

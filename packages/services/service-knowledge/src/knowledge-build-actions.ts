@@ -40,7 +40,7 @@ export const KNOWLEDGE_INDEX_STATUS_ACTION = 'index_status';
 /** The part of `KnowledgeService` the two actions use. */
 export type KnowledgeBuildActionsService = Pick<
   KnowledgeService,
-  'describeSources' | 'describeSource' | 'readIndexState' | 'rebuildSource' | 'buildRecord'
+  'describeSources' | 'describeSource' | 'readIndexState' | 'rebuildSource' | 'buildRecord' | 'boundAdapterId'
 >;
 
 /** One source in an `index_status` answer. */
@@ -48,7 +48,11 @@ export interface KnowledgeIndexStatusEntry {
   /** The source, as `search_knowledge` lists it: `NAMESPACE-NAME` for a package's source, the bare name otherwise. */
   id: string;
   label: string;
-  adapter: string;
+  /**
+   * The adapter the source binds to: the one it names, else the deployment's
+   * (ADR-0161 K4). Absent when it names none and none can be placed.
+   */
+  adapter?: string;
   /** The package that holds the source; absent for a source no package holds. */
   packageId?: string;
   /** What the adapter holds against what the service expects. */
@@ -155,10 +159,11 @@ export function knowledgeIndexStatusActionHandler(service: KnowledgeBuildActions
     }
     const sources: KnowledgeIndexStatusEntry[] = [];
     for (const source of targets) {
+      const adapter = service.boundAdapterId(source.source);
       sources.push({
         id: source.id,
         label: source.source.label,
-        adapter: source.source.adapter,
+        ...(adapter === undefined ? {} : { adapter }),
         ...(source.packageId === undefined ? {} : { packageId: source.packageId }),
         index: await service.readIndexState(source.id),
         build: service.buildRecord(source.id) ?? null,

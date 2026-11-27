@@ -1,6 +1,7 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 import { describe, it, expect } from 'vitest';
+import { deriveFieldGroupLayout } from '@objectstack/spec/data';
 import stack from '../objectstack.config.js';
 
 /**
@@ -17,10 +18,17 @@ import stack from '../objectstack.config.js';
  * declares must (a) carry a `name` and (b) resolve to a REAL zh-CN
  * `_sections.<name>.label` — non-empty and not an echoed English string.
  *
- * Read on the COMPOSED stack (`objectstack.config.ts`'s `views`/`translations`
- * arrays), not the imported view/bundle modules directly — what the platform's
- * i18n resolver and lint gates see is the composed stack, which is exactly the
- * reachability this issue is about.
+ * The object's create and edit forms are laid out by its `fieldGroups`, not by
+ * a form view (#36425), and a group heading resolves through the same
+ * `_sections.<key>` entry. So the sweep also covers every titled section
+ * `deriveFieldGroupLayout` (ADR-0085 §5, the derivation the renderers read)
+ * gives each object: the default forms the lead, opportunity and activity once
+ * declared moved there (#36553), and their headings must stay translated.
+ *
+ * Read on the COMPOSED stack (`objectstack.config.ts`'s `objects`/`views`/
+ * `translations` arrays), not the imported modules directly — what the
+ * platform's i18n resolver and lint gates see is the composed stack, which is
+ * exactly the reachability this issue is about.
  */
 describe('app-crm form section i18n coverage (#8231)', () => {
   const zhBundle = (stack.translations ?? [])[0] as
@@ -83,8 +91,30 @@ describe('app-crm form section i18n coverage (#8231)', () => {
     }
   }
 
-  it('exercised at least one container with named sections (guards against a vacuous sweep)', () => {
-    const total = containers.reduce(
+  const objects = (stack.objects ?? []) as Array<{ name: string }>;
+  /** Every titled section an object's field groups give its forms and record page. */
+  const groupSections = objects.flatMap((object) =>
+    (deriveFieldGroupLayout(object) ?? [])
+      .filter((s): s is typeof s & { key: string } => typeof s.key === 'string')
+      .map((s) => ({ objectName: object.name, key: s.key, label: s.label ?? s.key })),
+  );
+
+  for (const { objectName, key, label } of groupSections) {
+    it(`${objectName} · fieldGroups · section "${label}" resolves in zh-CN`, () => {
+      const zhLabel = zhBundle?.['zh-CN']?.objects?.[objectName]?._sections?.[key]?.label;
+      expect(
+        zhLabel,
+        `objects.${objectName}._sections.${key}.label is missing from the zh-CN bundle — ` +
+          'the group heading renders in English in every locale.',
+      ).toBeTruthy();
+      expect(zhLabel, `zh-CN _sections.${key}.label reads as untranslated ASCII`).not.toMatch(
+        /^[\x20-\x7e]+$/,
+      );
+    });
+  }
+
+  it('exercised the named sections the app declares (guards against a vacuous sweep)', () => {
+    const formSections = containers.reduce(
       (n, c) =>
         n +
         [...(c.form ? [c.form] : []), ...Object.values(c.formViews ?? {})].reduce(
@@ -93,6 +123,14 @@ describe('app-crm form section i18n coverage (#8231)', () => {
         ),
       0,
     );
-    expect(total).toBeGreaterThanOrEqual(9);
+    // Web-to-Lead's one section, and the ten field-group headings of the
+    // account (2), opportunity (1), lead (4) and activity (3) objects. Each
+    // sweep is held separately, so one cannot cover for the other shrinking.
+    expect(formSections).toBeGreaterThanOrEqual(1);
+    expect(groupSections.length).toBeGreaterThanOrEqual(10);
+    // The three objects whose default forms became field groups (#36553).
+    for (const objectName of ['crm_lead', 'crm_opportunity', 'crm_activity']) {
+      expect(groupSections.some((s) => s.objectName === objectName), objectName).toBe(true);
+    }
   });
 });

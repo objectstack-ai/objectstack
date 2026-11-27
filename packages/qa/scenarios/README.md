@@ -995,7 +995,7 @@ wrapper, with no change to the runner.
 ## Running the published skills' eval cases — `skill-evals`
 
 Every published skill bundle carries eval cases (`skills/BUNDLE/evals/*.json`: a `prompt`, an `expected_output` and
-`assertions.must_contain` / `must_not_contain`). `skill-evals` sends each case to the local Claude Code login twice,
+`assertions.must_contain` / `must_contain_any` / `must_not_contain`). `skill-evals` sends each case to the local Claude Code login twice,
 once with the bundle installed and once without, and grades each answer by the case's own tokens. A trigger case
 asks instead whether the skill was loaded, and runs with the bundle installed beside its competitors only. It runs from this checkout only. It is not part of the published `bin` or `exports`, not a CI job and not a merge gate. The cases are
 the skill authors' and the runner never edits them.
@@ -1010,6 +1010,7 @@ pnpm --filter @objectstack/scenarios skill-evals --skills objectstack-query --re
 pnpm --filter @objectstack/scenarios skill-evals --skills-from 18.5.0   # a published @objectstack/skills version's bundles and cases
 pnpm --filter @objectstack/scenarios skill-evals --skills objectstack-query --triggers-only   # its trigger cases alone
 pnpm --filter @objectstack/scenarios skill-evals --skills objectstack-query,objectstack-ask --triggers-only   # both installed in every trigger turn
+pnpm --filter @objectstack/scenarios skill-evals --case objectstack-ai/skills-tools-knowledge#6 --repeats 10   # one case, both arms
 pnpm --filter @objectstack/scenarios skill-evals --regrade DIR  # re-draw a recorded round's verdicts from its records; no model call
 pnpm --filter @objectstack/scenarios skill-evals --self-test    # the runner's own fixtures; no model call
 ```
@@ -1025,8 +1026,14 @@ pnpm --filter @objectstack/scenarios skill-evals --self-test    # the runner's o
   `--no-session-persistence`. A read outside the directory needs a permission no turn is given, and `-p` denies it.
   The skills built into Claude Code are present in both arms.
 - **Grading**: the answer is the result line's text, the reply a user reads. It passes when every `must_contain` token
-  is in it and no `must_not_contain` token is. Tokens match as literal, case-sensitive substrings, and no model judges
-  an answer. A turn whose init line shows the wrong arm is `invalid`: the with-skill arm does not list the bundle, or
+  is in it, every `must_contain_any` group has at least one of its tokens in it, and no `must_not_contain` token is.
+  Tokens match as literal, case-sensitive substrings in all three forms, nothing is normalised, and no model judges
+  an answer. `must_contain_any` is a list of groups, each a list of tokens, for a case whose correct answers do not
+  share one literal: `[["ai:approve", "signed-in session"], ["refused", "403"]]` reads "(the first or the second) and
+  (the third or the fourth)". The reader refuses a group that is empty or holds an empty token, and a case with no
+  token in any of the three forms. A failing record names each unmet group whole in `unmetAny` (the key is absent when
+  every group is met), and the summary's missed column prints it as ``(none of: `a` / `b`)``, each token in its own
+  code span like the all-of tokens beside it (`summary.github.md` spells angle brackets in them out as `(lt)` / `(gt)`). A turn whose init line shows the wrong arm is `invalid`: the with-skill arm does not list the bundle, or
   the no-skill arm lists one or launches one. A bundle whose `SKILL.md` sets `user-invocable: false` (`objectui`) is
   never in the init line's `skills` list, though the model can launch it. Its with-skill turns are graded, and each
   record's `armEvidence` says whether the turn launched the bundle (`launched`) or nothing in the stream shows it
@@ -1055,16 +1062,27 @@ pnpm --filter @objectstack/scenarios skill-evals --self-test    # the runner's o
   installed as a competitor while another named bundle has one; alone, or under `--trigger-field own`, it is refused
   (a published version before trigger cases has none). The flag is refused beside `--regrade` or `--self-test`.
   `--dry-run` prints the reduced plan, and `--skills-from VERSION` runs it on the published bundles.
+- **`--case KEY[,KEY]`**: the named cases alone, for an acceptance round on one or two cases. A key is the case's key
+  as the summary and each record print it, `BUNDLE/FILE_STEM#ID` (`objectstack-query/filters-pagination-search#3`):
+  ids repeat across a bundle's eval files, so a bundle and an id alone would not name one case. The flag repeats, and
+  the plan keeps catalog order. A behaviour case runs on both arms and a trigger case on the with-skill arm, as in a
+  whole round. A key that names no case is refused with where it stopped matching: the bundle, the eval file, or the
+  id, with the ones that exist. Beside `--skills`, every named case must be of a `--skills` bundle, and `--skills`
+  still sets what a trigger turn installs beside its bundle; without it, a trigger turn installs every bundle, as in
+  a whole round. It is refused beside `--triggers-only` (the keys already say which cases run), `--regrade` and
+  `--self-test`. `round.json` records the keys as `scope.selectedCases`, the summary header lists them, and
+  `--regrade DIR` keeps that scope. `--dry-run` prints the plan with only those cases.
 - **Case files**: a case's `files` entries are paths under the bundle's `evals/files/` (anything else is refused, and
   so is a path the bundle lacks or one with a `.claude` segment, since `.claude/` is where the runner places the skill). Each is copied, a directory whole, into both arms' directories at its path below
   `evals/files/`, so the arms still differ only in the bundle. A case whose prompt states its context needs none.
   `--regrade DIR` applies the current rules to a recorded round's answers and arm facts. A changed record keeps the
   verdict its turn was first given as `regradedFrom`. Each record carries `caseHash`, a hash of its case's prompt and
-  token lists as the turn ran them. A case changed or removed since the round is set apart: it is not regraded, its
+  token lists as the turn ran them, its `must_contain_any` groups included when it has any: a case with none hashes
+  as it did before the form existed, and a case moved to it has a new hash. A case changed or removed since the round is set apart: it is not regraded, its
   records are left as they are, and the summary names it outside every pass rate. A record with no hash predates the
   hash; it is regraded against the case as it is now, and the summary counts it as unhashed.
 - **Records**: by default the round goes to `docs/qa/platform-checklist/runs/skill-evals/ROUND/` (git-ignored), or to
-  `--out`. It holds one `runs/*.json` per turn (verdict, missing and forbidden tokens, the answer, the skills listed
+  `--out`. It holds one `runs/*.json` per turn (verdict, missing and forbidden tokens, unmet any-of groups, the answer, the skills listed
   and launched, the skill files read, the served model, the CLI's notional cost and the rate-limit reading), `round.json` (environment,
   scope and the full per-case scores on both arms) and `summary.md`. The summary has one row per bundle (each arm's
   pass rate, the with-skill failing cases, and the cases where the no-skill arm scored at least as high) and then

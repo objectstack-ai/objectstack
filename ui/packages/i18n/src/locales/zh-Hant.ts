@@ -2729,7 +2729,29 @@ const zhHant = {
           availableObjects: '列出可用的資料物件。',
           recentActivity: '總結我的最近動態。',
         },
+        // objectstack#37862 — the drawer's empty conversation: the platform's
+        // suggestions by the kind of page in view (`emptyConversationModel.ts`).
+        page: {
+          record: {
+            summarize: '總結這條記錄',
+            related: '這條記錄關聯了哪些內容？',
+          },
+          list: {
+            summarize: '總結這個列表裡的記錄',
+            recent: '本週新增了哪些記錄？',
+          },
+          dashboard: {
+            explain: '這個儀表盤展示了什麼？',
+            standOut: '這個儀表盤裡有什麼值得注意的？',
+          },
+          report: {
+            summarize: '總結這份報表',
+            takeaways: '這份報表的要點是什麼？',
+          },
+        },
       },
+      // objectstack#37862 — the accessible name of the empty conversation's suggestions.
+      suggestionsLabel: '推薦問題',
       // objectui#3546 slice four — the AI console surfaces: the /ai chat page's app switcher,
       // connection banner and plan/publish cards, the ChatDock chrome, and the
       // conversation-list date buckets. `group.*` is the template-key family
@@ -2757,7 +2779,7 @@ const zhHant = {
         expand: '展開',
         restore: '還原為側邊欄',
         open: '開啟助手',
-        planAwaitingApproval: '有一個方案等待確認',
+        planAwaitingApproval: '有一項操作等待確認',
         close: '關閉',
         more: '更多操作',
       },
@@ -3172,6 +3194,8 @@ const zhHant = {
         twoFactorTooManyAttempts: '錯誤次數過多，請重新使用密碼登入。',
         twoFactorExpired: '本次登入已過期，請重新使用密碼登入。',
         twoFactorLocked: '失敗次數過多，您的賬戶已被暫時鎖定，請稍後再試。',
+        managedPasswordSignIn: "此部署通過其身份提供方登入，這裡不能使用密碼。請點選上方的身份提供方按鈕登入。",
+        managedPasswordReset: "此部署通過其身份提供方登入，這裡不設定也不重置密碼。請在登入頁點選身份提供方按鈕登入。",
       },
       // objectui#3546 slice three — phone/OTP sign-in. `{seconds}` is LoginForm's own
       // literal `.replace()` hole, not i18next interpolation: keep the single braces.
@@ -3631,6 +3655,7 @@ const zhHant = {
     recent: '最近使用',
     starred: '已收藏',
     removeFromFavorites: '從收藏中移除 {{name}}',
+    conversationUnavailable: '該對話已不可用',
     allReports: '全部報表',
     collapse: '收起側邊欄',
     expand: '展開側邊欄',
@@ -3665,6 +3690,7 @@ const zhHant = {
         report: '報表',
         page: '頁面',
         url: '連結',
+        aiChat: 'AI 問詢',
       },
       linkLabel: '名稱',
       linkUrl: '網址',
@@ -3690,6 +3716,17 @@ const zhHant = {
       creating: '正在建立…',
       newItemPendingDraft: '這個名稱下已有一份未釋出的草稿，請再試一次。',
       newItemLeft: '新建的儀表盤「{{name}}」沒能刪除，請在 Studio 裡刪除它。',
+      aiChatName: 'AI 問詢',
+      aiChatDefaults: '留空的項顯示頁面的預設內容。',
+      aiChatTitle: '歡迎標題',
+      aiChatSubtitle: '副標題',
+      aiChatPlaceholder: '輸入框提示',
+      aiChatSuggestions: '推薦問題',
+      aiChatSuggestionsHint: '每行一個，最多 4 個。',
+      aiChatTooLong: '最多 {{max}} 個字元。',
+      aiChatTooMany: '最多 {{max}} 個問題。',
+      aiChatEdit: '編輯問詢頁',
+      setAsHome: '設為首頁',
     },
     pins: {
       button: '頁頭按鈕',
@@ -4848,6 +4885,7 @@ const zhHant = {
       add_field: '給物件新增欄位',
       apply_blueprint: '按方案搭建應用',
       apply_edit: '應用這次修改',
+      ask_which: '確認問題含義',
       create_metadata: '新建一項中繼資料',
       create_object: '新建一個物件',
       create_package: '新建一個應用包',
@@ -5500,6 +5538,7 @@ const zhHant = {
       toggleFailed: '切換應用狀態失敗：{{reason}}',
       setDefaultDone: '{{name}} 已設為預設',
       setDefaultFailed: '設定預設應用失敗：{{reason}}',
+      restoreDefaultFailed: '無法將 {{name}} 恢復為預設應用，因此它已不再是預設應用：{{reason}}',
       appDeleted: '{{name}} 已刪除',
       deleteFailed: '刪除應用失敗：{{reason}}',
       nothingToDelete: '{{name}} 無可刪除：{{reason}}',

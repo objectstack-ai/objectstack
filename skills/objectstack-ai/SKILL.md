@@ -13,7 +13,7 @@ license: Apache-2.0
 compatibility: Requires @objectstack/spec 19.x (Zod v4 schemas)
 metadata:
   author: objectstack-ai
-  version: "19.0.0-next.0"
+  version: "19.0.0-next.1"
   domain: ai
   tags: agent, tool, skill, knowledge, context-pack, llm, embedding, mcp
 ---
@@ -170,31 +170,9 @@ decided entirely by the skip rule above — `actionSkipReason(action, ctx)` and
 `actionRequiresApproval(action)` (from `@objectstack/service-ai`) answer both
 questions, and Studio's "AI exposure" diagnostics use the same predicates.
 
-### The **Ask AI** button — `type: 'ask_ai'` ☁️
-
-Pins the assistant's conversation to the record the action runs on and opens
-it, sending no message. Declare it on the object, in
-`locations: ['record_header']` or `['record_more']`:
-
-<!-- os:check -->
-```typescript
-import { defineAction } from '@objectstack/spec';
-
-export default defineAction({
-  name: 'ask_about_contract',
-  label: 'Ask AI',
-  objectName: 'contract',
-  type: 'ask_ai',
-  locations: ['record_header'],
-});
-```
-
-It names nothing and is never a tool: the parse refuses a `target`,
-`ai.exposed: true`, and `actionType: 'ask_ai'` on a dashboard header (a header
-runs on no record). Nothing serves it headless: `list_actions` skips it,
-`run_action` refuses it, and no `action_` tool exists for it. The console draws
-it only where the assistant surface is on **and** the AI service honours a
-conversation focus; elsewhere it is absent, not disabled.
+**No page declares an AI button of its own**, so there is no action to write
+for one: the shell's 「问 AI」 entry opens the in-app assistant and carries the
+current record automatically.
 
 ---
 

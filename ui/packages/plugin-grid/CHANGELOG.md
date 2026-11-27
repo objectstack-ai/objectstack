@@ -1,5 +1,140 @@
 # @object-ui/plugin-grid
 
+## 19.0.0-next.1
+
+### Patch Changes
+
+- ea1b70a: feat(plugin-grid,core): the Import Wizard names the column a lookup cell was scoped by when the value belongs to another parent; a scope no read could filter by says so
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  The Import Wizard's dry run and completion screen render the import cell error `reference_out_of_scope` (#36794) with their own text, `"Design review" was found, but not under Project "Gemini"`, built from the cell error's `scope` (each scoping column by its label, with the cell the row gave it) and translated in all eleven UI locales (`grid.import.referenceOutOfScope`, `grid.import.scopeEntry`). The Wizard keys on the code and the structured `scope`, never on the server's sentence; a cell error with no `scope` shows the server's own sentence, already in the caller's locale.
+  
+  The importer no longer reports a scoped lookup as `reference_out_of_scope` when the engine refused its scoped reads because of the scope: a `dependsOn` whose `param` names a target field the engine cannot filter by (a `formula`) has every scoped read refused (`INVALID_FIELD` naming that field), so the scope was never asked. That cell keeps `reference_not_found`, with its own catalog sentence `import_reference_scope_unqueryable` in all four platform locales, which says the lookup could not be made within the scope and that the `dependsOn` entry should point at a stored target field. No unscoped probe runs for it and it carries no `scope`. A scoped lookup whose reads are all refused for any other reason (no read access to the target, say) keeps the plain `no record matches` sentence.
+  
+  Wording: `ImportRowResultSchema.errors` and the runner's `ImportRowResult.errors` now say that a `reference_out_of_scope` element carries `scope`; the error catalog page says `scope` names the row's own scoping columns, not the parent's.
+  
+  What to do: nothing. A client that matches `reference_not_found` for "the lookup cell did not resolve" keeps receiving it for the unfilterable scope.
+- 3eb778d: perf(console): a list page draws its rows once before they paint, and the shell re-renders less during first load
+  
+  Clause-②: yes (narrowing)
+  Metadata-protocol: none
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No schema key, accepted value, metadata type or stored row is added, removed or renamed, so there is nothing for `objectstack migrate meta` to rewrite. What narrows is the value two React hooks of @object-ui/i18n return: `useObjectTranslation()` and `useI18nContext()` no longer carry `appContentLanguages`, which moved to its own hook. Its consumer is code, and the compiler names every reader left behind. `runtime-interface-only` does not fit on a checked fact: the context value's interface is not exported, so it cannot be named by path. -->
+  
+  On a list page's first load the grid drew its whole table several times between the rows' first render and their first paint: once with row-end controls before the list page scope was known, once when the inline-action fold found its host, and once when the record verdicts were republished with nothing new in them. The rows now draw once, without row-end controls, and those passes are gone.
+  
+  The shell does less during first load too. The app's own locale list lands after the console has drawn; it used to re-render every component that reads a translation, about 1,900 of them. It is now read with `useAppContentLanguages()` from `@object-ui/i18n`, and only the language menus re-render for it. `useObjectTranslation()` and `useI18nContext()` no longer carry `appContentLanguages`. A sidebar entry is not redrawn when a new capability checker gives it the same answer.
+  
+  Nothing changes in what the list, the sidebar or the language menus show.
+  
+  **BREAKING** (`@object-ui/i18n`, and `@object-ui/react`, which re-exports the same two hooks: their return values), shipped as `patch`: the change is not to the metadata protocol (`Metadata-protocol: none`).
+  
+  - Removed: the `appContentLanguages` field from what `useObjectTranslation()` and `useI18nContext()` return, whether they are imported from `@object-ui/i18n` or from `@object-ui/react`. It was added there by #36040.
+  - Use instead: `useAppContentLanguages()`, which both entries now export: `@object-ui/i18n`, and `@object-ui/react` beside the two hooks. It returns the same value, the app's declared content languages or `null` while they are unknown, and `null` outside an `I18nProvider`.
+  - Why: the list lands after the console has drawn. While it rode on the translation context, its arrival re-rendered every component that reads a translation, about 1,900 of them on first load. In its own context only the components that read it re-render.
+- 6e8f663: feat(chatbot)!: the build chat's frontend is retired — the plan, change, build-result and handoff cards, their detectors and the props that fed them are removed
+  
+  Clause-②: no (narrowing)
+  Metadata-protocol: none
+  
+  <!-- adr-0087: not-required (runtime-export-retired @object-ui/plugin-chatbot#detectDraftResult, @object-ui/plugin-chatbot#detectProposedPlan, @object-ui/plugin-chatbot#detectProposedChanges, @object-ui/plugin-chatbot#detectBuilderHandoff, @object-ui/plugin-chatbot#detectBuiltAppPackage, @object-ui/plugin-chatbot#detectAuthoringVerdict, @object-ui/plugin-chatbot#detectReplayOutcome, @object-ui/plugin-chatbot#buildProgressFromDraftReview, @object-ui/plugin-chatbot#DraftReview, @object-ui/plugin-chatbot#ProposedPlan, @object-ui/plugin-chatbot#ProposedChanges, @object-ui/plugin-chatbot#BuilderHandoff, @object-ui/plugin-chatbot#ReplayOutcome, @object-ui/plugin-chatbot#PublishOutcome, @object-ui/plugin-chatbot/core#PublishOutcome, @object-ui/plugin-chatbot#FloatingChatbotProps.autoPublishDrafts, @object-ui/plugin-chatbot#FloatingChatbotProps.builderHandoffOpenLabel, @object-ui/plugin-chatbot#FloatingChatbotProps.builderHandoffSupersededTitle, @object-ui/plugin-chatbot#FloatingChatbotProps.builderHandoffTitleLabel, @object-ui/plugin-chatbot#FloatingChatbotProps.changesAppliedLabel, @object-ui/plugin-chatbot#FloatingChatbotProps.changesApplyingLabel, @object-ui/plugin-chatbot#FloatingChatbotProps.changesConfirmedLabel, @object-ui/plugin-chatbot#FloatingChatbotProps.changesConfirmHintLabel, @object-ui/plugin-chatbot#FloatingChatbotProps.changesConfirmLabel, @object-ui/plugin-chatbot#FloatingChatbotProps.changesConfirmMessage, @object-ui/plugin-chatbot#FloatingChatbotProps.changesDraftedLabel, @object-ui/plugin-chatbot#FloatingChatbotProps.changesFailedLabel, @object-ui/plugin-chatbot#FloatingChatbotProps.changesTitleLabel, @object-ui/plugin-chatbot#FloatingChatbotProps.changeVerbLabels, @object-ui/plugin-chatbot#FloatingChatbotProps.designBuiltAppLabel, @object-ui/plugin-chatbot#FloatingChatbotProps.fetchPendingDraftCount, @object-ui/plugin-chatbot#FloatingChatbotProps.getArtifactAction, @object-ui/plugin-chatbot#FloatingChatbotProps.nextStepsLabel, @object-ui/plugin-chatbot#FloatingChatbotProps.onBuildMaterialized, @object-ui/plugin-chatbot#FloatingChatbotProps.onBuildResult, @object-ui/plugin-chatbot#FloatingChatbotProps.onDesignBuiltApp, @object-ui/plugin-chatbot#FloatingChatbotProps.onDiscardDrafts, @object-ui/plugin-chatbot#FloatingChatbotProps.onDraftArtifacts, @object-ui/plugin-chatbot#FloatingChatbotProps.onOpenBuilder, @object-ui/plugin-chatbot#FloatingChatbotProps.onOpenBuiltApp, @object-ui/plugin-chatbot#FloatingChatbotProps.onPlanApprovalPendingChange, @object-ui/plugin-chatbot#FloatingChatbotProps.onPreviewDraft, @object-ui/plugin-chatbot#FloatingChatbotProps.onPreviewDraftApp, @object-ui/plugin-chatbot#FloatingChatbotProps.onPublishDrafts, @object-ui/plugin-chatbot#FloatingChatbotProps.onReviewDraft, @object-ui/plugin-chatbot#FloatingChatbotProps.onReviewDrafts, @object-ui/plugin-chatbot#FloatingChatbotProps.openBuiltAppLabel, @object-ui/plugin-chatbot#FloatingChatbotProps.planAdjustLabel, @object-ui/plugin-chatbot#FloatingChatbotProps.planAnswerMessage, @object-ui/plugin-chatbot#FloatingChatbotProps.planApproveDefaultsMessage, @object-ui/plugin-chatbot#FloatingChatbotProps.planApproveHintLabel, @object-ui/plugin-chatbot#FloatingChatbotProps.planApproveLabel, @object-ui/plugin-chatbot#FloatingChatbotProps.planApproveMessage, @object-ui/plugin-chatbot#FloatingChatbotProps.planAssumptionsLabel, @object-ui/plugin-chatbot#FloatingChatbotProps.planBuildingLabel, @object-ui/plugin-chatbot#FloatingChatbotProps.planBuildNewAppMessage, @object-ui/plugin-chatbot#FloatingChatbotProps.planBuiltLabel, @object-ui/plugin-chatbot#FloatingChatbotProps.planDeferredLabel, @object-ui/plugin-chatbot#FloatingChatbotProps.planExtendExistingMessage, @object-ui/plugin-chatbot#FloatingChatbotProps.planExtendLabel, @object-ui/plugin-chatbot#FloatingChatbotProps.planQuestionsLabel, @object-ui/plugin-chatbot#FloatingChatbotProps.planReadyLabel, @object-ui/plugin-chatbot#FloatingChatbotProps.planTitleLabel, @object-ui/plugin-chatbot#FloatingChatbotProps.previewDraftLabel, @object-ui/plugin-chatbot#FloatingChatbotProps.publishDraftsLabel, @object-ui/plugin-chatbot#FloatingChatbotProps.publishedLabel, @object-ui/plugin-chatbot#FloatingChatbotProps.publishFromShellBar, @object-ui/plugin-chatbot#FloatingChatbotProps.resolveAppLabel, @object-ui/plugin-chatbot#FloatingChatbotProps.resolveFieldLabel, @object-ui/plugin-chatbot#FloatingChatbotProps.resolveFieldTypeLabel, @object-ui/plugin-chatbot#FloatingChatbotProps.resolveObjectLabel, @object-ui/plugin-chatbot#FloatingChatbotProps.subscribeMetadataRefresh, @object-ui/plugin-chatbot#FloatingChatbotProps.toolReviewLabel, @object-ui/plugin-chatbot#FloatingChatbotProps.verifiedLabel, @object-ui/plugin-chatbot#ChatbotEnhancedToolInvocation.builderHandoff, @object-ui/plugin-chatbot#ChatbotEnhancedToolInvocation.draftReview, @object-ui/plugin-chatbot#ChatbotEnhancedToolInvocation.proposedChanges, @object-ui/plugin-chatbot#ChatbotEnhancedToolInvocation.proposedPlan, @object-ui/plugin-chatbot#ChatbotEnhancedToolInvocation.replayOutcome, @object-ui/plugin-chatbot#ChatbotEnhancedMessage.blueprintProgress, @object-ui/plugin-chatbot#ChatbotEnhancedMessage.buildProgress, @object-ui/plugin-chatbot#ChatbotLabels.designingPlanHints, @object-ui/plugin-chatbot#ChatbotLabels.designingPlanLabel) the retired operands are functions, types, component props and chat-message fields of the published chat package entries; no packages/spec schema, no registered node type, no ADR-0087 conversion surface and no stored shape names them, so there is nothing for `objectstack migrate meta` to rewrite, and a host still using one is told by its own compiler -->
+  
+  **BREAKING** for a host that imports any export or passes any prop listed below. The console's chat (the dock and the full page `/ai/ask`) and Studio keep working; what goes is the code that drew the build conversation: the "Proposed plan" card, the change card, the build-result checklist and publish line, the builder handoff, the Build Doctor drawer, the pending-drafts bar, the spreadsheet import bar and Studio's copilot panel. An old `/ai/build/…` address still lands on the ask chat.
+  
+  `publishHealthFromResponse` and `PublishHealth` stay at both entry points of `@object-ui/plugin-chatbot`; the preview's Publish all still reads them.
+  
+  In `@object-ui/app-shell`, `ConversationsSidebar` no longer takes `includeAskConversations`: the sidebar lists the active agent's conversations. Delete the prop where a host passes it.
+  
+  `@object-ui/core`, `@object-ui/plugin-grid` and `@object-ui/plugin-form` carry comment and test edits only, which drop references to the deleted build-chat code. They change no behaviour.
+  
+  ## What leaves, and what to write instead
+  
+  Every name below leaves `@object-ui/plugin-chatbot`; `PublishOutcome` also leaves `@object-ui/plugin-chatbot/core`. `ChatbotEnhancedProps` loses the same 59 props as `FloatingChatbotProps`, and the seam types `SeamToolInvocation` and `SeamChatMessage`, with `ObjectChatMessage` built on them, lose the same fields as `ChatbotEnhancedToolInvocation` and `ChatbotEnhancedMessage`; the fix for those is the same deletion.
+  
+  | FROM | TO |
+  |:--|:--|
+  | `detectDraftResult`, `detectProposedPlan`, `detectProposedChanges`, `detectBuilderHandoff`, `detectBuiltAppPackage`, `detectAuthoringVerdict`, `detectReplayOutcome` | delete the import; a tool result is read as plain output, and a pending approval still through `detectPendingApproval` |
+  | `buildProgressFromDraftReview` | delete the call; nothing draws a build panel any more |
+  | `DraftReview`, `ProposedPlan`, `ProposedChanges`, `BuilderHandoff`, `ReplayOutcome`, `PublishOutcome` | delete the type import |
+  | `FloatingChatbotProps.onBuildMaterialized`, `FloatingChatbotProps.onBuildResult`, `FloatingChatbotProps.onDesignBuiltApp`, `FloatingChatbotProps.onDiscardDrafts`, `FloatingChatbotProps.onDraftArtifacts`, `FloatingChatbotProps.onOpenBuilder`, `FloatingChatbotProps.onOpenBuiltApp`, `FloatingChatbotProps.onPlanApprovalPendingChange`, `FloatingChatbotProps.onPreviewDraft`, `FloatingChatbotProps.onPreviewDraftApp`, `FloatingChatbotProps.onPublishDrafts`, `FloatingChatbotProps.onReviewDraft`, `FloatingChatbotProps.onReviewDrafts` | delete the handler; the chat raises no build event any more |
+  | `FloatingChatbotProps.builderHandoffOpenLabel`, `FloatingChatbotProps.builderHandoffSupersededTitle`, `FloatingChatbotProps.builderHandoffTitleLabel`, `FloatingChatbotProps.changesAppliedLabel`, `FloatingChatbotProps.changesApplyingLabel`, `FloatingChatbotProps.changesConfirmedLabel`, `FloatingChatbotProps.changesConfirmHintLabel`, `FloatingChatbotProps.changesConfirmLabel`, `FloatingChatbotProps.changesConfirmMessage`, `FloatingChatbotProps.changesDraftedLabel`, `FloatingChatbotProps.changesFailedLabel`, `FloatingChatbotProps.changesTitleLabel`, `FloatingChatbotProps.changeVerbLabels`, `FloatingChatbotProps.designBuiltAppLabel`, `FloatingChatbotProps.nextStepsLabel`, `FloatingChatbotProps.openBuiltAppLabel`, `FloatingChatbotProps.planAdjustLabel`, `FloatingChatbotProps.planAnswerMessage`, `FloatingChatbotProps.planApproveDefaultsMessage`, `FloatingChatbotProps.planApproveHintLabel`, `FloatingChatbotProps.planApproveLabel`, `FloatingChatbotProps.planApproveMessage`, `FloatingChatbotProps.planAssumptionsLabel`, `FloatingChatbotProps.planBuildingLabel`, `FloatingChatbotProps.planBuildNewAppMessage`, `FloatingChatbotProps.planBuiltLabel`, `FloatingChatbotProps.planDeferredLabel`, `FloatingChatbotProps.planExtendExistingMessage`, `FloatingChatbotProps.planExtendLabel`, `FloatingChatbotProps.planQuestionsLabel`, `FloatingChatbotProps.planReadyLabel`, `FloatingChatbotProps.planTitleLabel`, `FloatingChatbotProps.previewDraftLabel`, `FloatingChatbotProps.publishDraftsLabel`, `FloatingChatbotProps.publishedLabel`, `FloatingChatbotProps.resolveAppLabel`, `FloatingChatbotProps.resolveFieldLabel`, `FloatingChatbotProps.resolveFieldTypeLabel`, `FloatingChatbotProps.resolveObjectLabel`, `FloatingChatbotProps.toolReviewLabel`, `FloatingChatbotProps.verifiedLabel` | delete the label or message; the card that read it is gone |
+  | `FloatingChatbotProps.autoPublishDrafts`, `FloatingChatbotProps.fetchPendingDraftCount`, `FloatingChatbotProps.getArtifactAction`, `FloatingChatbotProps.publishFromShellBar`, `FloatingChatbotProps.subscribeMetadataRefresh` | delete the prop; the build panel that read it is gone |
+  | `ChatbotEnhancedToolInvocation.builderHandoff`, `ChatbotEnhancedToolInvocation.draftReview`, `ChatbotEnhancedToolInvocation.proposedChanges`, `ChatbotEnhancedToolInvocation.proposedPlan`, `ChatbotEnhancedToolInvocation.replayOutcome` | stop reading or setting the field; the mapper no longer lifts it out of a tool result |
+  | `ChatbotEnhancedMessage.blueprintProgress`, `ChatbotEnhancedMessage.buildProgress` | stop reading or setting the field; no message carries build progress any more |
+  | `ChatbotLabels.designingPlanHints`, `ChatbotLabels.designingPlanLabel` | delete the label; the plan-design wait is gone |
+  
+  The one-line fix: delete every import, prop and field named above. Keeping one fails `tsc` after the upgrade, because none of them is declared any more.
+- Updated dependencies [0296d97]
+- Updated dependencies [bb76b8c]
+- Updated dependencies [d9bc148]
+- Updated dependencies [c42a045]
+- Updated dependencies [58570d8]
+- Updated dependencies [81c68b3]
+- Updated dependencies [eb683b8]
+- Updated dependencies [561fe12]
+- Updated dependencies [f722411]
+- Updated dependencies [c3a4a30]
+- Updated dependencies [b1c41e5]
+- Updated dependencies [ea1b70a]
+- Updated dependencies [dedc16c]
+- Updated dependencies [adb65d1]
+- Updated dependencies [adb65d1]
+- Updated dependencies [adb65d1]
+- Updated dependencies [87af66e]
+- Updated dependencies [ddd5941]
+- Updated dependencies [d58bf7a]
+- Updated dependencies [bebc2cf]
+- Updated dependencies [c3da753]
+- Updated dependencies [4e10d4b]
+- Updated dependencies [4111380]
+- Updated dependencies [9a65a48]
+- Updated dependencies [9b99640]
+- Updated dependencies [712df42]
+- Updated dependencies [c2bfa3e]
+- Updated dependencies [579b857]
+- Updated dependencies [68aa1be]
+- Updated dependencies [d92684a]
+- Updated dependencies [50b4bf8]
+- Updated dependencies [3eb778d]
+- Updated dependencies [91875c7]
+- Updated dependencies [1bc265f]
+- Updated dependencies [39fafc0]
+- Updated dependencies [b1490f2]
+- Updated dependencies [44ccf94]
+- Updated dependencies [1dbf19a]
+- Updated dependencies [14badad]
+- Updated dependencies [f4d6bc5]
+- Updated dependencies [6e8f663]
+- Updated dependencies [6e8f663]
+- Updated dependencies [3e87d7b]
+- Updated dependencies [f07d63a]
+- Updated dependencies [709a087]
+- Updated dependencies [54dc93a]
+- Updated dependencies [56c9cae]
+- Updated dependencies [2980483]
+- Updated dependencies [1028438]
+- Updated dependencies [c826e8a]
+- Updated dependencies [8fbae19]
+- Updated dependencies [e50ab8f]
+- Updated dependencies [21ad7c5]
+- Updated dependencies [0a3ea67]
+- Updated dependencies [b620c4b]
+- Updated dependencies [1f97fce]
+- Updated dependencies [d1139f9]
+- Updated dependencies [babd660]
+  - @objectstack/spec@19.0.0-next.1
+  - @object-ui/i18n@19.0.0-next.1
+  - @object-ui/plugin-detail@19.0.0-next.1
+  - @object-ui/fields@19.0.0-next.1
+  - @object-ui/core@19.0.0-next.1
+  - @object-ui/react@19.0.0-next.1
+  - @object-ui/components@19.0.0-next.1
+  - @object-ui/types@19.0.0-next.1
+  - @object-ui/mobile@19.0.0-next.1
+  - @object-ui/permissions@19.0.0-next.1
+
 ## 19.0.0-next.0
 
 ### Minor Changes

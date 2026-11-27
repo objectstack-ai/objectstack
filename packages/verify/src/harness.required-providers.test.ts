@@ -1,5 +1,5 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
-// test-budget: 70 — spawns the real producer once per single-cause fixture: twelve in-process bootStack boots, no two the same configuration (a top-level requires, a package body's, the top level over the bodies, the control, an explicit instance, triggers with its hard dependencies, record-context with mcp, its no-token control, a host-mounted record-context, knowledge with realtime, its no-token control, knowledge on a file database under OS_HOME), each its case's subject; 5.9 s in a local run for the first six, 10.0 s with the three record-context boots, 14.8 s with the two knowledge boots, 19.0 s with the file-database knowledge boot (local, verbose reporter); slowest CI reading 53.7 s (scheduled CI run 45914939800, job Test Core (10/10) 140232535871, head 80519b5991, after PR #37708), x 1.25 = 67.1 s, rounded up to the next 10 s
+// test-budget: 80 — spawns the real producer once per single-cause fixture: thirteen in-process bootStack boots, no two the same configuration (a top-level requires, a package body's, the top level over the bodies, the control, an explicit instance, triggers with its hard dependencies, record-context with mcp, its no-token control, a host-mounted record-context, knowledge with realtime, its no-token control, knowledge on a file database under OS_HOME, a knowledge_source item with no adapter and no token), each its case's subject; 5.9 s in a local run for the first six, 10.0 s with the three record-context boots, 14.8 s with the two knowledge boots, 19.0 s with the file-database knowledge boot, 15.6 s for all thirteen on a shared box after the item boot was added (local, verbose reporter); slowest CI reading 53.7 s for the twelve (scheduled CI run 45914939800, job Test Core (10/10) 140232535871, head 80519b5991, after PR #37708), scaled by 13/12 = 58.2 s, x 1.25 = 72.7 s, rounded up to the next 10 s
 
 /**
  * #22301 item 1 — `bootStack` mounts the providers an app's `requires` names,
@@ -442,6 +442,80 @@ describe("requires: ['knowledge'] — the knowledge service and one store", () =
       else process.env.OS_HOME = previousHome;
       rmSync(root, { recursive: true, force: true });
     }
+  }, 120_000);
+
+  // [ADR-0161 K4 ◆, K8 item 12] The epic's finish line (a), on this boot's
+  // database: a source written as metadata — the stack's `knowledgeSources` —
+  // with no `adapter` and no `requires: ['knowledge']`. The item mounts the
+  // service and the deployment's store, and the source binds to that store
+  // although application code registered a second adapter beside it.
+  it("an item, no adapter, no token: the item mounts the service and the deployment's store, which builds and searches Chinese text", async () => {
+    /** Character bigrams: Chinese text has no spaces to split words on. */
+    class BigramEmbedder {
+      readonly id = 'rqp-bigrams';
+      readonly dimensions = 64;
+      readonly model = 'rqp-bigrams';
+      async embed(texts: string[]): Promise<number[][]> {
+        return texts.map((text) => {
+          const v = new Array<number>(this.dimensions).fill(0);
+          const chars = [...text.replace(/\s+/g, '')];
+          for (let i = 0; i + 1 < chars.length; i++) {
+            let h = 0;
+            for (const ch of chars[i]! + chars[i + 1]!) h = (h * 31 + ch.codePointAt(0)!) >>> 0;
+            v[h % this.dimensions] += 1;
+          }
+          const n = Math.hypot(...v) || 1;
+          return v.map((x) => x / n);
+        });
+      }
+    }
+    /** Application code: the embedder, and an adapter of its own — never the deployment's by registering. */
+    class AppStore {
+      readonly name = 'com.example.rqp.app-store';
+      readonly version = '0.0.0';
+      readonly type = 'standard';
+      readonly searched: string[] = [];
+      async init(ctx: { registerService(name: string, service: unknown): void }): Promise<void> {
+        ctx.registerService('embedder', new BigramEmbedder());
+      }
+      async start(ctx: { getService<T>(name: string): T }): Promise<void> {
+        const searched = this.searched;
+        ctx.getService<{ registerAdapter(id: string, a: unknown): void }>('knowledge').registerAdapter('rqp_app_store', {
+          id: 'rqp_app_store',
+          upsert: async () => undefined,
+          delete: async () => undefined,
+          search: async (q: string) => {
+            searched.push(q);
+            return [];
+          },
+        });
+      }
+    }
+    const appStore = new AppStore();
+    const source = { name: 'rqp_policies', label: '制度', source: { kind: 'object', object: 'rqp_article', content: ['title', 'body'] } };
+    stack = await bootStack(app({ requires: ['realtime'], knowledgeSources: [source] }), { extraPlugins: [appStore] });
+    expect(stack.kernel.hasPlugin(KNOWLEDGE)).toBe(true);
+    expect(stack.kernel.hasPlugin(TURSO)).toBe(true);
+    expect(stack.kernel.hasPlugin(PGVECTOR)).toBe(false);
+    const knowledge = await stack.kernel.getServiceAsync<any>('knowledge');
+    expect(knowledge.listAdapters().sort()).toEqual(['rqp_app_store', 'turso']);
+    const [described] = knowledge.describeSources();
+    expect(described?.source.adapter).toBeUndefined();
+    expect(knowledge.adapterIdFor(described.source)).toBe('turso');
+
+    const ql = await stack.kernel.getServiceAsync<any>('objectql');
+    await ql.insert('rqp_article', { title: '差旅报销制度', body: '出差住宿标准每晚不超过五百元，报销需附发票。' }, { context: { isSystem: true } });
+    await ql.insert('rqp_article', { title: '信息安全制度', body: '密码至少十二位，每季度更换一次。' }, { context: { isSystem: true } });
+    const ec = { isSystem: true, userId: 'system', roles: [], permissions: [] };
+    let hits: Array<{ sourceId: string; snippet: string }> = [];
+    for (let i = 0; i < 50 && hits.length === 0; i++) {
+      hits = (await knowledge.searchWithRefusals('住宿标准 报销', { executionContext: ec, sourceIds: [described.id], topK: 1 })).hits;
+      if (hits.length === 0) await new Promise((r) => setTimeout(r, 50));
+    }
+    expect(hits.map((h) => h.sourceId)).toEqual([described.id]);
+    expect(hits[0]?.snippet).toContain('住宿标准');
+    // The application's adapter was never asked: the source is the deployment's store's.
+    expect(appStore.searched).toEqual([]);
   }, 120_000);
 
   // LAST in the file: it clears the module cache to make the store's package unimportable.

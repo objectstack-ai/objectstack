@@ -13,9 +13,13 @@
  *   report its progress and result.
  * - `KnowledgeServicePlugin` runs the boot pass at `kernel:bootstrapped`, in
  *   the background, unless `buildAtBoot: false`.
+ * - `reconcileSources` walks every source whose store lists its documents
+ *   (trigger `reconcile`), one node per source; the plugin schedules it as a
+ *   daily job and asks for it after a predicate write, once the quiet period
+ *   passes (ADR-0161 K1).
  */
 
-import { describe, it, expect, vi } from 'vitest';
+import { afterEach, describe, it, expect, vi } from 'vitest';
 import type {
   AdapterContext,
   AdapterEmbeddingDescriptor,
@@ -25,8 +29,16 @@ import type {
 } from '@objectstack/spec/contracts';
 import type { KnowledgeDocument, KnowledgeHit, KnowledgeSource } from '@objectstack/spec/ai';
 import { KnowledgeService } from '../knowledge-service.js';
-import { KnowledgeServicePlugin } from '../knowledge-service-plugin.js';
-import { buildLockKey, type KnowledgeBuildLock, type KnowledgeBuildLockHandle } from '../knowledge-build.js';
+import { KnowledgeServicePlugin, reconcileJobOutcome } from '../knowledge-service-plugin.js';
+import {
+  buildLockKey,
+  RECONCILE_DEFAULT_CRON,
+  RECONCILE_JOB,
+  RECONCILE_MAX_WAIT_MS,
+  RECONCILE_QUIET_MS,
+  type KnowledgeBuildLock,
+  type KnowledgeBuildLockHandle,
+} from '../knowledge-build.js';
 import { knowledgeIndexStatusActionHandler, knowledgeRebuildActionHandler } from '../knowledge-build-actions.js';
 import type { KnowledgeIndexStatusEntry } from '../knowledge-build-actions.js';
 
@@ -400,6 +412,29 @@ describe('buildSourcesAtBoot — the first build', () => {
     expect(service.buildRecord('kb')).toMatchObject({ status: 'done' });
   });
 
+  it('[ADR-0161 K4] a source that names no adapter is built at boot on the one it is placed on; one that cannot be placed is left to the reading', async () => {
+    const db = makeEngine(ROWS);
+    const { adapter, calls } = makeAdapter();
+    const { service } = makeService(db.engine, adapter);
+    const { adapter: other } = makeAdapter();
+    const { adapter: unnamed } = makeAdapter();
+    service.registerSource(source({ adapter: undefined }));
+
+    await service.buildSourcesAtBoot();
+    expect(service.adapterIdFor(service.describeSources()[0]!.source)).toBe('memory');
+    expect(service.buildRecord('kb')).toMatchObject({ trigger: 'boot', status: 'done', result: { ok: true, indexed: 3 } });
+    expect(calls.upserted).toBe(3);
+
+    // A second node where two adapters arrived after the source and none is the deployment's:
+    // the pass builds nothing for it, and the reading names it.
+    const second = makeService(db.engine, other);
+    second.service.registerSource(source({ adapter: undefined }));
+    second.service.registerAdapter('app_store', unnamed);
+    await second.service.buildSourcesAtBoot();
+    expect(second.service.buildRecord('kb')).toBeUndefined();
+    expect(second.service.reportUnmountedAdapters()).toEqual(['kb']);
+  });
+
   it('a source with refresh.onRecordChange: false is left to its external indexer', async () => {
     const db = makeEngine(ROWS);
     const { adapter, calls } = makeAdapter();
@@ -551,5 +586,304 @@ describe('KnowledgeServicePlugin — the boot pass', () => {
     await new Promise((resolve) => setTimeout(resolve, 20));
     expect(calls.upserted).toBe(0);
     expect(service.buildRecord('kb')).toBeUndefined();
+  });
+});
+
+describe('reconcileSources — which sources the reconcile walks (ADR-0161 K1)', () => {
+  it('walks a current source again: unchanged documents are skipped, stale ones purged, under trigger reconcile', async () => {
+    const db = makeEngine(ROWS);
+    const { adapter, calls, docs } = makeAdapter();
+    const { service } = makeService(db.engine, adapter);
+    service.registerSource(source());
+    await service.rebuildSource('kb', { trigger: 'boot' });
+    expect(await service.readIndexState('kb')).toMatchObject({ state: 'current', due: false });
+    db.rows.delete('a2');
+
+    const report = await service.reconcileSources();
+    expect(report.sources).toEqual([
+      expect.objectContaining({ sourceId: 'kb', record: expect.objectContaining({ trigger: 'reconcile', status: 'done' }) }),
+    ]);
+    expect(service.buildRecord('kb')).toMatchObject({ trigger: 'reconcile', result: { indexed: 0, skipped: 2, purged: 1 } });
+    expect([...docs.keys()].sort()).toEqual(['kb:a1', 'kb:a3']);
+    expect(calls.beginBuild).toBe(2);
+  });
+
+  it('leaves a source whose adapter does not list its documents, said once at warn naming the operator rebuild', async () => {
+    const db = makeEngine(ROWS);
+    const { adapter, calls } = makeAdapter({ omit: ['listDocuments'] });
+    const { service, logger } = makeService(db.engine, adapter);
+    service.registerSource(source());
+
+    const first = await service.reconcileSources();
+    await service.reconcileSources();
+    expect(first.sources[0]).toMatchObject({ sourceId: 'kb', left: expect.stringContaining('no listDocuments') });
+    expect(first.sources[0]?.record).toBeUndefined();
+    expect(calls).toMatchObject({ beginBuild: 0, upserted: 0 });
+    const said = logger.warn.mock.calls.map((c) => String(c[0])).filter((l) => l.includes("source 'kb' is not reconciled"));
+    expect(said).toHaveLength(1);
+    expect(said[0]).toContain('os knowledge rebuild');
+  });
+
+  it('[ADR-0161 K4] reads the store a source that names no adapter is placed on: one that lists no documents is left, one that does is walked', async () => {
+    const db = makeEngine(ROWS);
+    const { adapter, calls } = makeAdapter({ omit: ['listDocuments'] });
+    const { service } = makeService(db.engine, adapter);
+    service.registerSource(source({ adapter: undefined }));
+    const report = await service.reconcileSources();
+    expect(report.sources[0]).toMatchObject({ sourceId: 'kb', left: expect.stringContaining('no listDocuments') });
+    expect(calls).toMatchObject({ beginBuild: 0, upserted: 0 });
+
+    const listing = makeAdapter();
+    const walked = makeService(db.engine, listing.adapter);
+    walked.service.registerSource(source({ adapter: undefined }));
+    await walked.service.reconcileSources();
+    expect(walked.service.buildRecord('kb')).toMatchObject({ trigger: 'reconcile', status: 'done' });
+    expect(listing.calls.upserted).toBe(3);
+  });
+
+  it('leaves a source with refresh.onRecordChange: false to its external indexer', async () => {
+    const db = makeEngine(ROWS);
+    const { adapter, calls } = makeAdapter();
+    const { service, logger } = makeService(db.engine, adapter);
+    service.registerSource(source({ refresh: { onRecordChange: false } }));
+
+    const report = await service.reconcileSources();
+    expect(report.sources[0]).toMatchObject({ sourceId: 'kb', left: expect.stringContaining('external indexer') });
+    expect(calls).toMatchObject({ beginBuild: 0, upserted: 0 });
+    expect(service.buildRecord('kb')).toBeUndefined();
+    expect(logger.warn).not.toHaveBeenCalled();
+  });
+
+  it('two nodes over one store and one cluster lock: one reconcile walks, the other records not-run', async () => {
+    const db = makeEngine(ROWS);
+    const { adapter, calls } = makeAdapter();
+    const shared = makeSharedLock();
+    const nodeA = makeService(db.engine, adapter, { lock: shared.lock });
+    const nodeB = makeService(db.engine, adapter, { lock: shared.lock });
+    nodeA.service.registerSource(source());
+    nodeB.service.registerSource(source());
+
+    const [a, b] = await Promise.all([nodeA.service.reconcileSources(), nodeB.service.reconcileSources()]);
+    const statuses = [a.sources[0]?.record?.status, b.sources[0]?.record?.status].sort();
+    expect(statuses).toEqual(['done', 'not-run']);
+    expect(calls.beginBuild).toBe(1);
+    expect(a.unfinished).toEqual([]);
+    expect(b.unfinished).toEqual([]);
+    expect(shared.held.size).toBe(0);
+  });
+
+  it('a reconcile that loses its lease stops before its next page, and the report names it', async () => {
+    const db = makeEngine(ROWS);
+    const { adapter, calls } = makeAdapter();
+    let held = true;
+    const handle: KnowledgeBuildLockHandle = { async release() { held = false; }, async renew() {}, isHeld: () => held };
+    const lock: KnowledgeBuildLock = { acquire: async () => handle };
+    const upsert = adapter.upsert.bind(adapter);
+    adapter.upsert = async (batch, ctx) => {
+      await upsert(batch, ctx);
+      held = false; // the lease lapses while the first page is written
+    };
+    const { service } = makeService(db.engine, adapter, { lock });
+    service.registerSource(source());
+
+    const report = await service.reconcileSources();
+    expect(report.sources[0]?.record).toMatchObject({ trigger: 'reconcile', status: 'lease-lost', result: { ok: false, purged: null } });
+    expect(calls.completeBuild).toBe(0);
+    expect(report.unfinished).toEqual([expect.objectContaining({ sourceId: 'kb', status: 'lease-lost' })]);
+    expect(reconcileJobOutcome(report)).toMatchObject({ outcome: 'degraded', reason: expect.stringContaining('kb (lease-lost') });
+  });
+});
+
+describe('KnowledgeServicePlugin — the reconcile job and the predicate-write reconcile', () => {
+  type Handler = (event: { type: string; object?: string; payload?: unknown; timestamp?: string }) => Promise<void>;
+
+  function makeJobs() {
+    const scheduled: Array<{ name: string; schedule: unknown; handler: () => Promise<unknown> }> = [];
+    const cancelled: string[] = [];
+    const jobs = {
+      schedule: vi.fn(async (name: string, schedule: unknown, handler: () => Promise<unknown>) => {
+        scheduled.push({ name, schedule, handler });
+      }),
+      cancel: vi.fn(async (name: string) => { cancelled.push(name); }),
+      trigger: vi.fn(async () => undefined),
+    };
+    return { jobs, scheduled, cancelled };
+  }
+
+  function makeCtx(engine: IDataEngine, adapter: IKnowledgeAdapter, extra: { jobs?: unknown } = {}) {
+    const hooks = new Map<string, Array<() => Promise<void>>>();
+    let service: KnowledgeService | undefined;
+    let handler: Handler | undefined;
+    const ctx: any = {
+      logger: makeLogger(),
+      hook: (name: string, fn: () => Promise<void>) => {
+        hooks.set(name, [...(hooks.get(name) ?? []), fn]);
+      },
+      registerService: (name: string, svc: unknown) => {
+        if (name === 'knowledge') service = svc as KnowledgeService;
+      },
+      getService: (name: string) => {
+        if (name === 'objectql') return engine;
+        if (name === 'embedder') return { id: 'test-embedder' };
+        if (name === 'job' && extra.jobs) return extra.jobs;
+        if (name === 'realtime') {
+          return {
+            subscribe: async (_channel: string, h: Handler) => { handler = h; return 'sub-1'; },
+            unsubscribe: async () => undefined,
+          };
+        }
+        throw new Error(`[Kernel] Service '${name}' not found`);
+      },
+    };
+    return {
+      ctx,
+      bulk: (object: string, matched = 10) =>
+        handler!({ type: 'data.records.updated', object, payload: { type: 'data.records.updated', object, matched } }),
+      async boot(plugin: KnowledgeServicePlugin) {
+        await plugin.init(ctx);
+        service!.registerAdapter('memory', adapter);
+        await plugin.start(ctx);
+        for (const fn of hooks.get('kernel:ready') ?? []) await fn();
+        for (const fn of hooks.get('kernel:bootstrapped') ?? []) await fn();
+        return service!;
+      },
+    };
+  }
+
+  const warned = (ctx: { logger: ReturnType<typeof makeLogger> }) => ctx.logger.warn.mock.calls.map((c) => String(c[0]));
+
+  it('schedules one cron job, daily at 03:00 UTC by default; its run answers completed, and degraded naming a source whose walk failed', async () => {
+    const db = makeEngine(ROWS);
+    const { adapter } = makeAdapter();
+    const { jobs, scheduled, cancelled } = makeJobs();
+    const harness = makeCtx(db.engine, adapter, { jobs });
+    const plugin = new KnowledgeServicePlugin({ sources: [source()], buildAtBoot: false, enableEventSync: false });
+    const service = await harness.boot(plugin);
+
+    expect(scheduled).toEqual([
+      { name: RECONCILE_JOB, schedule: { type: 'cron', expression: RECONCILE_DEFAULT_CRON, timezone: 'UTC' }, handler: expect.any(Function) },
+    ]);
+    expect(RECONCILE_DEFAULT_CRON).toBe('0 3 * * *');
+    expect(await scheduled[0]!.handler()).toEqual({ outcome: 'completed' });
+    expect(service.buildRecord('kb')).toMatchObject({ trigger: 'reconcile', status: 'done' });
+
+    adapter.upsert = async () => { throw new Error('provider quota exceeded'); };
+    db.rows.set('a9', { id: 'a9', title: 'New', body: 'Written without an event' });
+    const degraded = (await scheduled[0]!.handler()) as { outcome: string; reason?: string };
+    expect(degraded.outcome).toBe('degraded');
+    expect(degraded.reason).toContain('kb (failed');
+    expect(degraded.reason).toContain('provider quota exceeded');
+
+    await plugin.destroy();
+    expect(cancelled).toEqual([RECONCILE_JOB]);
+  });
+
+  it('moves the job to the cron and time zone the option names', async () => {
+    const db = makeEngine(ROWS);
+    const { adapter } = makeAdapter();
+    const { jobs, scheduled } = makeJobs();
+    const harness = makeCtx(db.engine, adapter, { jobs });
+    await harness.boot(new KnowledgeServicePlugin({ buildAtBoot: false, enableEventSync: false, reconcile: { cron: '30 1 * * 0', timezone: 'Asia/Shanghai' } }));
+    expect(scheduled.map((s) => s.schedule)).toEqual([{ type: 'cron', expression: '30 1 * * 0', timezone: 'Asia/Shanghai' }]);
+  });
+
+  it('reconcile: false schedules nothing', async () => {
+    const db = makeEngine(ROWS);
+    const { adapter } = makeAdapter();
+    const { jobs } = makeJobs();
+    const harness = makeCtx(db.engine, adapter, { jobs });
+    await harness.boot(new KnowledgeServicePlugin({ buildAtBoot: false, enableEventSync: false, reconcile: false }));
+    expect(jobs.schedule).not.toHaveBeenCalled();
+    expect(warned(harness.ctx).some((l) => l.includes('job service'))).toBe(false);
+  });
+
+  it('no job service is said once at boot, naming the operator rebuild', async () => {
+    const db = makeEngine(ROWS);
+    const { adapter } = makeAdapter();
+    const harness = makeCtx(db.engine, adapter);
+    await harness.boot(new KnowledgeServicePlugin({ sources: [source()], buildAtBoot: false, enableEventSync: false }));
+    const said = warned(harness.ctx).filter((l) => l.includes('no job service is composed'));
+    expect(said).toHaveLength(1);
+    expect(said[0]).toContain('os knowledge rebuild');
+  });
+
+  describe('after a predicate write', () => {
+    afterEach(() => {
+      vi.useRealTimers();
+    });
+
+    async function bootBuilt(opts: { reconcile?: false } = {}) {
+      const db = makeEngine(ROWS);
+      const made = makeAdapter();
+      const harness = makeCtx(db.engine, made.adapter);
+      const service = await harness.boot(new KnowledgeServicePlugin({ sources: [source()], buildAtBoot: false, ...opts }));
+      await service.rebuildSource('kb', { trigger: 'operator' });
+      vi.useFakeTimers();
+      // A pass queued after every pending one: awaiting it waits for them.
+      const settle = async () => { await service.reconcileSources({ sources: [] }); };
+      return { db, ...made, harness, service, settle };
+    }
+
+    it('ten predicate writes in a row start one reconcile of the source, once the quiet period passes', async () => {
+      const { db, calls, docs, harness, service, settle } = await bootBuilt();
+      db.rows.delete('a1');
+      for (let i = 0; i < 10; i++) {
+        await harness.bulk('kb_article');
+        await vi.advanceTimersByTimeAsync(10_000);
+      }
+      // The quiet period counts from the last write: not yet.
+      await vi.advanceTimersByTimeAsync(RECONCILE_QUIET_MS - 10_001);
+      await settle();
+      expect(calls.beginBuild).toBe(1);
+
+      await vi.advanceTimersByTimeAsync(1);
+      await settle();
+      expect(calls.beginBuild).toBe(2);
+      expect(service.buildRecord('kb')).toMatchObject({ trigger: 'reconcile', status: 'done', result: { purged: 1 } });
+      expect(docs.has('kb:a1')).toBe(false);
+
+      await vi.advanceTimersByTimeAsync(RECONCILE_MAX_WAIT_MS);
+      await settle();
+      expect(calls.beginBuild).toBe(2);
+
+      const said = warned(harness.ctx).filter((l) => l.includes("'kb_article' had a predicate write"));
+      expect(said).toHaveLength(10);
+      expect(said[0]).toContain('source(s) kb');
+      expect(said[0]).toContain('2 minute(s)');
+      expect(said[0]).not.toContain('cannot be repaired from the event stream. Retention');
+    });
+
+    it('predicate writes that keep arriving start the reconcile at the latest ten minutes after the first', async () => {
+      const { calls, harness, settle } = await bootBuilt();
+      for (let t = 0; t < RECONCILE_MAX_WAIT_MS; t += 60_000) {
+        await harness.bulk('kb_article');
+        await vi.advanceTimersByTimeAsync(60_000 - (t + 60_000 >= RECONCILE_MAX_WAIT_MS ? 1 : 0));
+      }
+      await settle();
+      expect(calls.beginBuild).toBe(1);
+      await vi.advanceTimersByTimeAsync(1);
+      await settle();
+      expect(calls.beginBuild).toBe(2);
+    });
+
+    it('a predicate write on an object no source indexes asks for nothing', async () => {
+      const { calls, harness, settle } = await bootBuilt();
+      await harness.bulk('invoice');
+      await vi.advanceTimersByTimeAsync(RECONCILE_MAX_WAIT_MS);
+      await settle();
+      expect(calls.beginBuild).toBe(1);
+      expect(warned(harness.ctx).some((l) => l.includes("'invoice'"))).toBe(false);
+    });
+
+    it('reconcile: false asks for no reconcile and keeps the stale-index warning', async () => {
+      const { calls, harness, settle } = await bootBuilt({ reconcile: false });
+      await harness.bulk('kb_article');
+      await vi.advanceTimersByTimeAsync(RECONCILE_MAX_WAIT_MS);
+      await settle();
+      expect(calls.beginBuild).toBe(1);
+      const said = warned(harness.ctx).filter((l) => l.includes("'kb_article' had a predicate write"));
+      expect(said).toHaveLength(1);
+      expect(said[0]).toContain('cannot be repaired from the event stream');
+    });
   });
 });

@@ -2729,7 +2729,29 @@ const zh = {
           availableObjects: '列出可用的数据对象。',
           recentActivity: '总结我的最近动态。',
         },
+        // objectstack#37862 — the drawer's empty conversation: the platform's
+        // suggestions by the kind of page in view (`emptyConversationModel.ts`).
+        page: {
+          record: {
+            summarize: '总结这条记录',
+            related: '这条记录关联了哪些内容？',
+          },
+          list: {
+            summarize: '总结这个列表里的记录',
+            recent: '本周新增了哪些记录？',
+          },
+          dashboard: {
+            explain: '这个仪表盘展示了什么？',
+            standOut: '这个仪表盘里有什么值得注意的？',
+          },
+          report: {
+            summarize: '总结这份报表',
+            takeaways: '这份报表的要点是什么？',
+          },
+        },
       },
+      // objectstack#37862 — the accessible name of the empty conversation's suggestions.
+      suggestionsLabel: '推荐问题',
       // objectui#3546 slice four — the AI console surfaces: the /ai chat page's app switcher,
       // connection banner and plan/publish cards, the ChatDock chrome, and the
       // conversation-list date buckets. `group.*` is the template-key family
@@ -2757,7 +2779,7 @@ const zh = {
         expand: '展开',
         restore: '还原为侧边栏',
         open: '打开助手',
-        planAwaitingApproval: '有一个方案等待确认',
+        planAwaitingApproval: '有一项操作等待确认',
         close: '关闭',
         more: '更多操作',
       },
@@ -3172,6 +3194,8 @@ const zh = {
         twoFactorTooManyAttempts: '错误次数过多，请重新使用密码登录。',
         twoFactorExpired: '本次登录已过期，请重新使用密码登录。',
         twoFactorLocked: '失败次数过多，您的账户已被暂时锁定，请稍后再试。',
+        managedPasswordSignIn: "此部署通过其身份提供方登录，这里不能使用密码。请点击上方的身份提供方按钮登录。",
+        managedPasswordReset: "此部署通过其身份提供方登录，这里不设置也不重置密码。请在登录页点击身份提供方按钮登录。",
       },
       // objectui#3546 slice three — phone/OTP sign-in. `{seconds}` is LoginForm's own
       // literal `.replace()` hole, not i18next interpolation: keep the single braces.
@@ -3631,6 +3655,7 @@ const zh = {
     recent: '最近使用',
     starred: '已收藏',
     removeFromFavorites: '从收藏中移除 {{name}}',
+    conversationUnavailable: '该对话已不可用',
     allReports: '全部报表',
     collapse: '收起侧边栏',
     expand: '展开侧边栏',
@@ -3665,6 +3690,7 @@ const zh = {
         report: '报表',
         page: '页面',
         url: '链接',
+        aiChat: 'AI 问询',
       },
       linkLabel: '名称',
       linkUrl: '网址',
@@ -3690,6 +3716,17 @@ const zh = {
       creating: '正在创建…',
       newItemPendingDraft: '这个名称下已有一份未发布的草稿，请再试一次。',
       newItemLeft: '新建的仪表盘「{{name}}」没能删除，请在 Studio 里删除它。',
+      aiChatName: 'AI 问询',
+      aiChatDefaults: '留空的项显示页面的默认内容。',
+      aiChatTitle: '欢迎标题',
+      aiChatSubtitle: '副标题',
+      aiChatPlaceholder: '输入框提示',
+      aiChatSuggestions: '推荐问题',
+      aiChatSuggestionsHint: '每行一个，最多 4 个。',
+      aiChatTooLong: '最多 {{max}} 个字符。',
+      aiChatTooMany: '最多 {{max}} 个问题。',
+      aiChatEdit: '编辑问询页',
+      setAsHome: '设为首页',
     },
     pins: {
       button: '页头按钮',
@@ -4848,6 +4885,7 @@ const zh = {
       add_field: '给对象添加字段',
       apply_blueprint: '按方案搭建应用',
       apply_edit: '应用这次修改',
+      ask_which: '确认问题含义',
       create_metadata: '新建一项元数据',
       create_object: '新建一个对象',
       create_package: '新建一个应用包',
@@ -5500,6 +5538,7 @@ const zh = {
       toggleFailed: '切换应用状态失败：{{reason}}',
       setDefaultDone: '{{name}} 已设为默认',
       setDefaultFailed: '设置默认应用失败：{{reason}}',
+      restoreDefaultFailed: '无法将 {{name}} 恢复为默认应用，因此它已不再是默认应用：{{reason}}',
       appDeleted: '{{name}} 已删除',
       deleteFailed: '删除应用失败：{{reason}}',
       nothingToDelete: '{{name}} 无可删除：{{reason}}',

@@ -439,8 +439,13 @@ writes it: it changes only by a PR, when the card or the runner changes, or when
 it at install. A hand edit of that last kind changes only what the refusal names, and the provenance's `amended`
 entry records it with the sha256 it replaced. A card edit the build's Build reading does not feel re-pins
 `cardSha256` the same way, its `amended` entry naming the card sha256 it replaced (`cardFrom`); a card edit that
-changes the reading needs a new build. `packages/qa/scenarios/test/verified-builds.test.ts` pins both sha256s, a
-build for every dataset card, and a protocol range that admits the tree's own. Records, recordings and logs stay
+changes the reading needs a new build. The provenance's `scored` names the runner revision, the date and the Build
+reading of the build's latest re-score (`verified` stays the authoring run's reading). A scorer change that fails a
+verified build re-scores it in the same PR: when the platform moved under the build (the check follows a runtime
+ruling the build predates), a hand edit restores what the card asks for and records an `amended` entry; otherwise
+the build is rebuilt. Either way `scored` moves. `packages/qa/scenarios/test/verified-builds.test.ts` pins both sha256s, a
+build for every dataset card, a protocol range that admits the tree's own, and a build that passes every Build
+check of the tree's scorer with no roll-up charge. Records, recordings and logs stay
 out of the tree. The loader and the packed library read this directory one level deep, so `builds/` is
 neither a card nor shipped.
 

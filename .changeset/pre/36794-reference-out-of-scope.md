@@ -4,6 +4,8 @@
 '@objectstack/runtime': patch
 ---
 
+**Shipped in 19.0.0-next.0**, whose CHANGELOG missed this entry; listed here one prerelease late.
+
 feat(spec,core): an import lookup cell that names a record under another parent answers its own reason, `reference_out_of_scope`, with the scoping columns as data
 
 Clause-②: yes (widening)

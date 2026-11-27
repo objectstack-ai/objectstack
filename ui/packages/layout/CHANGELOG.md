@@ -1,5 +1,123 @@
 # @object-ui/layout
 
+## 19.0.0-next.1
+
+### Patch Changes
+
+- e2837e7: **Shipped in 19.0.0-next.0**, whose CHANGELOG missed this entry; listed here one prerelease late.
+  
+  fix(app-shell): a full-height console page gives the impersonation banner its height back
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  - While an administrator impersonates a user, the console draws its banner above the page. Where it is drawn in place (every page on a phone, and Studio, Home and the organization pages on a desktop) the page below still took the whole viewport, so the document was taller than the window by the banner's height: a list's footer and bulk action bar sat below the fold and the page gained a second scrollbar. The same held for the read-rate and storage banners beside it.
+  - The banners drawn in place now publish their height as the CSS custom property `--os-chrome-banners` on the document root, and the console's full-height shells take the viewport less it: `AppShell` (`@object-ui/layout`, whose sidebar wrapper's own minimum height is overridden to match), Studio and its access-required screen, Home, the AI chat page, the organization layouts and the app-unavailable and no-app screens. While no banner is drawn in place, and anywhere outside the console, the property is unset and every shell keeps its viewport height. Inside an app on a desktop the banners are drawn into the content area, as before, and publish nothing.
+- 3eb778d: perf(console): a list page draws its rows once before they paint, and the shell re-renders less during first load
+  
+  Clause-②: yes (narrowing)
+  Metadata-protocol: none
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No schema key, accepted value, metadata type or stored row is added, removed or renamed, so there is nothing for `objectstack migrate meta` to rewrite. What narrows is the value two React hooks of @object-ui/i18n return: `useObjectTranslation()` and `useI18nContext()` no longer carry `appContentLanguages`, which moved to its own hook. Its consumer is code, and the compiler names every reader left behind. `runtime-interface-only` does not fit on a checked fact: the context value's interface is not exported, so it cannot be named by path. -->
+  
+  On a list page's first load the grid drew its whole table several times between the rows' first render and their first paint: once with row-end controls before the list page scope was known, once when the inline-action fold found its host, and once when the record verdicts were republished with nothing new in them. The rows now draw once, without row-end controls, and those passes are gone.
+  
+  The shell does less during first load too. The app's own locale list lands after the console has drawn; it used to re-render every component that reads a translation, about 1,900 of them. It is now read with `useAppContentLanguages()` from `@object-ui/i18n`, and only the language menus re-render for it. `useObjectTranslation()` and `useI18nContext()` no longer carry `appContentLanguages`. A sidebar entry is not redrawn when a new capability checker gives it the same answer.
+  
+  Nothing changes in what the list, the sidebar or the language menus show.
+  
+  **BREAKING** (`@object-ui/i18n`, and `@object-ui/react`, which re-exports the same two hooks: their return values), shipped as `patch`: the change is not to the metadata protocol (`Metadata-protocol: none`).
+  
+  - Removed: the `appContentLanguages` field from what `useObjectTranslation()` and `useI18nContext()` return, whether they are imported from `@object-ui/i18n` or from `@object-ui/react`. It was added there by #36040.
+  - Use instead: `useAppContentLanguages()`, which both entries now export: `@object-ui/i18n`, and `@object-ui/react` beside the two hooks. It returns the same value, the app's declared content languages or `null` while they are unknown, and `null` outside an `I18nProvider`.
+  - Why: the list lands after the console has drawn. While it rode on the translation context, its arrival re-rendered every component that reads a translation, about 1,900 of them on first load. In its own context only the components that read it re-render.
+- ce4d8c7: perf(console): the sidebar no longer redraws every entry each time the console re-renders during first load
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  While a console page first loads, the shell re-renders about ten times as its boot reads land. Each time, the sidebar redrew every navigation entry, and with each entry its ⋯ menu and tooltip: about 2,700 components per pass, several passes before the page could paint.
+  
+  Now an entry is redrawn only when what it shows changes: its label, icon, colour, address, or the gates that decide whether it shows. The ⋯ menu redraws its menu tree only when its own text or entries change. The console's expression evaluator is no longer rebuilt on every render, because that rebuild alone made every entry redraw.
+  
+  On a list page's first load this halves the components drawn before first paint. Nothing changes in what the sidebar shows or does.
+- 8fbae19: feat(spec): an `ai:chat` menu entry's `params` have a declared shape — the AI inquiry home page's title, subtitle, placeholder and up to four suggested questions
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: added
+  Skills-docs: follow-up owed
+  
+  An app puts the AI inquiry home page on its menu as a component entry with `componentRef: 'ai:chat'`. Its `params` are now judged by the new `AiChatNavParamsSchema` wherever an app is parsed:
+  
+  ```ts
+  { id: 'nav_ask', type: 'component', label: 'Ask AI', componentRef: 'ai:chat',
+    params: {
+      title: 'Ask about our policies',          // at most 60 characters
+      subtitle: 'Leave, travel and expenses',   // at most 200
+      placeholder: 'Type a question…',          // at most 100
+      suggestions: ['How many leave days do I get?', 'Who approves travel?'],  // 1 to 4, each at most 100
+    } }
+  ```
+  
+  - The record is closed: an unknown key, a wrong type, an empty string or a fifth suggestion is refused at `navigation.<i>.params.<key>`. `agent` and `scope` are answered with why they are not configurable: the page always talks to the platform `ask` agent, and answers prefer the app's own objects without being limited to them.
+  - An app carries at most one `ai:chat` entry across `navigation` and every `areas[].navigation`, at any depth; a second one is refused at its own path, naming the first.
+  - Every other `componentRef` keeps its open `params` record, unchanged.
+  - The console sidebar links an `ai:chat` entry to `/apps/<app>/component/ai/chat` with no querystring: the page reads the copy off the entry, not the URL. Other component entries still carry their `params` as querystring. `@object-ui/types`' app validator chains both new spec checks.
+  
+  New exports from `@objectstack/spec/ui`: `AiChatNavParamsSchema`, `AiChatNavParams` (author state), `AiChatNavParamsParsed`, `AI_CHAT_COMPONENT_REF`, `checkAiChatNavParams`, `checkAppSingleAiChatEntry`. The console page that reads these keys ships separately; until then an `ai:chat` entry opens the console's "component not registered" notice, as it did before.
+- Updated dependencies [0296d97]
+- Updated dependencies [bb76b8c]
+- Updated dependencies [d9bc148]
+- Updated dependencies [c42a045]
+- Updated dependencies [58570d8]
+- Updated dependencies [81c68b3]
+- Updated dependencies [eb683b8]
+- Updated dependencies [561fe12]
+- Updated dependencies [f722411]
+- Updated dependencies [c3a4a30]
+- Updated dependencies [b1c41e5]
+- Updated dependencies [ea1b70a]
+- Updated dependencies [dedc16c]
+- Updated dependencies [adb65d1]
+- Updated dependencies [adb65d1]
+- Updated dependencies [87af66e]
+- Updated dependencies [ddd5941]
+- Updated dependencies [d58bf7a]
+- Updated dependencies [bebc2cf]
+- Updated dependencies [c3da753]
+- Updated dependencies [9a65a48]
+- Updated dependencies [9b99640]
+- Updated dependencies [712df42]
+- Updated dependencies [579b857]
+- Updated dependencies [50b4bf8]
+- Updated dependencies [3eb778d]
+- Updated dependencies [91875c7]
+- Updated dependencies [1bc265f]
+- Updated dependencies [39fafc0]
+- Updated dependencies [b1490f2]
+- Updated dependencies [44ccf94]
+- Updated dependencies [1dbf19a]
+- Updated dependencies [14badad]
+- Updated dependencies [f4d6bc5]
+- Updated dependencies [6e8f663]
+- Updated dependencies [3e87d7b]
+- Updated dependencies [f07d63a]
+- Updated dependencies [709a087]
+- Updated dependencies [54dc93a]
+- Updated dependencies [56c9cae]
+- Updated dependencies [2980483]
+- Updated dependencies [1028438]
+- Updated dependencies [c826e8a]
+- Updated dependencies [8fbae19]
+- Updated dependencies [b620c4b]
+- Updated dependencies [1f97fce]
+- Updated dependencies [babd660]
+  - @objectstack/spec@19.0.0-next.1
+  - @object-ui/core@19.0.0-next.1
+  - @object-ui/react@19.0.0-next.1
+  - @object-ui/components@19.0.0-next.1
+  - @object-ui/types@19.0.0-next.1
+
 ## 19.0.0-next.0
 
 ### Minor Changes

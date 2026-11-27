@@ -3209,7 +3209,29 @@ const en = {
           availableObjects: 'List the available data objects.',
           recentActivity: 'Summarize my recent activity.',
         },
+        // objectstack#37862 — the drawer's empty conversation: the platform's
+        // suggestions by the kind of page in view (`emptyConversationModel.ts`).
+        page: {
+          record: {
+            summarize: 'Summarize this record',
+            related: 'What is related to this record?',
+          },
+          list: {
+            summarize: 'Summarize the records in this list',
+            recent: 'Which records were added this week?',
+          },
+          dashboard: {
+            explain: 'What does this dashboard show?',
+            standOut: 'What stands out on this dashboard?',
+          },
+          report: {
+            summarize: 'Summarize this report',
+            takeaways: 'What are the key takeaways from this report?',
+          },
+        },
       },
+      // objectstack#37862 — the accessible name of the empty conversation's suggestions.
+      suggestionsLabel: 'Suggested questions',
       // objectui#3546 slice four — the AI console surfaces: the /ai chat page's app switcher,
       // connection banner and plan/publish cards, the ChatDock chrome, and the
       // conversation-list date buckets. `group.*` is the template-key family
@@ -3237,8 +3259,8 @@ const en = {
         expand: 'Expand',
         restore: 'Restore side panel',
         open: 'Open assistant',
-        // objectui#11666 — the launchers' marker while a proposed plan awaits approval.
-        planAwaitingApproval: 'A proposed plan is waiting for your approval',
+        // objectui#11666 — the launchers' marker while a proposed write awaits approval.
+        planAwaitingApproval: 'An action is waiting for your approval',
         close: 'Close',
         more: 'More actions',
       },
@@ -3765,6 +3787,10 @@ const en = {
         twoFactorTooManyAttempts: 'Too many incorrect codes. Sign in with your password again.',
         twoFactorExpired: 'This sign-in has expired. Sign in with your password again.',
         twoFactorLocked: 'Too many failed attempts. Your account is temporarily locked. Try again later.',
+        // objectstack#34171 — a cloud-managed runtime's 409 `RESOURCE_CONFLICT` on the
+        // password doors (`signInRefusalMessages`, `passwordDoorRefusalMessages`).
+        managedPasswordSignIn: "This deployment signs you in through its identity provider, so a password can't be used here. Use the identity provider's button above to sign in.",
+        managedPasswordReset: "This deployment signs you in through its identity provider, so no password is set or reset here. Sign in with the identity provider's button on the sign-in page.",
       },
     },
     register: {
@@ -4212,6 +4238,7 @@ const en = {
     recent: 'Recent',
     starred: 'Starred',
     removeFromFavorites: 'Remove {{name}} from favorites',
+    conversationUnavailable: 'This conversation is no longer available',
     allReports: 'All reports',
     collapse: 'Collapse sidebar',
     expand: 'Expand sidebar',
@@ -4246,6 +4273,7 @@ const en = {
         report: 'Reports',
         page: 'Pages',
         url: 'Link',
+        aiChat: 'AI inquiry',
       },
       linkLabel: 'Label',
       linkUrl: 'URL',
@@ -4271,6 +4299,17 @@ const en = {
       creating: 'Creating…',
       newItemPendingDraft: 'A draft with this name is already pending. Try again.',
       newItemLeft: 'The new dashboard "{{name}}" could not be removed again; remove it in Studio.',
+      aiChatName: 'Ask AI',
+      aiChatDefaults: 'Leave a field empty to show the page\'s default.',
+      aiChatTitle: 'Heading',
+      aiChatSubtitle: 'Subtitle',
+      aiChatPlaceholder: 'Question box hint',
+      aiChatSuggestions: 'Suggested questions',
+      aiChatSuggestionsHint: 'One per line, at most 4.',
+      aiChatTooLong: 'At most {{max}} characters.',
+      aiChatTooMany: 'At most {{max}} questions.',
+      aiChatEdit: 'Edit inquiry page',
+      setAsHome: 'Set as home',
     },
     pins: {
       button: 'Header buttons',
@@ -5530,6 +5569,7 @@ const en = {
       add_field: 'Add a field',
       apply_blueprint: 'Build the app from the plan',
       apply_edit: 'Apply the change',
+      ask_which: 'Clarify the question',
       create_metadata: 'Create a metadata item',
       create_object: 'Create an object',
       create_package: 'Create a package',
@@ -6294,6 +6334,7 @@ const en = {
       toggleFailed: 'Failed to toggle app status: {{reason}}',
       setDefaultDone: '{{name}} set as default',
       setDefaultFailed: 'Failed to set default app: {{reason}}',
+      restoreDefaultFailed: 'Could not restore {{name}} as the default app, so it is no longer the default: {{reason}}',
       appDeleted: '{{name}} deleted',
       deleteFailed: 'Failed to delete app: {{reason}}',
       // A `reset: false` answer: no customization row existed, so nothing was

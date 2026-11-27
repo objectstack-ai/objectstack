@@ -50,7 +50,7 @@ import {
   ObjectIconTile,
   RecordTopBarButton,
 } from '@object-ui/components';
-import { Bot, Database, Lock, MoreHorizontal, Plus, RotateCcw, Save, X } from 'lucide-react';
+import { Database, Lock, MessageCircle, MoreHorizontal, Plus, RotateCcw, Save, X } from 'lucide-react';
 import { toast } from 'sonner';
 import { formatMetadataError } from '@object-ui/data-objectstack';
 import { useObjectTranslation, useObjectLabel } from '@object-ui/i18n';
@@ -730,7 +730,10 @@ export function ObjectDataPage({ dataSource, objects }: any) {
   const openDrawerRecordWithAssistant = React.useCallback(() => {
     if (!openedRecordId || !dock) return;
     openDrawerRecordAsPage();
-    dock.open();
+    // ui ADR-0057 Amendment A5 — this is the assistant's entry, drawn on the
+    // pane: with the drawer closed it opens as the entry does.
+    if (dock.openEntry) dock.openEntry();
+    else dock.open();
   }, [openedRecordId, dock, openDrawerRecordAsPage]);
   React.useEffect(() => {
     if (openedRecordId && !navOverlay.isOpen) navOverlay.open({ id: openedRecordId });
@@ -1233,11 +1236,11 @@ export function ObjectDataPage({ dataSource, objects }: any) {
           onExpand={openedRecordId ? openDrawerRecordAsPage : undefined}
           toggles={openedRecordId && dock ? (
             <RecordTopBarButton
-              label={t('topbar.aiAssistant', { defaultValue: 'AI Assistant' })}
+              label={t('home.askAI', { defaultValue: 'Ask AI' })}
               onClick={openDrawerRecordWithAssistant}
               data-testid="record-pane-open-assistant"
             >
-              <Bot className="h-3.5 w-3.5" />
+              <MessageCircle className="h-3.5 w-3.5" />
             </RecordTopBarButton>
           ) : undefined}
           title={servedObjectLabel(objectDef, language, objectLabel)}

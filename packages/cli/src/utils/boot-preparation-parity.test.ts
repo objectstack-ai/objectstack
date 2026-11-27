@@ -63,6 +63,7 @@ import {
   resolvePlatformAuthComposition,
   resolveServedCapabilities,
   resolveStackTiers,
+  stackItemCapabilities,
 } from '@objectstack/core';
 import { createStandaloneStack } from '@objectstack/runtime';
 import { stampSearchPinyinEnabled } from '@objectstack/types';
@@ -123,6 +124,9 @@ const STEPS: readonly Step[] = [
       // [#22301] Which tokens get a provider — the declared ones, `email` for
       // `auth`, the always-on slate, `job` / `queue` ahead — read by both boots.
       resolveServedCapabilities,
+      // [ADR-0161 K8 item 12] The tokens a stack's items mount (a shipped
+      // `knowledge_source` mounts `knowledge`), read by both boots off the config.
+      stackItemCapabilities,
       stampSearchPinyinEnabled,
       providesCapability,
     ],

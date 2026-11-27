@@ -41,6 +41,10 @@ export {
   BUILD_LEASE_MS,
   BUILD_PROGRESS_LOG_INTERVAL_MS,
   buildLockKey,
+  RECONCILE_DEFAULT_CRON,
+  RECONCILE_JOB,
+  RECONCILE_MAX_WAIT_MS,
+  RECONCILE_QUIET_MS,
 } from './knowledge-build.js';
 export type {
   KnowledgeBuildLock,
@@ -50,6 +54,9 @@ export type {
   KnowledgeBuildTrigger,
   KnowledgeIndexReading,
   KnowledgeIndexState,
+  KnowledgeReconcileEntry,
+  KnowledgeReconcileReport,
+  KnowledgeReconcileRequest,
 } from './knowledge-build.js';
 export {
   KNOWLEDGE_INDEX_STATUS_ACTION,
@@ -65,4 +72,7 @@ export {
   knowledgeSetupNavItem,
   KNOWLEDGE_SETUP_NAV_BUNDLE_ID,
 } from './knowledge-settings-contribution.js';
-export type { KnowledgeSettingsContribution } from './knowledge-settings-contribution.js';
+export type {
+  KnowledgeSettingsContribution,
+  KnowledgeSettingsContributionOptions,
+} from './knowledge-settings-contribution.js';

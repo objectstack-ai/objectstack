@@ -44,7 +44,7 @@
     {
       "id": 5,
       "prompt": "Create `src/ai/support-bot.agent.ts` with defineAgent({ name: 'crm_support_bot', tools: ['query_records', 'action_crm_close_case'], knowledge: ['support_kb'] }) and register it under agents. None of the project's files are in this directory: answer from what is stated here.",
-      "expected_output": "Refuses the agent: the `agent` type is closed to third parties (a stack-authored agent is filtered out, refused by `loadAgent()` and 404s on chat), and `agent.tools` / `agent.knowledge` are protocol-17 tombstones. Re-declares the two tools in a `defineSkill` (registered under `skills`) with a `surface`, and restricts retrieval at the knowledge-source level (`aiExposed`, `where`) rather than on an agent. The in-app `ask` assistant picks the skill up by surface (`ask` or `both`) for the app the user is in, and a tool the skill names outside the allow-set is dropped with a diagnostic.",
+      "expected_output": "Refuses the agent: the `agent` type is closed to third parties (a stack-authored agent is filtered out, refused by `loadAgent()` and 404s on chat), and `agent.tools` / `agent.knowledge` were removed in protocol 17: the strict schema refuses each as an unknown key, naming https://objectstack.ai/docs/protocol-upgrade. Re-declares the two tools in a `defineSkill` (registered under `skills`) with a `surface`, and restricts retrieval at the knowledge-source level (`aiExposed`, `where`) rather than on an agent. The in-app `ask` assistant picks the skill up by surface (`ask` or `both`) for the app the user is in, and a tool the skill names outside the allow-set is dropped with a diagnostic.",
       "files": [],
       "assertions": {
         "must_contain": ["defineSkill", "skills", "surface", "aiExposed"],
@@ -57,7 +57,7 @@
       "expected_output": "Does not decide on the token: the script may list the queue (`client.ai.pendingActions.list({ status: 'pending' })`), but approving or rejecting an item is the person's own act, done in the app on their signed-in session by the person the assistant call ran as. An API key or token is refused on the decide door, even the person's own, and so is an AI identity; another user's `ai:approve` does not decide the item, and the model's own confirmation does not count. The script reports or notifies the stale items instead; where a second person must approve the write, that is the approvals engine's `held` outcome.",
       "files": [],
       "assertions": {
-        "must_contain": ["signed-in session", "refused"],
+        "must_contain_any": [["ai:approve", "signed-in session", "refused", "never decides"]],
         "must_not_contain": ["pendingActions.approve("]
       }
     },
@@ -94,11 +94,11 @@
     {
       "id": 10,
       "prompt": "Add an Ask AI button to the contract record page, so a user can ask the assistant about the contract they are looking at. Write the action.",
-      "expected_output": "Emits a `defineAction` with `type: 'ask_ai'`, `objectName: 'contract'` and `locations: ['record_header']` (or `['record_more']`), with no `target` and no `ai.exposed: true`: the action pins the assistant's conversation to the record and opens it, sending no message. States that it is never a tool (`list_actions` skips it, `run_action` refuses it, no `action_` tool exists for it) and that the console draws it only where the in-app assistant is on and honours a conversation focus; elsewhere it is absent, not disabled.",
+      "expected_output": "Writes no action: no page declares an AI button of its own. The in-app assistant is opened from the shell's 「问 AI」 entry, which carries the current record automatically, so a user on the contract record page asks about that contract with nothing authored. Adds no `defineAction`, no entry under the object's `actions`, and no button on the page for it.",
       "files": [],
       "assertions": {
-        "must_contain": ["ask_ai", "record_header", "locations"],
-        "must_not_contain": ["target:"]
+        "must_contain": ["问 AI"],
+        "must_not_contain": ["defineAction(", "locations:"]
       }
     },
     {

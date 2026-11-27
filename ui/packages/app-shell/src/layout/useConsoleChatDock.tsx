@@ -15,8 +15,8 @@
 import * as React from 'react';
 import { NavigationType, useLocation, useNavigate, useNavigationType } from 'react-router-dom';
 import { useIsMobile } from '@object-ui/components';
-import { isBuildAgent } from '@object-ui/plugin-chatbot/core';
-import { useAssistant } from '../assistant/assistantBus.js';
+import { agentRouteName, isBuildAgent } from '@object-ui/plugin-chatbot/core';
+import { isApprovalPendingIn, useAssistant } from '../assistant/assistantBus.js';
 import { useChatDockState, ChatDockPanel, ChatDockMobileSheet } from './ChatDock.js';
 import { matchChatDockShortcut, DOCK_EXPANDED_STORAGE_KEY } from './chatDockState.js';
 import {
@@ -31,6 +31,7 @@ import {
   type BuilderHandoffState,
   type ChatDockHandoff,
   type ChatDockTarget,
+  type ShownConversation,
 } from './chatDockTarget.js';
 import type { ChatDockControl } from './chatDockControl.js';
 import type { ChatSurfaceContext } from './chatSurfaceContext.js';
@@ -104,6 +105,78 @@ function writeSheetShownAt(key: string | null): void {
   }
 }
 
+/**
+ * ui ADR-0057 Amendment A5 — how the drawer was last closed, per tab
+ * (sessionStorage, like the drawer's own state, so it holds across a reload
+ * and the layouts' remounts): by the user (×, the entry or the toggle again,
+ * dismissing the phone sheet) or by the console (the phone sheet collapsed
+ * because the page under it moved), and the conversation it showed then.
+ * Absent until the first close in the tab. Where sessionStorage throws it is
+ * kept in this module, for as long as the page.
+ */
+export interface DockClosing {
+  by: 'user' | 'console';
+  shown: ShownConversation;
+}
+
+export const DOCK_LAST_CLOSE_STORAGE_KEY = 'ai-chat-dock-last-close';
+let lastCloseInMemory: DockClosing | null = null;
+
+function readLastClose(): DockClosing | null {
+  let raw: string | null;
+  try {
+    raw = window.sessionStorage.getItem(DOCK_LAST_CLOSE_STORAGE_KEY);
+  } catch {
+    return lastCloseInMemory;
+  }
+  if (!raw) return null;
+  try {
+    const parsed = JSON.parse(raw) as Partial<DockClosing> | null;
+    if (!parsed || (parsed.by !== 'user' && parsed.by !== 'console')) return null;
+    const shown = parsed.shown && typeof parsed.shown === 'object' ? parsed.shown : {};
+    const text = (v: unknown) => (typeof v === 'string' && v ? v : undefined);
+    return { by: parsed.by, shown: { conversationId: text(shown.conversationId), agent: text(shown.agent) } };
+  } catch {
+    return null;
+  }
+}
+
+function writeLastClose(closing: DockClosing): void {
+  lastCloseInMemory = closing;
+  try {
+    window.sessionStorage.setItem(DOCK_LAST_CLOSE_STORAGE_KEY, JSON.stringify(closing));
+  } catch {
+    /* private mode: the module copy above stands in */
+  }
+}
+
+/**
+ * ui ADR-0057 Amendment A5 — what an opening from the assistant's entry shows,
+ * from how the drawer was last closed. `agent` is the agent the entry asks
+ * (Home's 「Ask AI」 asks `ask`), absent for the top-bar button and the
+ * keyboard toggle. `build` says whether the drawer would show a build thread:
+ * A5 leaves those as they were (row 8).
+ *  - `same`: what the drawer shows, as before;
+ *  - `pending`: the conversation shown at the close, which holds a write
+ *    awaiting the user's approval (row 3);
+ *  - `new`: a new conversation (rows 1 and 4).
+ */
+export function entryOpening(input: {
+  lastClose: DockClosing | null;
+  agent?: string;
+  build: boolean;
+  approvalPending: (conversationId: string) => boolean;
+}): 'same' | 'pending' | 'new' {
+  const { lastClose, agent, build, approvalPending } = input;
+  const shown = lastClose?.shown;
+  // An entry that asks a named agent keeps the thread only when it is that agent's.
+  const sameAgent = !agent || !shown?.agent || agentRouteName(agent) === shown.agent;
+  if (build) return 'same';
+  if (lastClose?.by === 'console' && sameAgent) return 'same';
+  if (shown?.conversationId && sameAgent && approvalPending(shown.conversationId)) return 'pending';
+  return 'new';
+}
+
 function hasHandoff(state: BuilderHandoffState | undefined): state is BuilderHandoffState {
   return Boolean(state && (state.handoffPrompt || state.parentConversationId));
 }
@@ -168,7 +241,7 @@ export function useConsoleChatDock({
     }
   }, []);
 
-  const { expand, collapse, toggle, fullWindow, setFullWindow, expanded: storedExpanded } = dock;
+  const { expand, collapse, fullWindow, setFullWindow, expanded: storedExpanded } = dock;
   // ui ADR-0057 Amendment A4 — on the AI inquiry page the drawer is shown only
   // after a build hand-off opened it there; the stored open state is left as
   // it is, so the next page shows the drawer as the user left it.
@@ -192,6 +265,69 @@ export function useConsoleChatDock({
     },
     [setTarget, holdHandoff, expand],
   );
+
+  // ── ui ADR-0057 Amendment A5 — an opening from the entry ─────────────────
+  // The body reports the conversation it shows; a close records it with who
+  // closed (the user, or the console's phone collapse), and the entry's next
+  // opening reads that record (`entryOpening`). Everything else that opens
+  // the drawer (a named target, an `/ai…` address, the bus) is unchanged.
+  const shownRef = React.useRef<ShownConversation>({});
+  const [onShownConversationChange] = React.useState(() => (shown: ShownConversation) => {
+    shownRef.current = shown;
+  });
+  const closeBy = React.useCallback(
+    (by: DockClosing['by']) => {
+      writeLastClose({ by, shown: shownRef.current });
+      collapse();
+    },
+    [collapse],
+  );
+  const expandedRef = React.useRef(expanded);
+  const shownTargetRef = React.useRef<ChatDockTarget | undefined>(undefined);
+  const defaultAgentRef = React.useRef(defaultAgent);
+  const userIdRef = React.useRef(userId);
+  React.useLayoutEffect(() => {
+    expandedRef.current = expanded;
+    shownTargetRef.current = shownTarget;
+    defaultAgentRef.current = defaultAgent;
+    userIdRef.current = userId;
+  });
+  const openEntry = React.useCallback(
+    (agent?: string) => {
+      if (askPageActiveRef.current || expandedRef.current) return;
+      const shown = shownTargetRef.current;
+      // Row 8: the drawer would show a build thread — by a target naming the
+      // build agent or a package, or by the app's `defaultAgent: 'build'`.
+      const build = agent
+        ? isBuildAgent(agent)
+        : Boolean(
+            shown?.packageId ||
+              (shown?.agent ? isBuildAgent(shown.agent) : isBuildAgent(defaultAgentRef.current)),
+          );
+      const lastClose = readLastClose();
+      const opening = entryOpening({
+        lastClose,
+        agent,
+        build,
+        approvalPending: (conversationId) => isApprovalPendingIn(conversationId, userIdRef.current),
+      });
+      if (opening === 'pending' && lastClose?.shown.conversationId) {
+        setTarget({ agent: lastClose.shown.agent, conversationId: lastClose.shown.conversationId });
+      } else if (opening === 'new') {
+        // `fresh` reaches the body as `forceNew` (never `resumeMode: 'fresh'`):
+        // no row exists until the first send, and the last thread stays in history.
+        setTarget({ agent: agent ? agentRouteName(agent) : undefined, fresh: true });
+        holdHandoff(undefined);
+        shownRef.current = {};
+      }
+      expand();
+    },
+    [setTarget, holdHandoff, expand],
+  );
+  const entryToggle = React.useCallback(() => {
+    if (expandedRef.current) closeBy('user');
+    else openEntry();
+  }, [closeBy, openEntry]);
 
   // A redirected old `/ai…` link hands its handoff over in navigation state;
   // take it once, then drop it from the history entry so a reload never
@@ -261,7 +397,7 @@ export function useConsoleChatDock({
     if (askPageActive && storedExpanded && !expanded) {
       movedAwayRef.current = false;
       writeSheetShownAt(null);
-      collapse();
+      closeBy('console');
       return;
     }
     if (!expanded) {
@@ -272,11 +408,13 @@ export function useConsoleChatDock({
     if (movedAwayRef.current) {
       movedAwayRef.current = false;
       writeSheetShownAt(null);
-      collapse();
+      // ui ADR-0057 Amendment A5, row 2 — the console's close: the entry's
+      // next opening shows this conversation again.
+      closeBy('console');
       return;
     }
     writeSheetShownAt(location.key);
-  }, [enabled, isMobile, expanded, storedExpanded, askPageActive, location.key, navigationType, collapse]);
+  }, [enabled, isMobile, expanded, storedExpanded, askPageActive, location.key, navigationType, closeBy]);
 
   // A designer surface can ask the assistant to open through the assistant bus
   // (e.g. an "Ask AI" button).
@@ -288,29 +426,31 @@ export function useConsoleChatDock({
     if (enabled && !askPageActiveRef.current) expand();
   }, [openSeq, enabled, expand]);
 
-  // ⌘/Ctrl+Shift+I toggles the drawer (composer-safe; see matchChatDockShortcut).
+  // ⌘/Ctrl+Shift+I toggles the drawer (composer-safe; see matchChatDockShortcut):
+  // one of the entry's three doors (ui ADR-0057 Amendment A5).
   // ui ADR-0057 Amendment A4 — inert on the AI inquiry page.
   React.useEffect(() => {
     if (!enabled || askPageActive) return;
     const onKeyDown = (e: KeyboardEvent) => {
       if (matchChatDockShortcut(e) !== 'toggle') return;
       e.preventDefault();
-      toggle();
+      entryToggle();
     };
     document.addEventListener('keydown', onKeyDown);
     return () => document.removeEventListener('keydown', onKeyDown);
-  }, [enabled, askPageActive, toggle]);
+  }, [enabled, askPageActive, entryToggle]);
 
   const control = React.useMemo<ChatDockControl | null>(
-    () => (enabled ? { expanded, fullWindow, toggle, open, askPageActive } : null),
-    [enabled, expanded, fullWindow, toggle, open, askPageActive],
+    () => (enabled ? { expanded, fullWindow, toggle: entryToggle, open, openEntry, askPageActive } : null),
+    [enabled, expanded, fullWindow, entryToggle, open, openEntry, askPageActive],
   );
 
-  const thread = { target: shownTarget, onTargetChange: setTarget, handoff };
+  const thread = { target: shownTarget, onTargetChange: setTarget, handoff, onShownConversationChange };
   const rail =
     enabled && expanded && !isMobile ? (
       <ChatDockPanel
-        dock={dock}
+        // The drawer's × is the user's close (A5).
+        dock={{ ...dock, collapse: () => closeBy('user') }}
         userId={userId}
         defaultAgent={defaultAgent}
         appPackageId={appPackageId}
@@ -323,7 +463,8 @@ export function useConsoleChatDock({
     enabled && isMobile ? (
       <ChatDockMobileSheet
         open={expanded}
-        onOpenChange={(next) => (next ? expand() : dock.collapse())}
+        // Dismissing the sheet is the user's close (A5).
+        onOpenChange={(next) => (next ? expand() : closeBy('user'))}
         userId={userId}
         defaultAgent={defaultAgent}
         appPackageId={appPackageId}
