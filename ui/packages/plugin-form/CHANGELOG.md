@@ -1,5 +1,141 @@
 # @object-ui/plugin-form
 
+## 19.0.0-next.1
+
+### Patch Changes
+
+- fbcfdfb: fix(console): the named-form page (`/forms/NAME`) sizes each field from its `span`, not only its `colSpan`
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  A form field with `span: 'full'` now takes the whole row of its section, and with the default `span: 'auto'` a textarea, markdown, html or rich-text field, or a file or image field whose object field declares `multiple: true`, takes the whole row too. An authored `colSpan` still wins over that default, clamped to the section's column count. The page used to read `colSpan` alone, so these fields rendered one cell wide. The width comes from the same resolver the record form uses; `@object-ui/plugin-form` now exports `resolveColSpan` from both the package root and the side-effect-free `@object-ui/plugin-form/core` subpath, so the console can reach it without loading the form renderers.
+- 50b4bf8: perf(console): the first load no longer downloads spec schemas the Console never reads, nor the whole form package
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  The Console's first load (the chunks every page fetches before it can draw) is 97,612 bytes smaller gzipped: 1,899,348 across 123 chunks, from 1,996,960 across 124 on `main`.
+  
+  - **`@objectstack/spec`.** The build now marks each module-scope initializer it cannot otherwise prove side-effect free (a spread of another schema's shape, an `.extend()` / `.pick()` chain, a table derived from a schema) as droppable, so a bundler that tree-shakes leaves out the ones an application never reads, together with the schema graphs they hold. Initializers that write into an object that already exists (`Object.assign(Existing, …)`, `Object.defineProperty(Existing, …)`) are never marked. Nothing changes for code that reads an export: every export that is used evaluates exactly as before. `TRANSLATABLE_METADATA_TYPES` is now built from a plain list of names instead of from the translator table, so reading it no longer keeps every metadata translator.
+  - **`@object-ui/plugin-form`.** One new export on the published `@object-ui/plugin-form/core` subpath, `createKeepsField` (the same function the package root already exports); nothing is removed or renamed, and the package root exports the same names as before. This is the widening the `Clause-②` line names; `@objectstack/spec`'s public surface does not change.
+  - **`@object-ui/app-shell`.** The record page's related-record actions read `createKeepsField` from `@object-ui/plugin-form/core`, so the form package is no longer part of the first load.
+  - **`@object-ui/console`, `@objectstack/console`.** The Console's `plugin-form-core` chunk group also claims `createKeepsField`, so it lands with the other side-effect-free form helpers; the Console build `@objectstack/console` ships carries the smaller first load.
+  
+  Nothing to migrate.
+- 5314575: fix(console): a named or public form lays its sections out by the form view's own `columns`, as its Setup preview does
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  - A form view's `columns` (the form body's column count) was drawn by the Setup preview and ignored by the published form: `/forms/:name` and `/f/:slug` read only each section's `columns`, defaulting to two. A form saved with `columns: 3` and undeclared sections previewed three across and published two across; a form with `columns: 1` and a `columns: 2` section previewed one column and published two.
+  - The form page now resolves each section's fields per row through `@object-ui/plugin-form`'s `sectionedGridLayout`, the rule the Setup canvas, the record dialog and the record form already share: the form view's `columns` is the grid width and caps a section's count, and a section that declares none takes the form's count. A form view without `columns` draws exactly as before.
+  - `@object-ui/plugin-form`: `sectionedGridLayout` and its `SectionedGridLayout` type are exported from the package root and from `/core`, and the layout gains `sectionColumns(declared)`, the count one section draws, for a host that draws each section on a grid of its own.
+- f4d6bc5: fix(plugin-form): a `repeater` field on `span: 'auto'` takes the whole row again, on the record form and on `/forms/NAME`
+  
+  Clause-②: no (layout only; an author could already set `span: 'full'`)
+  Metadata-protocol: none
+  
+  The spec's form field `span` docblock lists `repeater` among the types that take the whole row by default. A repeater used to get there through the wide line-items widget it mapped to; since it moved to the JSON editor that `json`, `composite` and `record` also use, both form renderers gave it one cell. The default width now reads the object field's own type, so a repeater is wide and those three types stay one cell. The Studio form designer's canvas asks the same rule, so it lays a repeater out as the form does. An authored `colSpan` still wins. The named-form page passes the object field's type to the shared resolver, as it already passed `multiple`. The spec docblock's stale "through the `field:grid` widget" clause now says how the width is decided.
+- 6e8f663: feat(chatbot)!: the build chat's frontend is retired — the plan, change, build-result and handoff cards, their detectors and the props that fed them are removed
+  
+  Clause-②: no (narrowing)
+  Metadata-protocol: none
+  
+  <!-- adr-0087: not-required (runtime-export-retired @object-ui/plugin-chatbot#detectDraftResult, @object-ui/plugin-chatbot#detectProposedPlan, @object-ui/plugin-chatbot#detectProposedChanges, @object-ui/plugin-chatbot#detectBuilderHandoff, @object-ui/plugin-chatbot#detectBuiltAppPackage, @object-ui/plugin-chatbot#detectAuthoringVerdict, @object-ui/plugin-chatbot#detectReplayOutcome, @object-ui/plugin-chatbot#buildProgressFromDraftReview, @object-ui/plugin-chatbot#DraftReview, @object-ui/plugin-chatbot#ProposedPlan, @object-ui/plugin-chatbot#ProposedChanges, @object-ui/plugin-chatbot#BuilderHandoff, @object-ui/plugin-chatbot#ReplayOutcome, @object-ui/plugin-chatbot#PublishOutcome, @object-ui/plugin-chatbot/core#PublishOutcome, @object-ui/plugin-chatbot#FloatingChatbotProps.autoPublishDrafts, @object-ui/plugin-chatbot#FloatingChatbotProps.builderHandoffOpenLabel, @object-ui/plugin-chatbot#FloatingChatbotProps.builderHandoffSupersededTitle, @object-ui/plugin-chatbot#FloatingChatbotProps.builderHandoffTitleLabel, @object-ui/plugin-chatbot#FloatingChatbotProps.changesAppliedLabel, @object-ui/plugin-chatbot#FloatingChatbotProps.changesApplyingLabel, @object-ui/plugin-chatbot#FloatingChatbotProps.changesConfirmedLabel, @object-ui/plugin-chatbot#FloatingChatbotProps.changesConfirmHintLabel, @object-ui/plugin-chatbot#FloatingChatbotProps.changesConfirmLabel, @object-ui/plugin-chatbot#FloatingChatbotProps.changesConfirmMessage, @object-ui/plugin-chatbot#FloatingChatbotProps.changesDraftedLabel, @object-ui/plugin-chatbot#FloatingChatbotProps.changesFailedLabel, @object-ui/plugin-chatbot#FloatingChatbotProps.changesTitleLabel, @object-ui/plugin-chatbot#FloatingChatbotProps.changeVerbLabels, @object-ui/plugin-chatbot#FloatingChatbotProps.designBuiltAppLabel, @object-ui/plugin-chatbot#FloatingChatbotProps.fetchPendingDraftCount, @object-ui/plugin-chatbot#FloatingChatbotProps.getArtifactAction, @object-ui/plugin-chatbot#FloatingChatbotProps.nextStepsLabel, @object-ui/plugin-chatbot#FloatingChatbotProps.onBuildMaterialized, @object-ui/plugin-chatbot#FloatingChatbotProps.onBuildResult, @object-ui/plugin-chatbot#FloatingChatbotProps.onDesignBuiltApp, @object-ui/plugin-chatbot#FloatingChatbotProps.onDiscardDrafts, @object-ui/plugin-chatbot#FloatingChatbotProps.onDraftArtifacts, @object-ui/plugin-chatbot#FloatingChatbotProps.onOpenBuilder, @object-ui/plugin-chatbot#FloatingChatbotProps.onOpenBuiltApp, @object-ui/plugin-chatbot#FloatingChatbotProps.onPlanApprovalPendingChange, @object-ui/plugin-chatbot#FloatingChatbotProps.onPreviewDraft, @object-ui/plugin-chatbot#FloatingChatbotProps.onPreviewDraftApp, @object-ui/plugin-chatbot#FloatingChatbotProps.onPublishDrafts, @object-ui/plugin-chatbot#FloatingChatbotProps.onReviewDraft, @object-ui/plugin-chatbot#FloatingChatbotProps.onReviewDrafts, @object-ui/plugin-chatbot#FloatingChatbotProps.openBuiltAppLabel, @object-ui/plugin-chatbot#FloatingChatbotProps.planAdjustLabel, @object-ui/plugin-chatbot#FloatingChatbotProps.planAnswerMessage, @object-ui/plugin-chatbot#FloatingChatbotProps.planApproveDefaultsMessage, @object-ui/plugin-chatbot#FloatingChatbotProps.planApproveHintLabel, @object-ui/plugin-chatbot#FloatingChatbotProps.planApproveLabel, @object-ui/plugin-chatbot#FloatingChatbotProps.planApproveMessage, @object-ui/plugin-chatbot#FloatingChatbotProps.planAssumptionsLabel, @object-ui/plugin-chatbot#FloatingChatbotProps.planBuildingLabel, @object-ui/plugin-chatbot#FloatingChatbotProps.planBuildNewAppMessage, @object-ui/plugin-chatbot#FloatingChatbotProps.planBuiltLabel, @object-ui/plugin-chatbot#FloatingChatbotProps.planDeferredLabel, @object-ui/plugin-chatbot#FloatingChatbotProps.planExtendExistingMessage, @object-ui/plugin-chatbot#FloatingChatbotProps.planExtendLabel, @object-ui/plugin-chatbot#FloatingChatbotProps.planQuestionsLabel, @object-ui/plugin-chatbot#FloatingChatbotProps.planReadyLabel, @object-ui/plugin-chatbot#FloatingChatbotProps.planTitleLabel, @object-ui/plugin-chatbot#FloatingChatbotProps.previewDraftLabel, @object-ui/plugin-chatbot#FloatingChatbotProps.publishDraftsLabel, @object-ui/plugin-chatbot#FloatingChatbotProps.publishedLabel, @object-ui/plugin-chatbot#FloatingChatbotProps.publishFromShellBar, @object-ui/plugin-chatbot#FloatingChatbotProps.resolveAppLabel, @object-ui/plugin-chatbot#FloatingChatbotProps.resolveFieldLabel, @object-ui/plugin-chatbot#FloatingChatbotProps.resolveFieldTypeLabel, @object-ui/plugin-chatbot#FloatingChatbotProps.resolveObjectLabel, @object-ui/plugin-chatbot#FloatingChatbotProps.subscribeMetadataRefresh, @object-ui/plugin-chatbot#FloatingChatbotProps.toolReviewLabel, @object-ui/plugin-chatbot#FloatingChatbotProps.verifiedLabel, @object-ui/plugin-chatbot#ChatbotEnhancedToolInvocation.builderHandoff, @object-ui/plugin-chatbot#ChatbotEnhancedToolInvocation.draftReview, @object-ui/plugin-chatbot#ChatbotEnhancedToolInvocation.proposedChanges, @object-ui/plugin-chatbot#ChatbotEnhancedToolInvocation.proposedPlan, @object-ui/plugin-chatbot#ChatbotEnhancedToolInvocation.replayOutcome, @object-ui/plugin-chatbot#ChatbotEnhancedMessage.blueprintProgress, @object-ui/plugin-chatbot#ChatbotEnhancedMessage.buildProgress, @object-ui/plugin-chatbot#ChatbotLabels.designingPlanHints, @object-ui/plugin-chatbot#ChatbotLabels.designingPlanLabel) the retired operands are functions, types, component props and chat-message fields of the published chat package entries; no packages/spec schema, no registered node type, no ADR-0087 conversion surface and no stored shape names them, so there is nothing for `objectstack migrate meta` to rewrite, and a host still using one is told by its own compiler -->
+  
+  **BREAKING** for a host that imports any export or passes any prop listed below. The console's chat (the dock and the full page `/ai/ask`) and Studio keep working; what goes is the code that drew the build conversation: the "Proposed plan" card, the change card, the build-result checklist and publish line, the builder handoff, the Build Doctor drawer, the pending-drafts bar, the spreadsheet import bar and Studio's copilot panel. An old `/ai/build/…` address still lands on the ask chat.
+  
+  `publishHealthFromResponse` and `PublishHealth` stay at both entry points of `@object-ui/plugin-chatbot`; the preview's Publish all still reads them.
+  
+  In `@object-ui/app-shell`, `ConversationsSidebar` no longer takes `includeAskConversations`: the sidebar lists the active agent's conversations. Delete the prop where a host passes it.
+  
+  `@object-ui/core`, `@object-ui/plugin-grid` and `@object-ui/plugin-form` carry comment and test edits only, which drop references to the deleted build-chat code. They change no behaviour.
+  
+  ## What leaves, and what to write instead
+  
+  Every name below leaves `@object-ui/plugin-chatbot`; `PublishOutcome` also leaves `@object-ui/plugin-chatbot/core`. `ChatbotEnhancedProps` loses the same 59 props as `FloatingChatbotProps`, and the seam types `SeamToolInvocation` and `SeamChatMessage`, with `ObjectChatMessage` built on them, lose the same fields as `ChatbotEnhancedToolInvocation` and `ChatbotEnhancedMessage`; the fix for those is the same deletion.
+  
+  | FROM | TO |
+  |:--|:--|
+  | `detectDraftResult`, `detectProposedPlan`, `detectProposedChanges`, `detectBuilderHandoff`, `detectBuiltAppPackage`, `detectAuthoringVerdict`, `detectReplayOutcome` | delete the import; a tool result is read as plain output, and a pending approval still through `detectPendingApproval` |
+  | `buildProgressFromDraftReview` | delete the call; nothing draws a build panel any more |
+  | `DraftReview`, `ProposedPlan`, `ProposedChanges`, `BuilderHandoff`, `ReplayOutcome`, `PublishOutcome` | delete the type import |
+  | `FloatingChatbotProps.onBuildMaterialized`, `FloatingChatbotProps.onBuildResult`, `FloatingChatbotProps.onDesignBuiltApp`, `FloatingChatbotProps.onDiscardDrafts`, `FloatingChatbotProps.onDraftArtifacts`, `FloatingChatbotProps.onOpenBuilder`, `FloatingChatbotProps.onOpenBuiltApp`, `FloatingChatbotProps.onPlanApprovalPendingChange`, `FloatingChatbotProps.onPreviewDraft`, `FloatingChatbotProps.onPreviewDraftApp`, `FloatingChatbotProps.onPublishDrafts`, `FloatingChatbotProps.onReviewDraft`, `FloatingChatbotProps.onReviewDrafts` | delete the handler; the chat raises no build event any more |
+  | `FloatingChatbotProps.builderHandoffOpenLabel`, `FloatingChatbotProps.builderHandoffSupersededTitle`, `FloatingChatbotProps.builderHandoffTitleLabel`, `FloatingChatbotProps.changesAppliedLabel`, `FloatingChatbotProps.changesApplyingLabel`, `FloatingChatbotProps.changesConfirmedLabel`, `FloatingChatbotProps.changesConfirmHintLabel`, `FloatingChatbotProps.changesConfirmLabel`, `FloatingChatbotProps.changesConfirmMessage`, `FloatingChatbotProps.changesDraftedLabel`, `FloatingChatbotProps.changesFailedLabel`, `FloatingChatbotProps.changesTitleLabel`, `FloatingChatbotProps.changeVerbLabels`, `FloatingChatbotProps.designBuiltAppLabel`, `FloatingChatbotProps.nextStepsLabel`, `FloatingChatbotProps.openBuiltAppLabel`, `FloatingChatbotProps.planAdjustLabel`, `FloatingChatbotProps.planAnswerMessage`, `FloatingChatbotProps.planApproveDefaultsMessage`, `FloatingChatbotProps.planApproveHintLabel`, `FloatingChatbotProps.planApproveLabel`, `FloatingChatbotProps.planApproveMessage`, `FloatingChatbotProps.planAssumptionsLabel`, `FloatingChatbotProps.planBuildingLabel`, `FloatingChatbotProps.planBuildNewAppMessage`, `FloatingChatbotProps.planBuiltLabel`, `FloatingChatbotProps.planDeferredLabel`, `FloatingChatbotProps.planExtendExistingMessage`, `FloatingChatbotProps.planExtendLabel`, `FloatingChatbotProps.planQuestionsLabel`, `FloatingChatbotProps.planReadyLabel`, `FloatingChatbotProps.planTitleLabel`, `FloatingChatbotProps.previewDraftLabel`, `FloatingChatbotProps.publishDraftsLabel`, `FloatingChatbotProps.publishedLabel`, `FloatingChatbotProps.resolveAppLabel`, `FloatingChatbotProps.resolveFieldLabel`, `FloatingChatbotProps.resolveFieldTypeLabel`, `FloatingChatbotProps.resolveObjectLabel`, `FloatingChatbotProps.toolReviewLabel`, `FloatingChatbotProps.verifiedLabel` | delete the label or message; the card that read it is gone |
+  | `FloatingChatbotProps.autoPublishDrafts`, `FloatingChatbotProps.fetchPendingDraftCount`, `FloatingChatbotProps.getArtifactAction`, `FloatingChatbotProps.publishFromShellBar`, `FloatingChatbotProps.subscribeMetadataRefresh` | delete the prop; the build panel that read it is gone |
+  | `ChatbotEnhancedToolInvocation.builderHandoff`, `ChatbotEnhancedToolInvocation.draftReview`, `ChatbotEnhancedToolInvocation.proposedChanges`, `ChatbotEnhancedToolInvocation.proposedPlan`, `ChatbotEnhancedToolInvocation.replayOutcome` | stop reading or setting the field; the mapper no longer lifts it out of a tool result |
+  | `ChatbotEnhancedMessage.blueprintProgress`, `ChatbotEnhancedMessage.buildProgress` | stop reading or setting the field; no message carries build progress any more |
+  | `ChatbotLabels.designingPlanHints`, `ChatbotLabels.designingPlanLabel` | delete the label; the plan-design wait is gone |
+  
+  The one-line fix: delete every import, prop and field named above. Keeping one fails `tsc` after the upgrade, because none of them is declared any more.
+- Updated dependencies [0296d97]
+- Updated dependencies [bb76b8c]
+- Updated dependencies [d9bc148]
+- Updated dependencies [c42a045]
+- Updated dependencies [58570d8]
+- Updated dependencies [81c68b3]
+- Updated dependencies [eb683b8]
+- Updated dependencies [561fe12]
+- Updated dependencies [f722411]
+- Updated dependencies [c3a4a30]
+- Updated dependencies [b1c41e5]
+- Updated dependencies [ea1b70a]
+- Updated dependencies [dedc16c]
+- Updated dependencies [adb65d1]
+- Updated dependencies [adb65d1]
+- Updated dependencies [adb65d1]
+- Updated dependencies [87af66e]
+- Updated dependencies [ddd5941]
+- Updated dependencies [d58bf7a]
+- Updated dependencies [bebc2cf]
+- Updated dependencies [c3da753]
+- Updated dependencies [4e10d4b]
+- Updated dependencies [4111380]
+- Updated dependencies [9a65a48]
+- Updated dependencies [9b99640]
+- Updated dependencies [712df42]
+- Updated dependencies [c2bfa3e]
+- Updated dependencies [579b857]
+- Updated dependencies [68aa1be]
+- Updated dependencies [d92684a]
+- Updated dependencies [50b4bf8]
+- Updated dependencies [3eb778d]
+- Updated dependencies [91875c7]
+- Updated dependencies [1bc265f]
+- Updated dependencies [39fafc0]
+- Updated dependencies [b1490f2]
+- Updated dependencies [44ccf94]
+- Updated dependencies [1dbf19a]
+- Updated dependencies [14badad]
+- Updated dependencies [f4d6bc5]
+- Updated dependencies [6e8f663]
+- Updated dependencies [6e8f663]
+- Updated dependencies [3e87d7b]
+- Updated dependencies [f07d63a]
+- Updated dependencies [709a087]
+- Updated dependencies [54dc93a]
+- Updated dependencies [56c9cae]
+- Updated dependencies [2980483]
+- Updated dependencies [1028438]
+- Updated dependencies [c826e8a]
+- Updated dependencies [8fbae19]
+- Updated dependencies [e50ab8f]
+- Updated dependencies [21ad7c5]
+- Updated dependencies [0a3ea67]
+- Updated dependencies [b620c4b]
+- Updated dependencies [1f97fce]
+- Updated dependencies [d1139f9]
+- Updated dependencies [babd660]
+  - @objectstack/spec@19.0.0-next.1
+  - @object-ui/i18n@19.0.0-next.1
+  - @object-ui/fields@19.0.0-next.1
+  - @object-ui/core@19.0.0-next.1
+  - @object-ui/react@19.0.0-next.1
+  - @object-ui/components@19.0.0-next.1
+  - @object-ui/types@19.0.0-next.1
+  - @object-ui/permissions@19.0.0-next.1
+
 ## 19.0.0-next.0
 
 ### Minor Changes
