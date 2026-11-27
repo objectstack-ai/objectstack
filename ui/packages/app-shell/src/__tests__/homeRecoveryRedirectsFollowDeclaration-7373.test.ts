@@ -131,7 +131,15 @@ const RECOVERY_SITES: ReadonlyArray<{
   },
   {
     file: 'packages/app-shell/src/console/ai/AiChatPage.tsx',
-    site: 'the AI page: no-agent screen + collapse-to-dock landing',
+    alsoReads: [
+      'packages/app-shell/src/console/ai/ChatPane.tsx',
+      'packages/app-shell/src/console/ai/aiChatHydration.ts',
+      'packages/app-shell/src/console/ai/aiChatLinks.ts',
+      'packages/app-shell/src/console/ai/useDeferredFirstSend.ts',
+      'packages/app-shell/src/console/ai/aiChatChrome.ts',
+      'packages/app-shell/src/console/ai/agentCopy.ts',
+    ],
+    site:'the AI page: no-agent screen + collapse-to-dock landing',
     expression: /const homePath = useHomePath\(\)/,
   },
   {
