@@ -392,3 +392,37 @@ describe('objectstack#37365 — focusRecordSection', () => {
     expect(a.getAttribute(RECORD_SECTION_TARGET_ATTR)).toBe('true');
   });
 });
+
+describe('objectstack#37664 — a cited heading is matched by the text its face draws, not its source', () => {
+  // The outline lists a markdown heading as its source line and an html one
+  // with six entities decoded; the page reads the drawn heading's text. Each
+  // body below cites its second heading, drawn as the face draws it.
+  const cited = (field: 'content' | 'legal', value: string, drawn: string): HTMLElement | undefined => {
+    const anchor = headingsOf(value, field === 'legal')[1].anchor;
+    document.body.innerHTML = row(field, `<h1>Intro</h1><p>x</p><h2 id="cited">${drawn}</h2><p>y</p>`);
+    return locateSection(document.body, sectionCandidates(FIELDS, { [field]: value }, anchor))?.heading;
+  };
+  const markdown = (heading: string): string => ['# Intro', '', 'x', '', `## ${heading}`, '', 'y'].join('\n');
+
+  it.each([
+    ['bold', '**Data** scope', '<strong>Data</strong> scope'],
+    ['inline code', '`Data` scope', '<code>Data</code> scope'],
+    ['a link', '[Data](https://example.test/a1) scope', '<a href="https://example.test/a1">Data</a> scope'],
+    ['an entity', 'Data &copy; 2026 scope', 'Data © 2026 scope'],
+    ['an escape', 'Data \\*1\\* scope', 'Data *1* scope'],
+    ['CONTROL: plain text', 'Data scope', 'Data scope'],
+  ])('a markdown heading with %s opens its section', (_, source, drawn) => {
+    expect(cited('content', markdown(source), drawn)?.id).toBe('cited');
+  });
+
+  it('an html heading with an entity the outline leaves encoded opens its section; CONTROL: one the outline decodes still does', () => {
+    expect(cited('legal', '<h1>Intro</h1><p>x</p><h2>Caf&eacute; &copy; terms</h2><p>y</p>', 'Caf&eacute; &copy; terms')?.id).toBe('cited');
+    expect(cited('legal', '<h1>Intro</h1><p>x</p><h2>Data &amp; terms</h2><p>y</p>', 'Data &amp; terms')?.id).toBe('cited');
+  });
+
+  it('a link heading drawn as the cited title counts as listed, not as an unlisted same-titled heading; CONTROL: a setext one still counts', () => {
+    const value = ['# [Scope](https://example.test/s)', '', 'x', '', '## Scope', '', 'y'].join('\n');
+    expect(sectionCandidates(FIELDS, { content: value }, 'scope')[0]?.unlisted).toBe(0);
+    expect(sectionCandidates(FIELDS, { content: `Scope\n=====\n\n${value}` }, 'scope')[0]?.unlisted).toBe(1);
+  });
+});
