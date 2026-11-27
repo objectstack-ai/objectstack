@@ -2545,7 +2545,8 @@ export class KnowledgeService implements IKnowledgeService {
    * `realtime` service) start this once the unit commits and never on a
    * rollback, off the write's response (`knowledge-record-hooks.ts`).
    * `data.record.restored` is published after the restore's own unit has
-   * committed. Bulk events (`data.records.*`) carry a count, not records, and
+   * committed; with no `realtime` service an engine middleware hears the
+   * restore instead and starts the sync of its rows the same way as the hooks. Bulk events (`data.records.*`) carry a count, not records, and
    * are not synced here — see the plugin's event bridge.
    *
    * Through the queue none of this holds: the triggers publish a message once
