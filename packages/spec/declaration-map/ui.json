@@ -29,6 +29,8 @@
     "ActionType": "ui/ActionType",
     "AddRecordConfig": "ui/AddRecordConfig",
     "AddRecordConfigSchema": "ui/AddRecordConfig",
+    "AiChatNavParams": "ui/AiChatNavParams",
+    "AiChatNavParamsSchema": "ui/AiChatNavParams",
     "App": "ui/App",
     "AppBranding": "ui/AppBranding",
     "AppBrandingSchema": "ui/AppBranding",

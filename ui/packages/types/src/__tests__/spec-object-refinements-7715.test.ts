@@ -376,7 +376,8 @@ const SITES = [
     // `checkAppLandingItems` joined the spec object with `landing` (objectstack#28022, spec half)
     // and was attached by objectstack#28450 with the console's landing redirect: a landing `item`
     // must name an openable entry of the app's own navigation, and its `visible` reads no `data`.
-    attached: ['checkAppLandingItems'],
+    // `checkAppSingleAiChatEntry` joined with the `ai:chat` navigation entry: at most one per app.
+    attached: ['checkAppLandingItems', 'checkAppSingleAiChatEntry'],
     notAttachable: [],
   },
   {

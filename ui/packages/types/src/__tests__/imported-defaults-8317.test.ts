@@ -154,6 +154,8 @@ import {
   checkPageRecordBindingPlacement,
   checkPageRecordPlacesComponent,
   checkAppLandingItems,
+  checkAiChatNavParams,
+  checkAppSingleAiChatEntry,
   VIEW_METADATA_MEMBERS as SpecViewMetadataMembers,
   // objectui#12736 — the form option's spec shape: the form-view option.
   FormSelectOptionSchema as SpecFormSelectOptionSchema,
@@ -763,6 +765,10 @@ describe('the import boundary strips every imported default (objectui#8317)', ()
       // objectstack#28450: the spec's `AppSchema.landing` check, re-attached on
       // `AppComponentSchema` under the objectui#7715 ruling.
       ['checkAppLandingItems', checkAppLandingItems],
+      // The `ai:chat` navigation entry's two checks: its `params` (chained on
+      // `NavigationItemSchema`'s flat arm) and at most one per app (on `AppComponentSchema`).
+      ['checkAiChatNavParams', checkAiChatNavParams],
+      ['checkAppSingleAiChatEntry', checkAppSingleAiChatEntry],
     ]);
 
     /**
