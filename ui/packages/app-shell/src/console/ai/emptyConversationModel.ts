@@ -16,6 +16,7 @@ import { agentAliasGroup, isAskAgent } from '@object-ui/plugin-chatbot/core';
 import type { ChatSurfaceContext } from '../../layout/chatSurfaceContext.js';
 import type { ConversationListItem } from '../../hooks/useConversationList.js';
 import { buildAgentSuggestions } from './agentCopy.js';
+import { ASK_RECENT_FETCH_LIMIT } from './appAskPageModel.js';
 
 type TranslationFn = (key: string, options?: Record<string, unknown>) => string;
 
@@ -141,6 +142,13 @@ export function drawerSuggestions(
 export function appHomeSuggestions(texts: readonly string[]): EmptySuggestion[] {
   return texts.map((text) => ({ text, mode: 'send' }));
 }
+
+/**
+ * How many of the caller's newest conversations the drawer reads to pick its
+ * recent ones from: the AI home's page size, so a
+ * caller with many app-home or other-agent threads still sees the drawer's own.
+ */
+export const DRAWER_RECENT_FETCH_LIMIT = ASK_RECENT_FETCH_LIMIT;
 
 /** How many recent conversations each size lists in the drawer. */
 export const DRAWER_RECENT_COUNT: Record<EmptyConversationSize, number> = { large: 5, compact: 3 };

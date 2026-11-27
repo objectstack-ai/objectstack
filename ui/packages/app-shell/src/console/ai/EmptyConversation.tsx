@@ -28,6 +28,7 @@ import { useConversationList, type ConversationListItem } from '../../hooks/useC
 import { timeAgo } from '../../utils/relativeTime.js';
 import {
   DRAWER_RECENT_COUNT,
+  DRAWER_RECENT_FETCH_LIMIT,
   greetingForHour,
   greetingName,
   selectDrawerRecent,
@@ -231,7 +232,7 @@ export function DrawerRecentConversations({
   agentName: string | undefined;
   onOpen: (conversation: { id: string; agentId?: string }) => void;
 }) {
-  const { conversations, isLoading, error } = useConversationList({ userId, apiBase, limit: 20 });
+  const { conversations, isLoading, error } = useConversationList({ userId, apiBase, limit: DRAWER_RECENT_FETCH_LIMIT });
   const recent = React.useMemo(
     () => selectDrawerRecent(conversations, agentName, DRAWER_RECENT_COUNT[size]),
     [conversations, agentName, size],
