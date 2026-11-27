@@ -2395,7 +2395,7 @@ const ko = {
         expand: "펼치기",
         restore: "사이드 패널로 복원",
         open: "어시스턴트 열기",
-        planAwaitingApproval: "제안된 계획이 승인을 기다리고 있습니다",
+        planAwaitingApproval: "작업이 승인을 기다리고 있습니다",
         close: "닫기",
         more: "추가 작업",
       },

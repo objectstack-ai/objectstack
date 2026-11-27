@@ -31,7 +31,7 @@ vi.mock('../../console/ai/AiChatPage', () => ({
   resolveApiBase: (explicit?: string) => explicit ?? '/api/v1/ai',
 }));
 
-const EN_MARKER = 'A proposed plan is waiting for your approval';
+const EN_MARKER = 'An action is waiting for your approval';
 
 // No AuthProvider here: `useAuth` answers its signed-out default, whose user id
 // the bus reads as '' — the owner every reading below is published for.

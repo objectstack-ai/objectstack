@@ -2741,7 +2741,7 @@ const zh = {
         expand: '展开',
         restore: '还原为侧边栏',
         open: '打开助手',
-        planAwaitingApproval: '有一个方案等待确认',
+        planAwaitingApproval: '有一项操作等待确认',
         close: '关闭',
         more: '更多操作',
       },

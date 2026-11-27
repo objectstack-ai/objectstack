@@ -6,10 +6,11 @@
  * entry: it opens and closes the right-side drawer without leaving the page.
  * The floating bottom-right button it replaces is gone; what that button
  * carried moved here:
- *  - objectui#11666 — while a proposed plan awaits the user's approval the
+ *  - objectui#11666 — while something the AI proposed awaits the user's
+ *    approval (since ui ADR-0057 A5, a write parked as a pending action) the
  *    entry carries a marker, so a user who closed the chat still sees the
  *    assistant is waiting on them. Read off the assistant bus; only a change
- *    of the plan's state clears it, never opening the chat.
+ *    of that approval's state clears it, never opening the chat.
  *
  * objectstack#37858 — the entry is an outlined button that says what it does,
  * 「Ask AI」, beside a chat-bubble icon, on every page: the

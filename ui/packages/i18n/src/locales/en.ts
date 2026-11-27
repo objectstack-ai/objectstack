@@ -3221,8 +3221,8 @@ const en = {
         expand: 'Expand',
         restore: 'Restore side panel',
         open: 'Open assistant',
-        // objectui#11666 — the launchers' marker while a proposed plan awaits approval.
-        planAwaitingApproval: 'A proposed plan is waiting for your approval',
+        // objectui#11666 — the launchers' marker while a proposed write awaits approval.
+        planAwaitingApproval: 'An action is waiting for your approval',
         close: 'Close',
         more: 'More actions',
       },

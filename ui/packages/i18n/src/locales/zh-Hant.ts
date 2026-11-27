@@ -2741,7 +2741,7 @@ const zhHant = {
         expand: '展開',
         restore: '還原為側邊欄',
         open: '開啟助手',
-        planAwaitingApproval: '有一個方案等待確認',
+        planAwaitingApproval: '有一項操作等待確認',
         close: '關閉',
         more: '更多操作',
       },

@@ -2460,7 +2460,7 @@ const pt = {
         expand: "Expandir",
         restore: "Restaurar painel lateral",
         open: "Abrir o assistente",
-        planAwaitingApproval: "Um plano proposto aguarda sua aprovação",
+        planAwaitingApproval: "Uma ação aguarda sua aprovação",
         close: "Fechar",
         more: "Mais ações",
       },

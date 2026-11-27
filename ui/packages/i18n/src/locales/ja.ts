@@ -2397,7 +2397,7 @@ const ja = {
         expand: "展開",
         restore: "サイドパネルに戻す",
         open: "アシスタントを開く",
-        planAwaitingApproval: "提案されたプランが承認待ちです",
+        planAwaitingApproval: "操作が承認待ちです",
         close: "閉じる",
         more: "その他の操作",
       },
