@@ -33,7 +33,7 @@
       {"object": "trip_request", "field": "traveler", "to": "employee"},
       {"object": "expense_claim", "field": "claimant", "to": "employee"},
       {"object": "expense_claim", "field": "trip", "to": "trip_request"},
-      {"object": "claim_line", "field": "claim", "to": "expense_claim"},
+      {"object": "claim_line", "field": "claim", "to": "expense_claim", "masterDetail": true},
       {"object": "approval_step", "field": "claim", "to": "expense_claim"},
       {"object": "approval_step", "field": "approver", "to": "employee"}
     ],
