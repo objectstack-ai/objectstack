@@ -25,7 +25,7 @@ type ReapGuard = (
  * each source as its adapter is handed it — `name` is its index key — which
  * is what a document id is built from and what the adapter's context carries.
  */
-type KnowledgeReapGuardService = Pick<KnowledgeService, 'indexedSources' | 'getAdapter'>;
+type KnowledgeReapGuardService = Pick<KnowledgeService, 'indexedSources' | 'adapterFor'>;
 
 /**
  * Reap guard that DE-INDEXES a row before the platform lifecycle sweep deletes
@@ -84,7 +84,7 @@ export function createKnowledgeReapGuard(
       let deIndexed = true;
       for (const source of targets) {
         try {
-          const adapter = service.getAdapter(source.adapter);
+          const adapter = service.adapterFor(source);
           await adapter.delete([documentIdFor(source.name, recordId)], {
             source,
             // Declared free-form diagnostics tag on the EXISTING
