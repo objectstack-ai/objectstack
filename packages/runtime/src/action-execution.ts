@@ -4905,6 +4905,50 @@ export function actionSelectionIdsOrRefuse(objectName: string, params: Record<st
 }
 
 /**
+ * Is the declaration a call resolved to bound to no object? An action the
+ * routed object declares in its own `actions` is that object's (matched as
+ * the handler-owner gate matches the invoked declaration: by reference or by
+ * name, since every door resolves the object's own first); any other
+ * declaration is bound to its own owner key ({@link standaloneActionOwnerKey}),
+ * and is object-less when that key is.
+ *
+ * Judged on the DECLARATION, never on the object the call was routed under:
+ * an object-less declaration is reachable under any object's name, and is no
+ * more bound to that object for it.
+ */
+export function isObjectLessActionDeclaration(action: any, routedObject: any): boolean {
+    const declaredByRouted = Array.isArray(routedObject?.actions)
+        && routedObject.actions.some((a: any) => a === action || (a && a.name === action?.name));
+    return !declaredByRouted && isObjectLessActionKey(standaloneActionOwnerKey(action));
+}
+
+/**
+ * An action not bound to an object accepts no record: the record key a call
+ * to one carries — its `recordId`, or a selection in `params._selectedIds` —
+ * is answered with the located `400` failure this returns, on every door and
+ * for every caller, whatever object the call was routed under, before any
+ * record is read or any body runs. `undefined` when the call may go on: the
+ * action is bound to an object, or the call carries neither key (absent,
+ * `null` and `''` carry none, as for `recordId`).
+ */
+export function objectLessActionRecordKeyFailure(
+    action: any,
+    routedObject: any,
+    actionName: string,
+    recordId: unknown,
+    params: Record<string, unknown>,
+): { field: string; code: 'invalid_value'; message: string } | undefined {
+    if (!isObjectLessActionDeclaration(action, routedObject)) return undefined;
+    const carries = (value: unknown) => value !== undefined && value !== null && value !== '';
+    const field = carries(recordId) ? 'recordId' : carries(params[ACTION_SELECTION_PARAM]) ? ACTION_SELECTION_PARAM : undefined;
+    if (field === undefined) return undefined;
+    const name = typeof action?.name === 'string' && action.name ? action.name : actionName;
+    const message = `Action '${name}' is not bound to an object, so it accepts no record: `
+        + `the record key \`${field}\` must be left out. To act on records, call an action declared on their object.`;
+    return { field, code: 'invalid_value', message };
+}
+
+/**
  * Read a selection IN THE CALLER'S OWN SCOPE, with the per-record door's own
  * read: every distinct id through {@link loadActionSubjectRecord} and
  * `readRecord` (the door's caller-scope `get` of one row of `objectName`), a
