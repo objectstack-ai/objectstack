@@ -594,12 +594,23 @@ export async function handlePermissionSetCloneWrite(
             if (refused) return newSimilarTargetRefusalAnswer(deps, refused);
             landing = { packageId: target.package, created: false };
         } else {
-            landing = await resolveDefaultCloneLanding(ql, protocol, source, async (base) => {
-                // [cloud#3814 D1] Declared replicas on the Redis driver: creating
-                // the pair here would register a package on this replica alone.
-                const oneReplica = await multiReplicaPairCreationRefusal(deps, context, ql, base, `Cloning permission set '${source.name}'`);
-                if (oneReplica) throw multiReplicaPackageChangeError(oneReplica);
-            });
+            try {
+                landing = await resolveDefaultCloneLanding(ql, protocol, source, async (base) => {
+                    // [cloud#3814 D1] Declared replicas on the Redis driver: creating
+                    // the pair here would register a package on this replica alone.
+                    const oneReplica = await multiReplicaPairCreationRefusal(deps, context, ql, base, `Cloning permission set '${source.name}'`);
+                    if (oneReplica) throw multiReplicaPackageChangeError(oneReplica);
+                });
+            } catch (err: unknown) {
+                // [#37811] The landing's 501 (no paired customization package can
+                // be ensured, so nothing was written), in the request's language.
+                // Every other failure goes on to the catch below, as before.
+                const thrown = err as { statusCode?: unknown; messageKey?: unknown; params?: Record<string, unknown> } | null;
+                if (thrown?.statusCode === 501 && thrown.messageKey === PAIR_UNSUPPORTED_KEY) {
+                    return catalogNotImplemented(deps, context, PAIR_UNSUPPORTED_KEY, thrown.params);
+                }
+                throw err;
+            }
         }
 
         // ── 7. the save ─────────────────────────────────────────────────────
@@ -660,12 +671,6 @@ export async function handlePermissionSetCloneWrite(
             }),
         };
     } catch (err: unknown) {
-        // [#37811] The landing's 501 (no paired customization package can be
-        // ensured), in the request's language.
-        const thrown = err as { statusCode?: unknown; messageKey?: unknown; params?: Record<string, unknown> } | null;
-        if (thrown?.statusCode === 501 && thrown.messageKey === PAIR_UNSUPPORTED_KEY) {
-            return catalogNotImplemented(deps, context, PAIR_UNSUPPORTED_KEY, thrown.params);
-        }
         // A validation failure keeps its 400; a save refusal keeps its own
         // status and code (a precondition conflict 409, a schema refusal 422).
         return { handled: true, response: deps.errorFromThrown(err, 500) };
