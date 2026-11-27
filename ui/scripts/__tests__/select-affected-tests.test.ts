@@ -655,6 +655,10 @@ describe('select-affected-tests — the live tree', () => {
     // One scan memo for the three (objectstack#31941): each call re-read every
     // placed test's import closure, 8.9 s here and 12.1 s on PR CI of the 15 s
     // testTimeout, and timed out in the merge queue; shared, 4.2 s here.
+    // Still 15.8 s on a starved PR runner (objectstack#37830), so each verdict
+    // was made cheaper with its output unchanged: filters lowered once, not
+    // once per pair; a file's specifiers read once; package owners memoised.
+    // 3.6 s -> 2.3 s here; the PR CI readings are recorded in that PR.
     const self = 'scripts/__tests__/select-affected-tests.test.ts';
     const scans = scanMemo();
     const walker = selectAffectedTests({ changed: [], outside: [PATH_WALKER_FILE], scans });
