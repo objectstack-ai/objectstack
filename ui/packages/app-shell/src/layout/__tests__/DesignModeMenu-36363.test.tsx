@@ -1536,3 +1536,72 @@ describe("the arrival from a Studio dashboard list's New (objectstack#36907)", (
     expect(screen.queryByTestId('design-menu-picker')).toBeNull();
   });
 });
+
+describe('the AI inquiry page entry in the picker and its 「⋮」 (objectstack#37832)', () => {
+  const ASK = { id: 'ask', type: 'component', label: 'Ask AI', componentRef: 'ai:chat' };
+  const kinds = (picker: HTMLElement) =>
+    within(within(picker).getByTestId('design-menu-picker-kinds')).getAllByRole('button').map((b) => b.textContent);
+  /** The items of the entry `id`'s 「⋮」 menu, left open. */
+  async function itemsOf(id: string): Promise<Array<string | null>> {
+    fireEvent.pointerDown(within(entry(id)).getByTestId('design-menu-actions'), { button: 0, pointerType: 'mouse' });
+    await flush();
+    return (await screen.findAllByRole('menuitem')).map((m) => m.textContent);
+  }
+
+  it('offers 「AI inquiry」 while the menu holds no `ai:chat` entry, and leaves it out once one is added', async () => {
+    start();
+    await flush();
+    fireEvent.click(screen.getByTestId('design-menu-add-top'));
+    let picker = await screen.findByTestId('design-menu-picker');
+    expect(kinds(picker)).toContain('AI inquiry');
+    fireEvent.click(within(picker).getByRole('button', { name: 'AI inquiry' }));
+    await flush();
+    fireEvent.change(within(picker).getByLabelText('Heading'), { target: { value: 'Ask about our policies' } });
+    fireEvent.click(within(picker).getByTestId('design-menu-ai-chat-submit'));
+    await flush();
+    expect(screen.queryByTestId('design-menu-picker')).toBeNull();
+    expect(screen.getByTestId('design-mode-menu')).toHaveTextContent('Ask AI');
+
+    fireEvent.click(screen.getByTestId('design-menu-add-sales'));
+    picker = await screen.findByTestId('design-menu-picker');
+    expect(kinds(picker)).not.toContain('AI inquiry');
+    expect(kinds(picker)).toContain('Link');
+  });
+
+  it('leaves 「AI inquiry」 out when the app already holds one, nested in a group', async () => {
+    servedNav.current = NAVIGATION.map((e) => (e.id === 'sales' ? { ...e, children: [...(e.children ?? []), ASK] } : e));
+    start();
+    await flush();
+    fireEvent.click(screen.getByTestId('design-menu-add-top'));
+    const picker = await screen.findByTestId('design-menu-picker');
+    expect(kinds(picker)).not.toContain('AI inquiry');
+    expect(kinds(picker)).toContain('Link');
+  });
+
+  it("that entry's 「⋮」 shows 「Edit inquiry page」 and 「Set as home」; another entry's shows neither", async () => {
+    servedNav.current = [...NAVIGATION, ASK];
+    start();
+    await flush();
+    expect(await itemsOf('ask')).toEqual(expect.arrayContaining(['Edit inquiry page', 'Set as home']));
+    fireEvent.keyDown(document.activeElement ?? document.body, { key: 'Escape' });
+    await flush();
+    const other = await itemsOf('leads');
+    expect(other).not.toContain('Edit inquiry page');
+    expect(other).not.toContain('Set as home');
+  });
+
+  it('「Set as home」 moves the entry to the first place of the top level, and the save writes no `landing`', async () => {
+    servedNav.current = NAVIGATION.map((e) => (e.id === 'sales' ? { ...e, children: [...(e.children ?? []), ASK] } : e));
+    start();
+    await flush();
+    expect(order()).toEqual(['home', ['sales', ['leads', 'accounts', 'ask']], ['insights', []]]);
+    await act_on('ask', 'Set as home');
+    expect(order()).toEqual(['ask', 'home', ['sales', ['leads', 'accounts']], ['insights', []]]);
+    fireEvent.click(screen.getByTestId('design-mode-save'));
+    await flush();
+    await flush();
+    const save = written.find(([verb, type]) => verb === 'save' && type === 'app')!;
+    expect((save[3] as { navigation: Array<{ id: string }> }).navigation.map((e) => e.id)).toEqual(['ask', 'home', 'sales', 'insights']);
+    expect(save[3]).not.toHaveProperty('landing');
+  });
+});

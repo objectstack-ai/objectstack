@@ -250,6 +250,18 @@ export function publishPlanApprovalPending(reading: {
 }
 
 /**
+ * ui ADR-0057 Amendment A5, row 3 — whether `conversationId` holds a proposal
+ * awaiting `userId`'s approval, as a mounted chat last read it. Read outside
+ * render, at the moment the drawer is opened from the entry, so it is a plain
+ * read, not a hook. A reading taken for another user is no answer.
+ */
+export function isApprovalPendingIn(conversationId: string | undefined, userId: string | undefined): boolean {
+  if (!conversationId) return false;
+  const reading = planApprovalOwners.get(conversationId);
+  return reading !== undefined && reading.owner === (userId ?? '');
+}
+
+/**
  * True while any conversation of the signed-in user has a proposed plan
  * awaiting approval, as last read by a mounted chat. Read by the launchers.
  */

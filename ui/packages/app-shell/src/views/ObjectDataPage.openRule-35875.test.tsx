@@ -372,10 +372,12 @@ describe('objectstack#36998 — the data page\'s side drawer opens the assistant
       fullWindow: false,
       toggle: () => calls.push('toggle'),
       open: (...args) => calls.push(`open:${JSON.stringify(args)}`),
+      openEntry: (...args) => calls.push(`entry:${JSON.stringify(args)}`),
     };
     await mountDataPage(undefined, dock);
     const drawer = await openDrawer('Globex', 'a2');
-    const entry = within(drawer).getByRole('button', { name: 'AI Assistant' });
+    // objectstack#37860 (C3's hand-over) — the entry's words, 「Ask AI」.
+    const entry = within(drawer).getByRole('button', { name: 'Ask AI' });
     expect(entry.getAttribute('data-testid')).toBe('record-pane-open-assistant');
     fireEvent.click(entry);
     await screen.findByTestId('record-page', undefined, { timeout: 5000 });
@@ -383,8 +385,9 @@ describe('objectstack#36998 — the data page\'s side drawer opens the assistant
     // The same hop as ⤢: the page carries the data page as its origin.
     expect(JSON.parse(screen.getByTestId('record-from').textContent ?? 'null')?.pathname)
       .toBe(`${DATA_PATH}?${new URLSearchParams(DATA_SEARCH).toString()}`);
-    // The assistant opens on whatever it shows: the console reads the record page in view.
-    expect(calls).toEqual(['open:[]']);
+    // ui ADR-0057 Amendment A5 — the assistant opens as the entry does; the
+    // console reads the record page in view.
+    expect(calls).toEqual(['entry:[]']);
     await settle();
     expect(screen.queryByRole('dialog')).toBeNull();
   });

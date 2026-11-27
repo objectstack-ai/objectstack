@@ -4,6 +4,8 @@
 '@object-ui/console': patch
 ---
 
+**Shipped in 19.0.0-next.0**, whose CHANGELOG missed this entry; listed here one prerelease late.
+
 fix(app-shell): a full-height console page gives the impersonation banner its height back
 
 Clause-②: no

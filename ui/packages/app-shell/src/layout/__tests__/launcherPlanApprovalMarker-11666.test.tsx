@@ -19,6 +19,9 @@ import { act, cleanup, render, screen } from '@testing-library/react';
 import React from 'react';
 import { I18nProvider } from '@object-ui/i18n';
 import { builtInLocales } from '@object-ui/i18n/locales';
+// `ChatDock` reaches `import('@object-ui/plugin-grid')` through the chat pane; pay
+// its first load at collection, never inside a clocked case (`check:test-source-alias`).
+import '@object-ui/plugin-grid';
 import { AssistantTopBarButton } from '../AssistantTopBarButton';
 import { ChatDockControlProvider, type ChatDockControl } from '../chatDockControl';
 import { ChatDockLauncher } from '../ChatDock';
@@ -31,7 +34,7 @@ vi.mock('../../console/ai/AiChatPage', () => ({
   resolveApiBase: (explicit?: string) => explicit ?? '/api/v1/ai',
 }));
 
-const EN_MARKER = 'A proposed plan is waiting for your approval';
+const EN_MARKER = 'An action is waiting for your approval';
 
 // No AuthProvider here: `useAuth` answers its signed-out default, whose user id
 // the bus reads as '' — the owner every reading below is published for.

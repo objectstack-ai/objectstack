@@ -141,11 +141,16 @@ const AGENTS_URL = '/api/v1/ai/agents';
 const SERVED = { success: true, data: { agents: [{ name: 'ask', label: 'Ask' }] } };
 const NO_SEAT = { success: true, data: { agents: [] } };
 
-/** Every pathname the router held, in order. */
+/**
+ * Every pathname the router held, in order. Recorded in a LAYOUT effect, which
+ * runs in the same commit that writes the DOM, so a routed page that is drawn
+ * is already recorded: the cases mounted outside `act` poll the DOM, and a
+ * passive `useEffect` may not have flushed when they read this array.
+ */
 let pathnames: string[] = [];
 function LocationProbe() {
   const location = useLocation();
-  React.useEffect(() => {
+  React.useLayoutEffect(() => {
     if (pathnames[pathnames.length - 1] !== location.pathname) pathnames.push(location.pathname);
   }, [location.pathname]);
   return <div data-testid="pathname">{location.pathname}</div>;

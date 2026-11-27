@@ -163,6 +163,7 @@
  *   books.<book>.label / .description
  *   books.<book>.groups.<group_key>.label   (a doc book's section title, #26690)
  *   mappings.<mapping>.label                (a named import mapping's label)
+ *   packages.<manifest id>.name / .description  (a package's display name, #35513)
  *   metadataForms.<type>.label / .description
  *   metadataForms.<type>.sections.<section>.label / .description
  *   metadataForms.<type>.fields.<dotPath>.label / .helpText / .placeholder
@@ -289,6 +290,7 @@ export interface ExpectedEntry {
     | 'permission'
     | 'book'
     | 'mapping'
+    | 'package'
     | 'metadataType'
     | 'metadataFormSection'
     | 'metadataFormField';
@@ -1899,6 +1901,9 @@ export function collectExpectedEntries(
   // ── Import mappings (`mappings.<name>.label`) ─────────────────────
   walkMappings(config, out);
 
+  // ── Package display names (`packages.<manifest id>.…`) ─────────────
+  walkPackages(config, out);
+
   // ── [ADR-0159 D8] `form` items (`forms.<name>.…`) ─────────────────
   walkForms(config, out);
 
@@ -2270,6 +2275,36 @@ function walkMappings(config: any, out: ExpectedEntry[]): void {
     const name = mapping.name;
     if (typeof name !== 'string' || name.length === 0) continue;
     pushOptional(out, ['mappings', name, 'label'], mapping.label, 'mapping');
+  }
+}
+
+// ─── Package display names (`packages.<manifest id>.…`) ────────────────────
+
+/**
+ * Emit a package's display name and description:
+ * `packages.<manifest id>.name` / `.description`, the keys the console reads
+ * where it lists packages (Setup's package list, Studio's package switcher;
+ * objectstack#35513). Read from the same two carriers
+ * {@link navigationContributionsOf} reads: the top-level `manifest` of a
+ * single-`defineStack` project, and each `packages[].manifest` of a composed
+ * artifact. `name` is required on a manifest and `description` optional, so
+ * both are recorded with {@link pushOptional}; a manifest without a string
+ * `id` names no package and is skipped.
+ */
+function walkPackages(config: any, out: ExpectedEntry[]): void {
+  const manifests: unknown[] = [config?.manifest];
+  const packages: unknown[] = Array.isArray(config?.packages) ? config.packages : [];
+  for (const entry of packages) manifests.push((entry as any)?.manifest);
+  // A composed stack restates one package's manifest at its top level and again
+  // in `packages[]`: one package, one name, walked once.
+  const seen = new Set<string>();
+  for (const manifest of manifests) {
+    if (!manifest || typeof manifest !== 'object') continue;
+    const id = (manifest as any).id;
+    if (typeof id !== 'string' || id.length === 0 || seen.has(id)) continue;
+    seen.add(id);
+    pushOptional(out, ['packages', id, 'name'], (manifest as any).name, 'package');
+    pushOptional(out, ['packages', id, 'description'], (manifest as any).description, 'package');
   }
 }
 
