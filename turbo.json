@@ -378,7 +378,8 @@
         "$TURBO_ROOT$/sdui.manifest.json",
         "$TURBO_ROOT$/scripts/js-comment-mask.mjs",
         "$TURBO_ROOT$/scripts/js-comment-mask.d.mts",
-        "$TURBO_ROOT$/packages/runtime/src/sandbox/quickjs-runner.ts"
+        "$TURBO_ROOT$/packages/runtime/src/sandbox/quickjs-runner.ts",
+        "$TURBO_ROOT$/packages/objectql/src/declared-read-columns.ts"
       ]
     },
     "@objectstack/cloud-connection#test": {

@@ -1030,6 +1030,10 @@ export const CROSS_PACKAGE_TEST_INPUTS = {
       //     `WRITE` list, so a method the runner starts gating on `api.write`
       //     turns this suite red instead of leaving the rule a method short.
       'packages/runtime/src/sandbox/quickjs-runner.ts',
+      //   src/validate-seed-record-keys.test.ts (#35143) READS the engine's
+      //     `PLATFORM_PROVISIONED_COLUMNS` and pins the rule's mirror of it, so
+      //     a column the engine starts provisioning turns this suite red.
+      'packages/objectql/src/declared-read-columns.ts',
     ],
     heldBy: {
       // `const commandsDir = join(repoRoot, 'packages/cli/src/commands')`

@@ -1,13 +1,17 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
+import { readFileSync } from 'node:fs';
+import { dirname, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
+import { explainRule } from './rule-explanations.js';
 
 import { validateSeedRecordKeys } from './validate-seed-record-keys.js';
 import { AUTHORING_RULES } from './authoring-rules.js';
 import { runRuntimeAuthoringRules, runtimeAuthoringRulesFor } from './runtime-gate.js';
 
-/** Module-local in the rule file, as the family's other ids are. */
-const SEED_RECORD_UNKNOWN_FIELD = 'seed-record-unknown-field';
+import { SEED_RECORD_UNKNOWN_FIELD } from './validate-seed-record-keys.js';
+const HERE = dirname(fileURLToPath(import.meta.url));
 const entry = AUTHORING_RULES.find((r) => r.name === 'validateSeedRecordKeys')!;
 
 const TASK = {
@@ -67,12 +71,29 @@ describe('validateSeedRecordKeys (#35143)', () => {
     ).toEqual([]);
   });
 
-  it('refuses an injected column the object opts out of, as defineSeed does', () => {
-    const findings = validateSeedRecordKeys({
+  it('admits the columns the engine provisions on every table even when the object opts out of system columns', () => {
+    // The engine's insert door accepts `PLATFORM_PROVISIONED_COLUMNS` undeclared
+    // on every object; read the list from its source so the two cannot drift.
+    const source = readFileSync(resolve(HERE, '../../objectql/src/declared-read-columns.ts'), 'utf8');
+    const listed = /export const PLATFORM_PROVISIONED_COLUMNS = \[([^\]]*)\]/.exec(source)?.[1] ?? '';
+    const provisioned = [...listed.matchAll(/'([a-z_]+)'/g)].map((m) => m[1]);
+    expect(provisioned).toEqual(['id', 'created_at', 'updated_at']);
+
+    const record = Object.fromEntries([['name', 'a'], ...provisioned.map((c) => [c, 'x'])]);
+    expect(validateSeedRecordKeys({ objects: [{ ...TASK, systemFields: false }], data: [seed([record])] })).toEqual([]);
+    // Control: an injected column the object opts out of and the engine does
+    // not provision is still refused — the engine's door refuses it too.
+    const refused = validateSeedRecordKeys({
       objects: [{ ...TASK, systemFields: false }],
-      data: [seed([{ name: 'a', created_at: '2026-01-01T00:00:00Z' }])],
+      data: [seed([{ name: 'a', created_by: 'u1' }])],
     });
-    expect(findings.map((f) => f.path)).toEqual(['data[0].records[0].created_at']);
+    expect(refused.map((f) => f.path)).toEqual(['data[0].records[0].created_by']);
+  });
+
+  it('judges no object whose field map is empty, as the engine\'s door has no opinion on one', () => {
+    expect(
+      validateSeedRecordKeys({ objects: [{ ...TASK, fields: {} }], data: [seed([{ name: 'a', anything: 1 }])] }),
+    ).toEqual([]);
   });
 
   it('judges no dataset whose object the snapshot does not hold', () => {
@@ -119,5 +140,13 @@ describe('validateSeedRecordKeys at the runtime `seed` publish door (#35143)', (
     });
     expect(result.errors).toEqual([]);
     expect(result.rulesRun).toContain('validateSeedRecordKeys');
+  });
+});
+
+describe('`os explain seed-record-unknown-field` (#35143)', () => {
+  it('has an entry that names the remedy', () => {
+    const entry = explainRule('seed-record-unknown-field');
+    expect(entry?.rule).toBe('seed-record-unknown-field');
+    expect(entry?.paragraphs.join('\n')).toContain('`created_at`');
   });
 });

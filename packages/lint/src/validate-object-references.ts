@@ -225,10 +225,20 @@ function artifactProvidedObjectNames(stack: AnyRec): string[] {
  *   it: the gate dispatches this rule on `flow` and `dataset` writes, a flow
  *   body carries none of this rule's sites, and the differential cancels what
  *   the context collections already hold.
+ * @param options.wholeCollection [#35143] `true` when `stack.objects` is the
+ *   whole collection a runtime host serves (a gated write that names no
+ *   package), as the list-view member reads it (#24668). It decides only the
+ *   flow-node site's severity: with neither it nor a closure — the CLI — a
+ *   flow node bound to a name this stack does not define is advised, not
+ *   refused, because a dependency package may define it and a build cannot
+ *   see that package (`flow-trigger-unknown-object`'s split, #24669).
  */
 export function validateObjectReferences(
   stack: AnyRec,
-  options: { packageScope?: { readonly packageId: string; readonly dependencies: readonly string[] } } = {},
+  options: {
+    packageScope?: { readonly packageId: string; readonly dependencies: readonly string[] };
+    wholeCollection?: boolean;
+  } = {},
 ): ObjectRefFinding[] {
   const findings: ObjectRefFinding[] = [];
   if (!stack || typeof stack !== 'object') return findings;
@@ -282,6 +292,7 @@ export function validateObjectReferences(
     subject: string,
     remedy = '',
     userTextOf?: UserTextParams,
+    advisory = false,
   ) => {
     const name = strName(target);
     if (!name) return;
@@ -314,6 +325,25 @@ export function validateObjectReferences(
 
     // ② Unprefixed and unresolved — a stack's own objects are namespace-
     // prefixed and present here, so there is no legitimate elsewhere.
+    // [#35143] Except where the caller says this stack cannot know (a flow
+    // node judged with no closure and no whole collection): a dependency
+    // package may define the name, so the miss is advised with that hedge.
+    if (advisory) {
+      findings.push({
+        severity: 'warning',
+        rule: OBJECT_REFERENCE_UNKNOWN,
+        where,
+        path,
+        message:
+          `${subject} "${name}" is not defined by this stack. If no installed package defines it, ` +
+          'the step fails the run every time it executes.' +
+          suggestName(name, resolvable),
+        hint:
+          'Point it at an object this stack defines, or declare the package that defines it in the manifest\'s ' +
+          '`dependencies`; ignore this if a declared dependency does',
+      });
+      return;
+    }
     findings.push({
       severity: 'error',
       rule: OBJECT_REFERENCE_UNKNOWN,
@@ -575,8 +605,10 @@ export function validateObjectReferences(
   //    refusal (#34864) answers it, so the member does not run there.
   //  - a flow node's `config.objectName` — `get_record`, `create_record`,
   //    `update_record`, `delete_record`, and a `screen` that renders an
-  //    object's form. Nothing resolved it at all: the step reaches the engine
-  //    with a name no object carries and fails the run on every execution. The
+  //    object's form. Nothing resolved it at all: when no installed package
+  //    defines the name either, the step reaches the engine with a name no
+  //    object carries and fails the run every time it executes. Advised on
+  //    the CLI, refused at the door (`flowNodeAdvisory` below). The
   //    START node's `objectName` is `flow-trigger-unknown-object`'s subject
   //    (`validate-flow-trigger-readiness.ts`) and is not read here.
   //  - a standalone action's `objectName`, the object `defineStack` folds it
@@ -602,12 +634,19 @@ export function validateObjectReferences(
   // none binds objects its dependencies own. Under a stated closure an empty
   // set is still a verdict (#24563): every binding is then outside it.
   const noUniverse = resolvable.size === 0 && !closure;
-  const checkBound = (target: string | undefined, where: string, path: string, subject: string) => {
+  const checkBound = (target: string | undefined, where: string, path: string, subject: string, advisory = false) => {
     if (noUniverse) return;
     const name = strName(target);
     if (name && extended.has(name)) return;
-    check(name, where, path, subject);
+    check(name, where, path, subject, '', undefined, advisory);
   };
+  // [#35143] A flow node's miss is refused only where this stack is enough to
+  // know: under a stated closure, or against the whole served collection. On
+  // the CLI a dependency package the build cannot see may define the name,
+  // so it is advised there — `flow-trigger-unknown-object`'s split (#24669).
+  // The seed and action sites keep the error: `defineStack` refuses the same
+  // misses on the CLI already.
+  const flowNodeAdvisory = !closure && options.wholeCollection !== true;
 
   const seeds = Array.isArray(stack.data) ? (stack.data as unknown[]) : [];
   for (let si = 0; si < seeds.length; si++) {
@@ -629,6 +668,7 @@ export function validateObjectReferences(
         `flow "${flowName}" · node "${strName(node.label) ?? strName(node.id) ?? '?'}"`,
         `${path}.config.objectName`,
         `${node.type} object`,
+        flowNodeAdvisory,
       );
     }
   }

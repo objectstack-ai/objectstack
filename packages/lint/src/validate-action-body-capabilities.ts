@@ -18,7 +18,11 @@
  *
  * The grant is the author's to write: Studio's action inspector draws the
  * capability list (`ScriptCapabilitiesField`), and a body `os build` lowers
- * from a handler gets the grant inferred from its calls.
+ * from a handler gets the grant inferred from its calls: the extractor
+ * (`packages/cli/src/utils/extract-hook-body.ts`) reads each shape listed
+ * below — a direct chain, `?.` before the leaf, an argument holding a call, a
+ * handle bound to `.object(…)` — so a handler the build lowers is not refused
+ * by the next step of the same build. Its pins hold that shape by shape.
  *
  * ## How the source is read
  *
@@ -53,7 +57,7 @@ import { collectActionBodies } from './validate-action-body-writes.js';
 
 type AnyRec = Record<string, unknown>;
 
-const ACTION_BODY_WRITE_CAPABILITY_UNDECLARED = 'action-body-write-capability-undeclared';
+export const ACTION_BODY_WRITE_CAPABILITY_UNDECLARED = 'action-body-write-capability-undeclared';
 
 /**
  * The write leaves the sandbox installs on `ctx.api.object(name)` behind

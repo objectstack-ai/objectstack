@@ -17,10 +17,15 @@
  * `data: [{ object, records }]` entry in the stack, or a `seed` saved through the
  * runtime publish door — was judged by nothing until the load. This rule is the
  * same question asked of every dataset, before the load: the column set is the
- * object's fields as served (an object extension may add one) plus the system
- * columns the platform injects on THAT object (`injectedColumnsFor`, the
- * registry's own plan, so an object built with `systemFields: false` is refused
- * `created_at` exactly as `defineSeed` refuses it).
+ * engine's own declared set for the insert door — the object's fields as served
+ * (an object extension may add one), the system columns the platform injects on
+ * THAT object (`injectedColumnsFor`, the registry's own plan), and the columns
+ * every physical table carries whether declared or not (`id`, `created_at`,
+ * `updated_at`: the engine's `PLATFORM_PROVISIONED_COLUMNS`, mirrored here and
+ * pinned to it by test). So an object built with `systemFields: false` still
+ * admits `created_at`, because the engine's door does; `defineSeed` refuses it
+ * for its own reason, which this rule does not claim. An object with an empty
+ * field map is not judged: the engine's door has no opinion on it either.
  *
  * A `columns` key that names no column is refused for `defineSeed`'s reason:
  * the policy governs nothing, and the column it was meant for keeps the
@@ -38,7 +43,16 @@ import { injectedColumnsFor } from './system-fields.js';
 
 type AnyRec = Record<string, unknown>;
 
-const SEED_RECORD_UNKNOWN_FIELD = 'seed-record-unknown-field';
+/**
+ * The columns the engine provisions on every physical table and its insert
+ * door accepts undeclared (`PLATFORM_PROVISIONED_COLUMNS`,
+ * `packages/objectql/src/declared-read-columns.ts`). Mirrored, not imported:
+ * `@objectstack/objectql` depends on this package. The test pins the two
+ * lists equal by reading that source.
+ */
+const ENGINE_PROVISIONED_COLUMNS = ['id', 'created_at', 'updated_at'] as const;
+
+export const SEED_RECORD_UNKNOWN_FIELD = 'seed-record-unknown-field';
 
 export interface SeedRecordKeyFinding {
   severity: 'error';
@@ -65,7 +79,8 @@ function columnsOf(obj: AnyRec): Set<string> | undefined {
   } else {
     return undefined;
   }
-  return new Set([...names, ...injectedColumnsFor(obj)]);
+  if (names.length === 0) return undefined;
+  return new Set([...names, ...injectedColumnsFor(obj), ...ENGINE_PROVISIONED_COLUMNS]);
 }
 
 /**

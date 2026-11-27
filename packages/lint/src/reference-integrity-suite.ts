@@ -263,8 +263,18 @@ export const REFERENCE_INTEGRITY_RULES: readonly ReferenceIntegrityRule[] = [
   {
     name: 'validateObjectReferences',
     runtimeTypes: ['flow', 'dataset', 'action'],
+    // [#35143] `wholeCollection` as the list-view member states it (#24668):
+    // a gated write that names no package is judged against everything the
+    // host serves, so the flow-node site refuses there; the CLI advises.
     run: (stack, ctx) =>
-      validateObjectReferences(stack, ctx?.packageScope ? { packageScope: ctx.packageScope } : {}),
+      validateObjectReferences(
+        stack,
+        ctx?.packageScope
+          ? { packageScope: ctx.packageScope }
+          : ctx?.runtimeWriteType !== undefined
+            ? { wholeCollection: true }
+            : {},
+      ),
   },
   // [#9313] `runtimeTypes` gains `view` on this member and its sort sibling:
   // both judge a LIST VIEW's field references, and a standalone list view is

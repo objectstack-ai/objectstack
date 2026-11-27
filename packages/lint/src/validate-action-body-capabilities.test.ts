@@ -4,6 +4,7 @@ import { readFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
+import { explainRule } from './rule-explanations.js';
 
 import {
   SANDBOX_API_WRITE_METHODS,
@@ -12,8 +13,7 @@ import {
 } from './validate-action-body-capabilities.js';
 import { runRuntimeAuthoringRules, runtimeAuthoringRulesFor } from './runtime-gate.js';
 
-/** Module-local in the rule file, as the family's other ids are. */
-const ACTION_BODY_WRITE_CAPABILITY_UNDECLARED = 'action-body-write-capability-undeclared';
+import { ACTION_BODY_WRITE_CAPABILITY_UNDECLARED } from './validate-action-body-capabilities.js';
 const HERE = dirname(fileURLToPath(import.meta.url));
 const RUNNER = resolve(HERE, '../../runtime/src/sandbox/quickjs-runner.ts');
 
@@ -152,5 +152,13 @@ describe('validateActionBodyCapabilities at the runtime publish door (#35143)', 
     expect(result.errors.filter((e) => e.rule === ACTION_BODY_WRITE_CAPABILITY_UNDECLARED).map((e) => e.path)).toEqual([
       'objects.pr_task.actions[0].body.capabilities',
     ]);
+  });
+});
+
+describe('`os explain action-body-write-capability-undeclared` (#35143)', () => {
+  it('has an entry that names the remedy', () => {
+    const entry = explainRule('action-body-write-capability-undeclared');
+    expect(entry?.rule).toBe('action-body-write-capability-undeclared');
+    expect(entry?.paragraphs.join('\n')).toContain('api.write');
   });
 });
