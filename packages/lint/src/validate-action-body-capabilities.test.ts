@@ -6,13 +6,14 @@ import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 
 import {
-  ACTION_BODY_WRITE_CAPABILITY_UNDECLARED,
   SANDBOX_API_WRITE_METHODS,
   bodyApiWriteCalls,
   validateActionBodyCapabilities,
 } from './validate-action-body-capabilities.js';
 import { runRuntimeAuthoringRules, runtimeAuthoringRulesFor } from './runtime-gate.js';
 
+/** Module-local in the rule file, as the family's other ids are. */
+const ACTION_BODY_WRITE_CAPABILITY_UNDECLARED = 'action-body-write-capability-undeclared';
 const HERE = dirname(fileURLToPath(import.meta.url));
 const RUNNER = resolve(HERE, '../../runtime/src/sandbox/quickjs-runner.ts');
 

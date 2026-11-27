@@ -53,7 +53,7 @@ import { collectActionBodies } from './validate-action-body-writes.js';
 
 type AnyRec = Record<string, unknown>;
 
-export const ACTION_BODY_WRITE_CAPABILITY_UNDECLARED = 'action-body-write-capability-undeclared';
+const ACTION_BODY_WRITE_CAPABILITY_UNDECLARED = 'action-body-write-capability-undeclared';
 
 /**
  * The write leaves the sandbox installs on `ctx.api.object(name)` behind

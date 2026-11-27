@@ -2,11 +2,13 @@
 
 import { describe, expect, it } from 'vitest';
 
-import { validateSeedRecordKeys, SEED_RECORD_UNKNOWN_FIELD } from './validate-seed-record-keys.js';
+import { validateSeedRecordKeys } from './validate-seed-record-keys.js';
 import { AUTHORING_RULES } from './authoring-rules.js';
-
-const entry = AUTHORING_RULES.find((r) => r.name === 'validateSeedRecordKeys')!;
 import { runRuntimeAuthoringRules, runtimeAuthoringRulesFor } from './runtime-gate.js';
+
+/** Module-local in the rule file, as the family's other ids are. */
+const SEED_RECORD_UNKNOWN_FIELD = 'seed-record-unknown-field';
+const entry = AUTHORING_RULES.find((r) => r.name === 'validateSeedRecordKeys')!;
 
 const TASK = {
   name: 'pr_task',

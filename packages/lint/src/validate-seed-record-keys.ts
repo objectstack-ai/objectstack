@@ -38,7 +38,7 @@ import { injectedColumnsFor } from './system-fields.js';
 
 type AnyRec = Record<string, unknown>;
 
-export const SEED_RECORD_UNKNOWN_FIELD = 'seed-record-unknown-field';
+const SEED_RECORD_UNKNOWN_FIELD = 'seed-record-unknown-field';
 
 export interface SeedRecordKeyFinding {
   severity: 'error';
