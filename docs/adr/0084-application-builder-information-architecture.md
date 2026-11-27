@@ -193,8 +193,8 @@ Every type the spec registers, enumerated at `origin/main` `151e8123` from `pack
 | **平台 Platform** | `system` | 3 | `email_template` 邮件模板 | 高级 |
 | **平台 Platform** | `system` | 4 | `translation` | 高级 |
 | **平台 Platform** | `system` | 5 | `api` | 高级 |
-| **平台 Platform** | `system` | 6 | `datasource` | 高级 |
-| **平台 Platform** | `system` | 7 | `external_catalog` | 高级 |
+| **平台 Platform** | `system` | 6 | `external_catalog` | 高级 |
+| **平台 Platform** | `system` | — | `datasource` | — |
 | **访问 Access** | `security` | 1 | `permission` 权限集 | 常用 |
 | **访问 Access** | `security` | 2 | `position` 岗位 | 常用 |
 | **访问 Access** | `security` | 3 | `assignment_rule` 分配规则 | 高级 |
@@ -210,6 +210,8 @@ Every type the spec registers, enumerated at `origin/main` `151e8123` from `pack
 *(Amended 2026-11-25: the table is redrawn one row per type and gains two columns, **Order** and **Tier** — [Amendment (2026-11-25)](#amendment-2026-11-25). Read again at `origin/main` `a33691e567`: 33 entries — the 32 of the first reading, each in the domain it had, and `ai_context`, registered `ai` on 2026-11-25 ([ADR-0160](./0160-record-scoped-ai-inquiry.md) D1). No type changed group, and the rows count 数据 Data 7 · 界面 UI 7 · 自动化 Automation 2 · 平台 Platform 7 · 访问 Access 6 · AI 4.)*
 
 *(Rewritten 2026-11-26, card [#37564](https://github.com/objectstack-ai/objectstack/issues/37564), which carries out [Amendment (2026-11-26)](#amendment-2026-11-26-moves) for two rows and decides nothing: `dataset` and `position`. `dataset` is registered `data` by the same change, so its row leaves 界面 UI, where it was seventh, for 数据 Data, where it is second, directly after `object`; each 数据 Data type behind it is one place later, and its tier is 常用. `position` keeps its place, and its tier is 常用. The registry holds the same 33 entries, and the rows now count 数据 Data 8 · 界面 UI 6 · 自动化 Automation 2 · 平台 Platform 7 · 访问 Access 6 · AI 4. The `datasource` row is not touched and `form` has no row yet: each is rewritten, or written, by the change that moves it.)*
+
+*(Rewritten 2026-11-27, card [#37920](https://github.com/objectstack-ai/objectstack/issues/37920), which carries out [Amendment (2026-11-26)](#amendment-2026-11-26-moves) for one row and decides nothing: `datasource`. The menu draws no row for it by the same change, so its row is written as `field`'s is — no order, no tier, last in its group — and `external_catalog`, the one type that was behind it, is one place earlier, sixth. The type stays registered `system` and keeps its row in this table, so 平台 Platform still counts 7: six rows with an order, and this one.)*
 
 The rows are in the menu's order: by group, then by **Order**, which counts inside a group. **Tier** is 常用 Common or 高级 Advanced. The Chinese word beside a registered name is the one the ruling or its proposal uses for that type; a type neither names in Chinese has none. `field` carries no order and no tier because it draws no row (the second reading below).
 
@@ -407,10 +409,13 @@ The top bar is drawn by `ui/packages/app-shell/src/views/studio-design/StudioDes
 | The way back to the app, with the app's name | The first control of the package row; the name is shown by the switcher beside it | the pick |
 | The ⋯ package menu (`ui/packages/app-shell/src/views/studio-design/StudioPackageMenu.tsx#STUDIO_PACKAGE_MENU_ITEMS`) | The header of 概览 Overview, moved as it is | the pick |
 | The pending-changes button with its count, and Publish | The Pending tab of 概览 Overview. The count is a badge on the menu's 概览 row, and one click on it opens that tab | the pick |
+| The same button and Publish on the package-less scope (`~org`), which draws no 概览 | A 变更 Changes row with its count, in the left column under the package row (`ui/packages/app-shell/src/views/studio-design/StudioTopLeft.tsx#StudioScopePendingRow`), drawn only while that scope has something pending. It opens the changes sheet that exists, and Publish is in that sheet | not ruled — the note below |
 | Save and Cancel, drawn while a page has unsaved edits | The action slot of the item's header (`ui/packages/app-shell/src/views/studio-design/StudioItemHeader.tsx#StudioItemHeader`) | the pick |
 | The AI assistant button, and the toggle of the right-hand panel | The right end of each page's title row — a list's title row, an item's header — where an app's page carries its own (`ui/packages/app-shell/src/layout/ShellPageActions.tsx#ShellPageActions`) | the pick |
 | The control that shows and hides the menu | Studio's row | decision 3 |
 | For a package with no app: the "create app" button, or the label that says its app waits for a publish | None — [item 5](#amendment-2026-11-26-silent) | not ruled |
+
+*(Amended 2026-11-27, card [#37685](https://github.com/objectstack-ai/objectstack/issues/37685): the table gains its fourth row — where Changes and Publish live on the package-less scope. The pick sends them to 概览, and `~org` draws no 概览 ([item 1](#amendment-2026-11-26-silent)), so card [#37456](https://github.com/objectstack-ai/objectstack/issues/37456), which removed the top bar, gave that scope a row of its own. The row is written from the code, read at `origin/main` `73d5e347`: it is drawn on `~org` alone, it counts the drafts of the organization's own flows, the rail keeps it as an icon, and the sheet it opens is `ui/packages/app-shell/src/preview/DraftChangesPanel.tsx#DraftChangesPanel`. No ruling gives this home: it was built first and is recorded after the fact, as that change's contract review asked ([comment 7202356468](https://github.com/objectstack-ai/objectstack/pull/37579#issuecomment-7202356468), finding S3). Merging this note accepts it. The top bar still held seven things: the row is a second home for the third, on a scope where its first is not drawn. No other row changes.)*
 
 Decision 3 says the ⋯ menu "is removed". It is read with decision 9 and the pick: the menu leaves the top left, and its rows live on in 概览's header.
 

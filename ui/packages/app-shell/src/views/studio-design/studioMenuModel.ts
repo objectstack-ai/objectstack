@@ -20,7 +20,9 @@
  * `scopeDirectoryEntries`), plus every 常用 Common type
  * ({@link STUDIO_MENU_ALWAYS_TYPES}), so a package that holds no app, page,
  * dashboard, report, flow, permission set or agent still shows where the
- * first is made. Each opens the type's list in the "All metadata" area,
+ * first is made. Not a type the menu draws no row for
+ * (`STUDIO_MENU_NO_ROW_TYPES`): `datasource`, managed in Setup → Integrations
+ * alone (ADR-0084, amended 2026-11-26, decision 12; objectstack#37920). Each opens the type's list in the "All metadata" area,
  * where an object, a flow and a permission set open their designers
  * full-screen (objectstack#36903-36905; objectstack#36909 retired the last of
  * the pillar redirects).
@@ -79,7 +81,6 @@
  */
 
 import { ENVIRONMENT_SCOPE_QUERY } from '../metadata-admin/catalog-scope.js';
-import { SETUP_DATASOURCES_PATH } from '../metadata-admin/metadataAreaHost.js';
 import { accessDirectoryPath } from '../setup/accessDirectory.js';
 import { isStudioAllPackagesScope } from './metadataArea.js';
 import {
@@ -93,7 +94,7 @@ import {
 } from './studioAddress.js';
 import { studioPackageOverviewPath } from './studioOverviewAddress.js';
 import { isStudioOrgScope, studioOrgScopePath } from './studioScope.js';
-import { STUDIO_MENU_PLACEMENT, type StudioMenuTier } from './studioMenuPlacement.js';
+import { STUDIO_MENU_NO_ROW_TYPES, STUDIO_MENU_PLACEMENT, type StudioMenuTier } from './studioMenuPlacement.js';
 
 export type { StudioMenuTier } from './studioMenuPlacement.js';
 
@@ -174,8 +175,6 @@ function typeEntryPath(scope: StudioMenuScope, type: string, setupDirectory: boo
     if (setupDirectory) return accessDirectoryPath(type);
     return studioMetadataAreaAddress(STUDIO_ALL_PACKAGES_SEGMENT, encodeURIComponent(type), { query: ENVIRONMENT_SCOPE_QUERY });
   }
-  // ADR-0146 D1 — a datasource is Setup's runtime configuration, as its directory tile says.
-  if (type === 'datasource') return SETUP_DATASOURCES_PATH;
   return studioMetadataAreaAddress(scope.packageId, encodeURIComponent(type), {
     query: `package=${encodeURIComponent(scope.packageId)}`,
   });
@@ -188,7 +187,8 @@ const PLACEMENT_TIER: ReadonlyMap<string, StudioMenuTier> = new Map(STUDIO_MENU_
 /**
  * The menu's groups and entries. `types` are the served type entries the
  * directory rule already scoped to this menu (`scopeDirectoryEntries`); a type
- * whose domain is none of the six is not drawn. Inside a group the types
+ * whose domain is none of the six is not drawn, nor is a type the menu draws
+ * no row for (`STUDIO_MENU_NO_ROW_TYPES`), in any scope. Inside a group the types
  * follow the placement table, an unplaced type after the placed ones in
  * served order, then the entries that are not a type. `settled` says the
  * diagnostics sweep has answered, so a missing count means none.
@@ -208,6 +208,7 @@ export function buildStudioMenu(input: {
   const rank = (type: string) => PLACEMENT_INDEX.get(type) ?? STUDIO_MENU_PLACEMENT.length;
   const placed = [...types].sort((a, b) => rank(a.type) - rank(b.type));
   for (const t of placed) {
+    if (STUDIO_MENU_NO_ROW_TYPES.has(t.type)) continue;
     const entries = groups.get(t.domain as StudioMenuGroup);
     if (!entries) continue;
     const tier = PLACEMENT_TIER.get(t.type) ?? 'advanced';

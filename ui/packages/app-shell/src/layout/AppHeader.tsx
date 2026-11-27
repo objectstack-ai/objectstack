@@ -988,11 +988,6 @@ export function AppHeader({
            */}
           {!phoneTab && <InboxBell activities={activities} />}
 
-          {/* AI Assistant — only when the runtime serves AI (hidden on
-              Community Edition so it can't dead-end on an agent-less chat).
-              objectstack#34608: it opens and closes the drawer in place. */}
-          {aiEnabled && <AssistantTopBarButton />}
-
           {/* Help & Documentation — the shared 「?」 menu (objectstack#36111:
               the page's button group draws the same component). The
               left-sidebar already links the hub, so this entry point earns
@@ -1002,6 +997,13 @@ export function AppHeader({
             appPackageId={currentAppPackageId}
             triggerClassName="h-8 w-8 hidden md:flex shrink-0"
           />
+
+          {/* Ask AI — only when the runtime serves AI (hidden on Community
+              Edition so it can't dead-end on an agent-less chat).
+              objectstack#34608: it opens and closes the drawer in place.
+              objectstack#37858: after help, as in the page's button group;
+              with its words on Home's bar, its icon alone (44 px) on a phone. */}
+          {aiEnabled && <AssistantTopBarButton className="md:ml-1" />}
         </div>
 
         {/* Group 3: Account (theme + lang moved into avatar dropdown) */}

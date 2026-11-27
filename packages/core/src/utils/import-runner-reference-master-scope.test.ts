@@ -397,6 +397,31 @@ describe('[#36159] [#36794] a scoped miss whose value exists outside the row\'s 
     ]);
   });
 
+  it('[#37717] a scoped lookup none of whose reads answered is never probed unscoped: a value the scope cell\'s type cannot take keeps the plain sentence', async () => {
+    const { p, findData } = protocol();
+    // Every read carrying the scope is refused for the scope cell's value
+    // (INVALID_FILTER, a comparand the field's type cannot take); a read
+    // without the scope would answer. "Design review" exists, under Apollo.
+    findData.mockImplementation(async (args: FindArgs) => {
+      const where = args.query!.where as Record<string, unknown>;
+      if (args.object === 'xm_task' && 'project' in where) {
+        throw Object.assign(new Error("ObjectQL.find('xm_task'): 'project' cannot take that value"), {
+          code: 'INVALID_FILTER', status: 400, field: 'project',
+        });
+      }
+      return (ROWS[args.object] ?? []).filter((r) => matches(r, where));
+    });
+    const summary = await run(p, [{ name: 'INV-1', project: 'Gemini', task: 'Design review' }]);
+    expect(summary.results.map(refusal)).toEqual([
+      { ok: false, code: 'reference_not_found', field: 'task', error: 'task: no record matches "Design review"' },
+    ]);
+    expect(summary.results.map(cellErrors)).toEqual([[{ field: 'task', code: 'reference_not_found', scope: undefined }]]);
+    // No unscoped probe ran: every xm_task read carried the scope.
+    const taskReads = findData.mock.calls.map(([c]) => c).filter((c) => c.object === 'xm_task');
+    expect(taskReads.length).toBeGreaterThan(0);
+    for (const c of taskReads) expect(c.query!.where).toHaveProperty('project');
+  });
+
   it('the unscoped probe is the importing caller\'s own read, and a record that caller cannot read stays unnamed', async () => {
     const { p, findData } = protocol();
     // The caller's reads see no Apollo task: the fake hides xm_task rows of p1

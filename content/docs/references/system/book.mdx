@@ -63,6 +63,13 @@ const result = BookSchema.parse(data);
 | **_lockDocsUrl** | `string` | optional | Optional documentation link surfaced next to _lockReason. |
 | **overrides** | `{ package: string; basedOn: string }` | optional | Override declaration (ADR-0146 D2): `{ package, basedOn }` — this item of "`<base>`.custom" replaces the base package's same-named item whole. `basedOn` is recorded and never gates; a base's upgrade plan reads it only as advice. |
 
+### Nested Shape: `Book.audience[option 3]`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **permissionSet** | `string` | ✅ |  |
+| **systemPermission** | `never` | optional | Not accepted beside `permissionSet`: an audience names one gate |
+
 ### Nested Shape: `Book.groups[number]`
 
 | Property | Type | Required | Description |
@@ -110,6 +117,7 @@ Type: `'public'`
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **permissionSet** | `string` | ✅ |  |
+| **systemPermission** | `never` | optional | Not accepted beside `permissionSet`: an audience names one gate |
 
 ---
 

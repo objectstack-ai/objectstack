@@ -1349,7 +1349,21 @@ const ja = {
       typeLabel: 'ビューの種類',
       includeCurrent: '現在のフィルターと並べ替えを含める',
       scopeShared: '共有',
-      scopeHint: '共有ビューはこのリストを見られる全員に表示されます',
+      scopeHint: '共有ビューはこのリストを見られる全員に表示されます。ただし、ある権限の保有者に限定した場合を除きます',
+      // objectstack#34908 — who a shared view reaches: the capability picker and its position preview.
+      audienceLabel: 'このビューを見られる人',
+      audienceEveryone: 'このリストを見られる全員',
+      audienceAdd: '権限の保有者に限定…',
+      audienceAllAdded: 'すべての権限を追加済み',
+      audienceLoading: '権限を読み込み中…',
+      audienceLoadFailed: '権限を読み込めないため、追加できません：{{message}}',
+      audienceNone: '権限はまだ定義されていません。権限はセットアップで権限セットに付与します。',
+      audienceGrantedBy: '付与元：{{sets}}',
+      audienceRemove: '{{name}} を削除',
+      audiencePositions: '{{positions}} がこのビューを見られます',
+      audienceNoPosition: '選択したすべての権限を単独で持つ役職はありません。直接、または複数の役職を通じてすべてを持つ人だけがこのビューを見られます',
+      audienceSelf: 'これはあなた自身にも適用されます。選択したすべての権限を持っていない場合、作成後このビューはあなたのリストからも消えます',
+      audiencePositionsUnread: '役職を読み込めないため、このビューを見られる人は表示されません',
       // objectstack#36409 — a shared view's name already taken, and a view that is gone.
       shareNameTaken: '未公開の下書きがすでにこのビューの名前を使っているため、共有しませんでした。ビューの名前を変えてもう一度お試しください。',
       viewGone: '開いたビューはもう存在しないため、リストは既定のビューを表示しています。',
@@ -2255,6 +2269,8 @@ const ja = {
       // ui ADR-0057 Amendment A4 — the app's AI inquiry page: its static scope badge.
       askPage: {
         scopeBadge: "このアプリを優先",
+        recentTitle: "最近の会話",
+        recentEmpty: "ここでした質問がここに表示されます。",
       },
       renameConversation: "会話の名前を変更",
       deleteConversation: "会話を削除",
@@ -4552,6 +4568,18 @@ const ja = {
     },
     recordCitations: {
       title: 'レコードからの引用',
+    },
+    questionCard: {
+      aiAsks: 'AI からの質問：',
+      progress: '質問 {{current}}/{{total}}',
+      typeYourOwn: 'その他（自分で入力）…',
+      recommended: 'おすすめ',
+      skip: 'スキップ',
+      back: '前へ',
+      next: '次へ',
+      send: '送信',
+      pending: '回答待ちの質問があります',
+      answerLine: '{{header}}：{{answer}}',
     },
     tool: {
       aggregate_data: "関連データを集計する",

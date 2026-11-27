@@ -1381,7 +1381,21 @@ const pt = {
       typeLabel: 'Tipo de visualização',
       includeCurrent: 'Incluir os filtros e a ordenação atuais',
       scopeShared: 'Compartilhada',
-      scopeHint: 'Visualizações compartilhadas são vistas por todos que podem ver esta lista',
+      scopeHint: 'Visualizações compartilhadas são vistas por todos que podem ver esta lista, a menos que a visualização seja limitada a quem tem uma permissão',
+      // objectstack#34908 — who a shared view reaches: the capability picker and its position preview.
+      audienceLabel: 'Quem vê esta visualização',
+      audienceEveryone: 'Todos que podem ver esta lista',
+      audienceAdd: 'Limitar a uma permissão…',
+      audienceAllAdded: 'Todas as permissões adicionadas',
+      audienceLoading: 'Carregando permissões…',
+      audienceLoadFailed: 'Não foi possível carregar as permissões, então nenhuma pode ser adicionada: {{message}}',
+      audienceNone: 'Nenhuma permissão definida ainda. As permissões são concedidas em Configuração, nos conjuntos de permissões.',
+      audienceGrantedBy: 'Concedida por {{sets}}',
+      audienceRemove: 'Remover {{name}}',
+      audiencePositions: '{{positions}} verão esta visualização',
+      audienceNoPosition: 'Nenhum cargo sozinho tem todas as permissões escolhidas: só quem tiver todas, diretamente ou por vários cargos, verá esta visualização',
+      audienceSelf: 'Isso também vale para você: se você não tiver todas as permissões escolhidas, a visualização sai da sua própria lista depois de criada',
+      audiencePositionsUnread: 'Não foi possível ler os cargos, então não é mostrado quem verá esta visualização',
       // objectstack#36409 — a shared view's name already taken, and a view that is gone.
       shareNameTaken: 'Um rascunho não publicado já usa o nome desta visualização, então nada foi compartilhado. Dê outro nome à visualização e tente novamente.',
       viewGone: 'A visualização que você abriu não está mais disponível, então a lista mostra a visualização padrão.',
@@ -2312,6 +2326,8 @@ const pt = {
       // ui ADR-0057 Amendment A4 — the app's AI inquiry page: its static scope badge.
       askPage: {
         scopeBadge: "Prioriza este app",
+        recentTitle: "Conversas recentes",
+        recentEmpty: "As perguntas que você fizer aqui aparecerão aqui.",
       },
       renameConversation: "Renomear conversa",
       deleteConversation: "Excluir conversa",
@@ -4639,6 +4655,18 @@ const pt = {
     },
     recordCitations: {
       title: 'Citado de registros',
+    },
+    questionCard: {
+      aiAsks: 'A IA pergunta:',
+      progress: 'Pergunta {{current}} de {{total}}',
+      typeYourOwn: 'Digitar outra coisa…',
+      recommended: 'Recomendado',
+      skip: 'Pular',
+      back: 'Anterior',
+      next: 'Próxima',
+      send: 'Enviar',
+      pending: 'Há uma pergunta aguardando sua resposta',
+      answerLine: '{{header}}: {{answer}}',
     },
     tool: {
       aggregate_data: "Resumir os dados",

@@ -156,6 +156,9 @@ const CASES: Case[] = [
   { key: 'ref-multi:permission', schema: { type: 'array', title: TITLE, items: { type: 'string' } }, ctx: { permissionSets: loaded([{ name: 'sales_rep' }, { name: 'support_agent' }]) }, value: ['sales_rep'] },
   // No `ctx` at all: the hosts that feed no catalog get the typed-name box inside the same named list (objectui#12126).
   { key: 'ref-multi:permission', variant: 'no-catalog', schema: { type: 'array', title: TITLE, items: { type: 'string' } }, value: ['sales_rep'] },
+  { key: 'ref-multi:capability', schema: { type: 'array', title: TITLE, items: { type: 'string' } }, ctx: { capabilityAudience: loaded({ capabilities: [{ name: 'view_deal_sales', grantedBy: ['sales_rep_set'] }], positions: [] }) }, value: ['view_deal_sales'] },
+  // No `ctx` at all: a closed list says the capabilities are not available here, inside the same named list (objectstack#34908).
+  { key: 'ref-multi:capability', variant: 'no-catalog', schema: { type: 'array', title: TITLE, items: { type: 'string' } }, value: ['view_deal_sales'] },
   { key: 'filter-mode', schema: { type: 'object', title: TITLE }, ctx: { objectFields: loaded([{ name: 'status' }]) }, value: { element: 'dropdown' } },
   { key: 'object-selector', schema: { type: 'string', title: TITLE }, ctx: { objectNames: loaded(['account']) }, value: 'account' },
   { key: 'object-selector', variant: 'multiple', schema: { type: 'array', title: TITLE }, spec: { multiple: true }, ctx: { objectNames: loaded(['account', 'contact']) }, value: ['account'] },
