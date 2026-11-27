@@ -105,6 +105,14 @@ export const zhHantObjects: NonNullable<TranslationData['objects']> = {
         label: "流程節點",
         help: "開啟此請求之流程中的核准節點 ID。"
       },
+      root_run_id: {
+        label: "根執行",
+        help: "此請求所屬審批發起時所在的自動化執行。"
+      },
+      root_run_started_at: {
+        label: "根執行開始時間",
+        help: "此請求所屬審批發起時所在的執行的開始時間。"
+      },
       node_config_json: {
         label: "節點設定",
         help: "由節點驅動之請求的核准節點設定（核准人／行為）快照。"
