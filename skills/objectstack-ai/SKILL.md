@@ -233,35 +233,42 @@ names, a skill's `context` over MCP, `os validate` rules:
 
 ## Knowledge Sources (RAG)
 
-The RAG primitive is the **KnowledgeSource** (`KnowledgeSourceSchema` in
-`@objectstack/spec/ai`): declarative metadata pairing *what to index* with the id
-of an `IKnowledgeAdapter` that does the work. There is no `defineStack`
-collection for them — they are registered at runtime, and the ☁️
-`search_knowledge` tool exposes registered sources to agents.
+A RAG source is a **`knowledge_source`** metadata item (`KnowledgeSourceSchema`
+in `@objectstack/spec/ai`): which records of one object are indexed, and which
+of their fields. Ship it in a package (`knowledgeSources`,
+`*.knowledge-source.ts` / `.yml`) or author it in Studio or over MCP;
+`KnowledgeServicePlugin({ sources })` and `registerSource` are a second door for
+the same schema, and one name is one source. An item mounts the knowledge
+service and its store with no `requires: ['knowledge']`, and the ☁️
+`search_knowledge` tool serves the sources to agents.
 
-**Wiring (open packages).** `KnowledgeServicePlugin({ sources })` from
-`@objectstack/service-knowledge` registers `IKnowledgeService` with the kernel and
-each source at boot (`service.registerSource` still works later). The `adapter`
-id resolves against an adapter plugin — `@objectstack/knowledge-memory` (`'memory'`,
-dev/test), `@objectstack/knowledge-pgvector` (`'pgvector'`) or `@objectstack/knowledge-turso` (`'turso'`).
+**A source is an egress and cost decision.** Its first build sends every listed
+field of every matching record to the embedding provider and keeps the text in
+an index. A run-time save needs `manage_knowledge_sources` beside
+`manage_metadata`, and is refused, naming the object or field, when you may not
+search that object or query a listed field.
 
-| Property | Purpose |
-|:---------|:--------|
-| `id` | Snake_case source id |
+| Key | Purpose |
+|:----|:--------|
+| `name` | Snake_case source name: what `search_knowledge` lists and its `sourceIds` names |
 | `label` / `description` | Display metadata |
-| `adapter` | Adapter id, resolved via `IKnowledgeService.registerAdapter` |
-| `adapterConfig` | Adapter-specific configuration (opaque to the service) |
-| `source` | What gets indexed — discriminated on `kind`: `'object'` \| `'file'` \| `'http'` |
-| `embedding` | Optional `EmbeddingModelSchema` ref (`provider`, `model`, `dimensions`) — adapters managing embeddings internally may ignore it |
-| `vectorStore` | Optional `VectorStoreSchema` ref (`provider`, `collection`) — same caveat |
-| `refresh` | `onRecordChange` (default `true` for object sources) + optional `cron` (for an external scheduler; not self-scheduled) |
-| `aiExposed` | May `search_knowledge` expose this source to agents (default `true`) — `false` indexes it without making it agent-searchable |
+| `adapter` | Optional store id (`pgvector`, `turso`, `memory`). Omitted: the deployment's store (`pgvector` on PostgreSQL, `turso` otherwise), else the only one registered; several and none the deployment's is refused, naming them |
+| `source.kind` | `'object'`, the one kind |
+| `source.object` | The object whose records are indexed |
+| `source.content` | Non-empty list of the fields whose text is indexed, in order. `'*'` is refused: embedding is egress, and a wildcard also sent fields added later. Meaningful text only, never ids or system fields; credential-class and `internal` fields are never indexed |
+| `source.metadataFields` | Fields kept for search-time filtering (`status`, `owner_id`, `tags`) |
+| `source.where` | ObjectQL `where`: keeps drafts and archived rows out |
+| `source.split` | How documents are cut into passages (below) |
+| `refresh.onRecordChange` | Sync from record events (default `true`); `false` leaves the index to an external indexer |
+| `aiExposed` | May `search_knowledge` expose it (default `true`) |
 
-| `source.kind` | Fields | Hygiene |
-|:--------------|:-------|:--------|
-| `object` | `object`, `contentFields[]` (min 1; `*` = every readable text field), `metadataFields?`, `where?` (ObjectQL `where` syntax), `split?` (below) | `where` keeps drafts and archived rows out of the index; `contentFields` takes meaningful text only (never system fields or ids, `*` sparingly); project what you will filter on at query time (`status`, `owner_id`, `tags`) into `metadataFields` |
-| `file` | `prefix` (storage prefix, e.g. `kb/handbooks/`), `mimeTypes?` | narrow the prefix instead of indexing a whole bucket |
-| `http` | `urls[]`, `userAgent?` | enumerate URLs explicitly — there is no crawler |
+Retired in 19, each refused with its fix: `id` (use `name`), `contentFields`
+(use `content`, listing the fields a `'*'` stood for), `embedding` (the
+deployment configures one embedder), `vectorStore` (the store is `adapter`),
+`adapterConfig` (an adapter takes plugin options), `refresh.cron` (call
+`reindexSource` from a flow or job), and `source.kind: 'file'` / `'http'` with
+`prefix`, `mimeTypes`, `urls`, `userAgent` (no form in 19). `os migrate meta
+--from 18` lists a stack's edits; edit a registration in code by hand.
 
 <!-- os:check -->
 ```typescript
@@ -270,25 +277,23 @@ import { KnowledgeSourceSchema, type KnowledgeSource } from '@objectstack/spec/a
 export const supportKb: KnowledgeSource = KnowledgeSourceSchema.parse({
   name: 'support_kb',
   label: 'Support Knowledge Base',
-  adapter: 'pgvector',
-  source: {
+  source: {                    // no adapter: the deployment's store
     kind: 'object',
     object: 'kb_article',
-    content: ['title', 'body'],             // joined into document content
-    metadataFields: ['category', 'owner_id'], // projected for search-time filtering
-    where: { published: true },             // index published articles only
+    content: ['title', 'body'],
+    metadataFields: ['category', 'owner_id'],
+    where: { published: true },
   },
-  refresh: { onRecordChange: true },        // re-index on record.* events
 });
 ```
 
-**Splitting (`split`, object sources only).** The knowledge service cuts each
-document into passages for an adapter declaring `capabilities.chunks`
-(`memory`, `pgvector`, `turso`). Any other adapter receives whole documents;
-`split` has no effect on it. `split: { strategy, maxChars?, minChars? }`:
+**Splitting (`split`).** The knowledge service cuts each document into passages
+for a store declaring `capabilities.chunks`; any other store receives whole
+documents. `split: { strategy, maxChars?, minChars? }` — `strategy` is required
+once `split` is written; an omitted `split` means `recursive`:
 
-- `recursive` (default): cuts at blank lines, then line breaks, then sentence
-  ends. For prose.
+- `recursive`: cuts at blank lines, then line breaks, then sentence ends. For
+  prose.
 - `markdown`: one section per heading, each passage embedded with its heading
   path. For documents with headings.
 - `whole`: one passage per document. For short records only: a document over
@@ -305,8 +310,8 @@ Retired and refused: the `knowledge.chunk_overlap` setting (`400 UNKNOWN_KEY`;
 passages never overlap) and `KnowledgeChunk.metadata` (parse error; a passage
 takes its document's `metadata`).
 
-Top-K, score thresholds and rerankers are not source metadata: they belong to
-the adapter or application code.
+`topK` is a `search_knowledge` argument; rerank and hybrid weights are options
+of the store's plugin. Neither is source metadata.
 
 ---
 

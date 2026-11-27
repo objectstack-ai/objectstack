@@ -450,7 +450,22 @@ export const CEILINGS = new Map([
   // 6791 -> 6609: the section that taught an authored AI button on a record
   // page is replaced by one sentence (ADR-0160 D6, "Entry point": the shell's
   // entry is the only one); the row follows the measurement down.
-  ['skills/objectstack-ai/SKILL.md', 6609], //          -18 (was 6824), then -5 A2′ (was 6806)
+  // 6609 -> 6639 (2026-11-27, the ADR-0161 K6 item 6 skills follow-up): § Knowledge
+  // Sources teaches the `knowledge_source` item (`name`, an explicit `content`
+  // list with `'*'` refused, the optional `adapter`, the item that mounts the
+  // service), egress and cost with the save-time permission and admission, the
+  // retired keys with their fixes, and `split.strategy` as required. Raise path
+  // the standing ruling 「A:先削重复,余额按实测提高」 (ruling record 6513306068,
+  // letter B). PAID DOWN FIRST: the wiring paragraph's package list, the old key
+  // table's `source.kind` Hygiene column (folded into the `content` and `where`
+  // rows), the example's four comments restating those rows and its
+  // `refresh: { onRecordChange: true }` line restating the default, and the
+  // split passage's adapter-list aside. Arithmetic in priced bytes (stamp line
+  // excluded), against `main`'s 26435 (headroom 0): the file is 26462 -> 26581
+  // bytes, so the LANDED priced text is 26554 -> ceil(26554 / 4) = 6639; the row
+  // moves +30, the measured remainder only. Pinned AT the measurement.
+  //   ceil(($(wc -c < skills/objectstack-ai/SKILL.md) - 27) / 4) == ceil(26554 / 4)
+  ['skills/objectstack-ai/SKILL.md', 6639], //          -18 (was 6824), then -5 A2′ (was 6806)
   // -12 (was 6331): the `http.server` decision-table row dropped a trailing
   // clause that taught `contributes.routes` as a key that "parses but serves
   // nothing". The key is retired — an authored entry is now REFUSED, carrying
