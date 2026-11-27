@@ -44,6 +44,7 @@
  */
 
 import { describe, it, expect, vi } from 'vitest';
+import { BUILTIN_OPERATION_MESSAGES } from '@objectstack/spec/system';
 import '@objectstack/metadata';
 
 import { HttpDispatcher } from '../http-dispatcher.js';
@@ -578,4 +579,31 @@ describe('#13953 — the run-lifecycle doors require the platform operator', () 
             expect(payloadOf(a.response).notice).not.toBe(payloadOf(b.response).notice);
         });
     });
+});
+
+// [#37811] This door's 501 sentence is the operation-message catalog's, in the
+// request's top `Accept-Language` tag: byte-identical English with no header,
+// the catalog's Japanese under `ja-JP`, and `Vary: Accept-Language` either way.
+const JA_37811 = { request: { headers: { 'accept-language': 'ja-JP,ja;q=0.9' } } };
+const LANGS_37811 = [['en', {}], ['ja-JP', JA_37811]] as const;
+const sentence37811 = (locale: 'en' | 'ja-JP', key: string, params: Record<string, string> = {}): string =>
+    BUILTIN_OPERATION_MESSAGES[locale][key].replace(/\{\{(\w+)\}\}/g, (_m, name: string) => params[name] ?? '');
+const vary37811 = (response: unknown): unknown => (response as any)?.headers?.Vary;
+
+describe('[#37811] the absent-member 501s follow the request\'s language', () => {
+    for (const [path, options, key] of [
+        [CANCEL_PATH, { cancel: 'absent' }, 'automation_run_cancel_unsupported'],
+        [RESTORE_PATH, { restore: 'absent' }, 'automation_run_restore_unsupported'],
+    ] as const) {
+        it(key, async () => {
+            for (const [locale, extra] of LANGS_37811) {
+                const { response } = await makeDispatcher(options as HarnessOptions).dispatcher.handleAutomation(
+                    path, 'POST', undefined, { ...OPERATOR_CTX(), ...extra } as HttpProtocolContext, undefined,
+                );
+                expect(statusOf(response)).toBe(501);
+                expect(messageOf(response)).toBe(sentence37811(locale, key));
+                expect(vary37811(response)).toBe('Accept-Language');
+            }
+        });
+    }
 });

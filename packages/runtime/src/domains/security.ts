@@ -42,6 +42,7 @@ import type { DomainHandlerDeps, DomainRoute } from '../domain-handler-registry.
 import { readDispatchedBody } from '../deferred-request-body.js';
 // [#23214] The repo's one sentence for a repeated single-valued parameter.
 import { repeatedQueryParamMessage } from '@objectstack/rest';
+import { catalogNotImplemented } from './own-door-bridge.js';
 
 export function createSecurityDomain(deps: DomainHandlerDeps): DomainRoute {
     return {
@@ -200,14 +201,7 @@ export async function handleSecurityRequest(
             // door is answered as such, never as a 404 on a mounted route.
             if (parts[2] === 'reopen') {
                 if (typeof service.reopenAudienceBindingSuggestion !== 'function') {
-                    return {
-                        handled: true,
-                        response: deps.error(
-                            'This deployment\'s security service does not implement re-opening a dismissed ' +
-                            'audience-binding suggestion, so the dismissal stands.',
-                            501,
-                        ),
-                    };
+                    return catalogNotImplemented(deps, context, 'security_audience_reopen_unsupported');
                 }
                 const result = await service.reopenAudienceBindingSuggestion(ec, id);
                 return { handled: true, response: deps.success(result) };

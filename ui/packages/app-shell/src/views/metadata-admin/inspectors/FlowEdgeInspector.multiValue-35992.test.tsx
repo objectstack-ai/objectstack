@@ -67,13 +67,13 @@ function renderEdge(draft: Record<string, unknown>) {
 
 describe('edge rows on a multiple: true column (objectstack#35992)', () => {
   it('a membership guard on it opens as one row', () => {
-    renderEdge(draftWith("record.attendees != null && 'u1' in record.attendees"));
+    renderEdge(draftWith("has(record.attendees) && record.attendees != null && 'u1' in record.attendees"));
     expect(screen.getByTestId('flow-edge-condition-rows')).toHaveTextContent('1 condition');
     expect(screen.queryByPlaceholderText(/CEL expression/)).toBeNull();
   });
 
   it('its operator dropdown offers membership and the empty checks only', async () => {
-    renderEdge(draftWith("record.attendees != null && 'u1' in record.attendees"));
+    renderEdge(draftWith("has(record.attendees) && record.attendees != null && 'u1' in record.attendees"));
     fireEvent.click(screen.getByTestId('flow-edge-condition-rows'));
     // The builder's row inside the popover: field (0), operator (1).
     const triggers = within(await screen.findByRole('dialog')).getAllByRole('combobox');

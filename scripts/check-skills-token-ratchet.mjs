@@ -439,9 +439,11 @@ export const CEILINGS = new Map([
   // CEILING_BASIS.strippedInternalIds. `(was N)` is the ceiling this replaced.
   // Every SKILL.md row was later lowered by exactly 5 when its release-stamp
   // line left the count (A2′, see STAMP_LINE_REPIN) — its headroom did not move.
-  // -1 to the measurement (was 6801, card #37304): the `supportKb` example's
-  // two renamed keys add two bytes and its comment gives back six.
-  ['skills/objectstack-ai/SKILL.md', 6800], //          -18 (was 6824), then -5 A2′ (was 6806)
+  // 6801 -> 6800: pitfall 2 no longer says Modify All grants a field edit (19: View All and
+  // Modify All cast no field vote). 27230 -> 27225 bytes; the row follows the measurement down.
+  // 6800 -> 6799 (card #37304): the `supportKb` example's two renamed keys add
+  // two bytes and its comment gives back six; the row follows the measurement down.
+  ['skills/objectstack-ai/SKILL.md', 6799], //          -18 (was 6824), then -5 A2′ (was 6806)
   // -12 (was 6331): the `http.server` decision-table row dropped a trailing
   // clause that taught `contributes.routes` as a key that "parses but serves
   // nothing". The key is retired — an authored entry is now REFUSED, carrying
@@ -1291,7 +1293,10 @@ export const CEILINGS = new Map([
   // the summary field and the permission set as JSON; the commented-out alternatives
   // became a sentence and a second field entry. 16884 -> 16811 bytes.
   //   ceil($(wc -c < skills/objectstack-data/rules/relationships.md) / 4) == ceil(16811 / 4)
-  ['skills/objectstack-data/rules/relationships.md', 4201], // -2 to the measurement (was 4203)
+  // 4201 -> 4181: the roll-up visibility paragraph no longer asks to remove Modify All before
+  // masking a summary (19: it overrides no mask). 16801 -> 16723 bytes.
+  //   ceil($(wc -c < skills/objectstack-data/rules/relationships.md) / 4) == ceil(16723 / 4)
+  ['skills/objectstack-data/rules/relationships.md', 4181], // -2 to the measurement (was 4203)
   // NEW FILE (#14296 item 1 = A, condition (b)): the entry's Security & Access
   // Control block moved here whole. Pinned at its landed count — no headroom,
   // because a split that arrives with budget is a raise wearing a new path.
@@ -1436,7 +1441,10 @@ export const CEILINGS = new Map([
   // The bullet adds 248 bytes, the cut removes 59: 17168 -> 17357 bytes -> 4340 tokens,
   // headroom 0 before, ceiling +48, the measured remainder only, pinned AT the measurement.
   //   ceil($(wc -c < skills/objectstack-data/rules/security.md) / 4) == ceil(17357 / 4)
-  ['skills/objectstack-data/rules/security.md', 4340],
+  // 4340 -> 4334: the `requiredPermissions` sentence no longer lists View All and Modify All
+  // beside the field votes it beats (19: they cast none). 17357 -> 17335 bytes.
+  //   ceil($(wc -c < skills/objectstack-data/rules/security.md) / 4) == ceil(17335 / 4)
+  ['skills/objectstack-data/rules/security.md', 4334],
   // 3024 -> 3109 (2026-08-31 app-repo-principles raise, see the block above).
   // Severity Levels listed the three values and left the CHOICE unstated: a
   // block rests on a judgement a person made, so a machine-inferred signal — a

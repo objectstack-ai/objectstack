@@ -201,6 +201,7 @@ import { getMetadataTypeRedactor } from '@objectstack/spec/kernel';
 // the spec's one reference arbiter: never a second parser.
 import { analyzeRelationshipTraversals } from '@objectstack/formula';
 import { referenceTargetOf } from '@objectstack/spec/data';
+import { catalogNotImplemented } from './own-door-bridge.js';
 
 /**
  * [#13598] The `protocol` service slot **as this domain reaches it** — one
@@ -3730,7 +3731,7 @@ export async function handlePackagesRequest(deps: DomainHandlerDeps, path: strin
                     return { handled: true, response: deps.errorFromThrown(e, 500) };
                 }
             }
-            return { handled: true, response: deps.error('Draft publishing not supported', 501) };
+            return catalogNotImplemented(deps, _context, 'packages_draft_publish_unsupported');
         }
 
         // POST /packages/:id/discard-drafts → drop every pending DRAFT bound
@@ -3775,7 +3776,7 @@ export async function handlePackagesRequest(deps: DomainHandlerDeps, path: strin
                     return { handled: true, response: deps.errorFromThrown(e, 500) };
                 }
             }
-            return { handled: true, response: deps.error('Draft discarding not supported', 501) };
+            return catalogNotImplemented(deps, _context, 'packages_draft_discard_unsupported');
         }
 
         // ── ADR-0067: package-scoped commit history & rollback ──────────
@@ -3803,7 +3804,7 @@ export async function handlePackagesRequest(deps: DomainHandlerDeps, path: strin
                     return { handled: true, response: deps.errorFromThrown(e, 500) };
                 }
             }
-            return { handled: true, response: deps.error('Commit history not supported', 501) };
+            return catalogNotImplemented(deps, _context, 'packages_commit_history_unsupported');
         }
 
         // POST /packages/:id/commits/:commitId/revert → revert ONE commit
@@ -3850,7 +3851,7 @@ export async function handlePackagesRequest(deps: DomainHandlerDeps, path: strin
                     return { handled: true, response: deps.errorFromThrown(e, 500) };
                 }
             }
-            return { handled: true, response: deps.error('Commit revert not supported', 501) };
+            return catalogNotImplemented(deps, _context, 'packages_commit_revert_unsupported');
         }
 
         // POST /packages/:id/rollback  body { commitId } → roll the package
@@ -3889,7 +3890,7 @@ export async function handlePackagesRequest(deps: DomainHandlerDeps, path: strin
                     return { handled: true, response: deps.errorFromThrown(e, 500) };
                 }
             }
-            return { handled: true, response: deps.error('Commit rollback not supported', 501) };
+            return catalogNotImplemented(deps, _context, 'packages_commit_rollback_unsupported');
         }
 
         // POST /packages/:id/revert → revert package to last published state
@@ -4050,7 +4051,7 @@ export async function handlePackagesRequest(deps: DomainHandlerDeps, path: strin
             const readOnly = requireWritablePackage(deps, qlService, id, 'adopt items into'); if (readOnly) return readOnly;
             const protocol = await resolveProtocol(deps, _context);
             if (!protocol || typeof protocol.reassignOrphanedMetadata !== 'function') {
-                return { handled: true, response: deps.error('Orphan adoption not supported', 501) };
+                return catalogNotImplemented(deps, _context, 'packages_orphan_adoption_unsupported');
             }
             try {
                 const actor = resolvePackageWriteActor(_context);
@@ -4095,7 +4096,7 @@ export async function handlePackagesRequest(deps: DomainHandlerDeps, path: strin
             const queryRefused = refusePackageWriteDoorQuery(deps, query, PACKAGE_WRITE_NO_QUERY_PARAMS); if (queryRefused) return queryRefused;
             const protocol = await resolveProtocol(deps, _context);
             if (!protocol || typeof protocol.duplicatePackage !== 'function') {
-                return { handled: true, response: deps.error('Package duplication not supported', 501) };
+                return catalogNotImplemented(deps, _context, 'packages_duplication_unsupported');
             }
             const targetPackageId = typeof body?.targetPackageId === 'string' ? body.targetPackageId.trim() : '';
             if (!targetPackageId) {
@@ -4170,7 +4171,7 @@ export async function handlePackagesRequest(deps: DomainHandlerDeps, path: strin
             }
             const protocol = await resolveProtocol(deps, _context);
             if (!protocol || typeof protocol.ensureCustomizationPackage !== 'function') {
-                return { handled: true, response: deps.error('Customization package ensure not supported', 501) };
+                return catalogNotImplemented(deps, _context, 'packages_customization_ensure_unsupported');
             }
             try {
                 const result = await protocol.ensureCustomizationPackage({ basePackageId: id });

@@ -111,7 +111,10 @@ describe('settings `visible` — declaration ⇄ evaluator', () => {
     // model list and its own Test connection, each with one predicate; the
     // existing per-provider predicates kept their count, now read as "the
     // default provider or turned on".
-    expect(predicates).toHaveLength(110);
+    // 110 -> 106 at #37104: `knowledge.adapter` itself was retired (nothing read
+    // it), so the four predicates over it went too: the `turso` group and its
+    // two keys now always show, and `over_fetch` was retired with its own.
+    expect(predicates).toHaveLength(106);
   });
 
   it('every bundled predicate is accepted by BOTH sides', () => {

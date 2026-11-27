@@ -13,6 +13,9 @@
 // (`connector-credential-door.test.ts`).
 
 import { describe, it, expect, vi } from 'vitest';
+// [#37811] Paid at collection: the dispatcher's reach loads `@objectstack/metadata` (check:test-source-alias).
+import '@objectstack/metadata';
+import { BUILTIN_OPERATION_MESSAGES } from '@objectstack/spec/system';
 
 import { HttpDispatcher } from '../http-dispatcher.js';
 import type { HttpProtocolContext } from '../http-dispatcher.js';
@@ -233,6 +236,34 @@ describe('[#27237] connector credential door — what it accepts', () => {
             const { response } = await call();
             expect(statusOf(response)).toBe(501);
             expect(codeOf(response)).toBe('NOT_IMPLEMENTED');
+        }
+    });
+});
+
+// [#37811] This door's 501 sentence is the operation-message catalog's, in the
+// request's top `Accept-Language` tag: byte-identical English with no header,
+// the catalog's Japanese under `ja-JP`, and `Vary: Accept-Language` either way.
+const JA_37811 = { request: { headers: { 'accept-language': 'ja-JP,ja;q=0.9' } } };
+const LANGS_37811 = [['en', {}], ['ja-JP', JA_37811]] as const;
+const sentence37811 = (locale: 'en' | 'ja-JP', key: string, params: Record<string, string> = {}): string =>
+    BUILTIN_OPERATION_MESSAGES[locale][key].replace(/\{\{(\w+)\}\}/g, (_m, name: string) => params[name] ?? '');
+const vary37811 = (response: unknown): unknown => (response as any)?.headers?.Vary;
+
+describe('[#37811] the absent-member 501 follows the request\'s language and names the member', () => {
+    it('automation_connector_credentials_unsupported, on the list, set and clear legs', async () => {
+        const h = boot({ service: { handlerReady: true } });
+        for (const [locale, extra] of LANGS_37811) {
+            const ctx = { ...ADMIN(), ...extra } as HttpProtocolContext;
+            for (const [call, member] of [
+                [() => get(h, ctx), 'listConnectorCredentialRefs'],
+                [() => put(h, ctx, { value: DUMMY_VALUE }), 'setConnectorCredential'],
+                [() => del(h, ctx), 'clearConnectorCredential'],
+            ] as const) {
+                const { response } = await call();
+                expect(statusOf(response)).toBe(501);
+                expect(messageOf(response)).toBe(sentence37811(locale, 'automation_connector_credentials_unsupported', { member }));
+                expect(vary37811(response)).toBe('Accept-Language');
+            }
         }
     });
 });
