@@ -1461,7 +1461,11 @@ export const SPEC_MIGRATION_ENTRY_ROOTS = Object.freeze([
  * pin spells, so a type that joins the pin without a row here reds it. Field's history, measured at a73edb3c: over the
  * month to that commit, 48 first-parent commits on main touched `field.zod.ts` and 9 changed the key set (each moved the
  * driver-sql table, which pins the set both ways); replayed over all 48, the reader fires on exactly those 9. A path
- * match would have named the suites 48 times for those 9.
+ * match would have named the suites 48 times for those 9. All fourteen, measured at 02ed8408: 69 first-parent commits
+ * on main since 2026-11-16 touched a declaring file here (68 replayed; the oldest one's parent lies past the clone's
+ * depth), and the reader fired the served pin on exactly the 12 that moved a count the metadata-protocol test spells
+ * (skill, field five times, object twice, action twice, flow, hook), on no other; a path match would have named that
+ * test 68 times for those 12.
  */
 export const SERVED_KEY_SET_DECLARATIONS = Object.freeze([
   Object.freeze({ type: 'action', path: 'packages/spec/src/ui/action.zod.ts', declares: 'actionObject', call: 'strictObject', argument: 1 }),
