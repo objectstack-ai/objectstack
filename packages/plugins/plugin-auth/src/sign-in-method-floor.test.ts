@@ -71,6 +71,8 @@
  */
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+// Paid during collection, not inside a clocked case: the auth manager loads it lazily.
+import '@objectstack/core/egress';
 import { ObjectKernel, resetCloudManagedForTesting, type Plugin, type PluginContext } from '@objectstack/core';
 import type { IHttpRequest, IHttpResponse, IHttpServer, RouteHandler } from '@objectstack/spec/contracts';
 import {
