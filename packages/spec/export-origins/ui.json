@@ -52,6 +52,7 @@
     "AddRecordConfigParsed": "src/ui/view.zod.ts#AddRecordConfigParsed (type)",
     "AddRecordConfigSchema": "src/ui/view.zod.ts#AddRecordConfigSchema (const)",
     "AiChatNavParams": "src/ui/ai-chat-nav-params.zod.ts#AiChatNavParams (type)",
+    "AiChatNavParamsParsed": "src/ui/ai-chat-nav-params.zod.ts#AiChatNavParamsParsed (type)",
     "AiChatNavParamsSchema": "src/ui/ai-chat-nav-params.zod.ts#AiChatNavParamsSchema (const)",
     "AnonymousFormIntakeCandidate": "src/ui/anonymous-form-intake.ts#AnonymousFormIntakeCandidate (interface)",
     "App": "src/ui/app.zod.ts#App (type)",

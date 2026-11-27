@@ -54,6 +54,7 @@
     "AddRecordConfigParsed (type)",
     "AddRecordConfigSchema (const)",
     "AiChatNavParams (type)",
+    "AiChatNavParamsParsed (type)",
     "AiChatNavParamsSchema (const)",
     "AnonymousFormIntakeCandidate (interface)",
     "App (const)",

@@ -27,4 +27,4 @@ An app puts the AI inquiry home page on its menu as a component entry with `comp
 - Every other `componentRef` keeps its open `params` record, unchanged.
 - The console sidebar links an `ai:chat` entry to `/apps/<app>/component/ai/chat` with no querystring: the page reads the copy off the entry, not the URL. Other component entries still carry their `params` as querystring. `@object-ui/types`' app validator chains both new spec checks.
 
-New exports from `@objectstack/spec/ui`: `AiChatNavParamsSchema`, `AiChatNavParams`, `AI_CHAT_COMPONENT_REF`, `checkAiChatNavParams`, `checkAppSingleAiChatEntry`. The console page that reads these keys ships separately; until then an `ai:chat` entry opens the console's "component not registered" notice, as it did before.
+New exports from `@objectstack/spec/ui`: `AiChatNavParamsSchema`, `AiChatNavParams` (author state), `AiChatNavParamsParsed`, `AI_CHAT_COMPONENT_REF`, `checkAiChatNavParams`, `checkAppSingleAiChatEntry`. The console page that reads these keys ships separately; until then an `ai:chat` entry opens the console's "component not registered" notice, as it did before.

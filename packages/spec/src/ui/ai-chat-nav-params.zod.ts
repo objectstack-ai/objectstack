@@ -82,7 +82,8 @@ export const AiChatNavParamsSchema = lazySchema(() => strictObject(
   },
 ).describe('Params of an `ai:chat` navigation entry: the copy the AI inquiry home page draws before the first question.'));
 
-export type AiChatNavParams = z.infer<typeof AiChatNavParamsSchema>;
+export type AiChatNavParams = z.input<typeof AiChatNavParamsSchema>;
+export type AiChatNavParamsParsed = z.infer<typeof AiChatNavParamsSchema>;
 
 /**
  * Judge an `ai:chat` component entry's `params` against
