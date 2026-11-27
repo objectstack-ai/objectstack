@@ -1661,7 +1661,21 @@ const en = {
       typeLabel: 'View type',
       includeCurrent: 'Include the current filters and sort',
       scopeShared: 'Shared',
-      scopeHint: 'Shared views are seen by everyone who can see this list',
+      scopeHint: 'Shared views are seen by everyone who can see this list, unless the view is limited to the holders of a capability',
+      // objectstack#34908 — who a shared view reaches: the capability picker and its position preview.
+      audienceLabel: 'Who sees this view',
+      audienceEveryone: 'Everyone who can see this list',
+      audienceAdd: 'Limit to a capability…',
+      audienceAllAdded: 'All capabilities added',
+      audienceLoading: 'Loading capabilities…',
+      audienceLoadFailed: 'The capabilities could not be loaded, so none can be added: {{message}}',
+      audienceNone: 'No capability is defined yet. Capabilities are granted on permission sets, in Setup.',
+      audienceGrantedBy: 'Granted by {{sets}}',
+      audienceRemove: 'Remove {{name}}',
+      audiencePositions: '{{positions}} will see this view',
+      audienceNoPosition: 'No single position holds every picked capability: only people who hold all of them, directly or through several positions, will see this view',
+      audienceSelf: 'This applies to you too: if you do not hold every capability picked, the view leaves your own list once it is created',
+      audiencePositionsUnread: 'The positions could not be read, so who will see this view is not shown',
       // objectstack#36409 — a shared view's name already taken, and a view that is gone.
       shareNameTaken: 'An unpublished draft already uses this view’s name, so nothing was shared. Give the view another name and try again.',
       viewGone: 'The view you opened is no longer available, so the list shows its default view.',
@@ -3069,6 +3083,8 @@ const en = {
       // ui ADR-0057 Amendment A4 — the app's AI inquiry page: its static scope badge.
       askPage: {
         scopeBadge: 'Answers prefer this app',
+        recentTitle: 'Recent conversations',
+        recentEmpty: 'Questions you ask here will appear here.',
       },
       renameConversation: 'Rename conversation',
       deleteConversation: 'Delete conversation',
@@ -3749,6 +3765,10 @@ const en = {
         twoFactorTooManyAttempts: 'Too many incorrect codes. Sign in with your password again.',
         twoFactorExpired: 'This sign-in has expired. Sign in with your password again.',
         twoFactorLocked: 'Too many failed attempts. Your account is temporarily locked. Try again later.',
+        // objectstack#34171 — a cloud-managed runtime's 409 `RESOURCE_CONFLICT` on the
+        // password doors (`signInRefusalMessages`, `passwordDoorRefusalMessages`).
+        managedPasswordSignIn: "This deployment signs you in through its identity provider, so a password can't be used here. Use the identity provider's button above to sign in.",
+        managedPasswordReset: "This deployment signs you in through its identity provider, so no password is set or reset here. Sign in with the identity provider's button on the sign-in page.",
       },
     },
     register: {
@@ -4230,6 +4250,7 @@ const en = {
         report: 'Reports',
         page: 'Pages',
         url: 'Link',
+        aiChat: 'AI inquiry',
       },
       linkLabel: 'Label',
       linkUrl: 'URL',
@@ -4255,6 +4276,17 @@ const en = {
       creating: 'Creating…',
       newItemPendingDraft: 'A draft with this name is already pending. Try again.',
       newItemLeft: 'The new dashboard "{{name}}" could not be removed again; remove it in Studio.',
+      aiChatName: 'Ask AI',
+      aiChatDefaults: 'Leave a field empty to show the page\'s default.',
+      aiChatTitle: 'Heading',
+      aiChatSubtitle: 'Subtitle',
+      aiChatPlaceholder: 'Question box hint',
+      aiChatSuggestions: 'Suggested questions',
+      aiChatSuggestionsHint: 'One per line, at most 4.',
+      aiChatTooLong: 'At most {{max}} characters.',
+      aiChatTooMany: 'At most {{max}} questions.',
+      aiChatEdit: 'Edit inquiry page',
+      setAsHome: 'Set as home',
     },
     pins: {
       button: 'Header buttons',
@@ -5485,6 +5517,19 @@ const en = {
     },
     recordCitations: {
       title: 'Cited from records',
+    },
+    // The question card the AI asks a clarifying question on, in the composer's place.
+    questionCard: {
+      aiAsks: 'AI asks:',
+      progress: 'Question {{current}} of {{total}}',
+      typeYourOwn: 'Type something else…',
+      recommended: 'Recommended',
+      skip: 'Skip',
+      back: 'Back',
+      next: 'Next',
+      send: 'Send',
+      pending: 'A question is waiting for your answer',
+      answerLine: '{{header}}: {{answer}}',
     },
     tool: {
       aggregate_data: 'Aggregate the data',

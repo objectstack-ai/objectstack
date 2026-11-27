@@ -42,6 +42,10 @@ import { AddWidgetPicker } from '../previews/AddWidgetPicker.js';
 import { WIDGET_TYPE_META, UnknownWidgetIcon } from '../previews/widget-types.js';
 import type { MetadataDefaultInspectorProps } from '../default-inspector-registry.js';
 import { SchemaForm } from '../SchemaForm.js';
+import type { WidgetContext } from '../widgets.js';
+import { conditionScopeForMetadataType } from '../conditionScope.js';
+import { useMetadataClient } from '../useMetadata.js';
+import { useCapabilityAudienceLoader } from '../useCapabilityAudienceLoader.js';
 import { fallbackFormPatch } from './fallbackFormPatch.js';
 import type { FormViewSpec } from '../SchemaForm.js';
 import { getDashboardForm, getDashboardSchema } from '../dashboard-schema.js';
@@ -187,6 +191,21 @@ export function DashboardDefaultInspector({
     return { schema: merged.schema, form: stackSectionsForNarrowPanel(merged.form) };
   }, [serverSchema, locale]);
 
+  // objectstack#34908 — the Access section's audience row is the
+  // `ref-multi:capability` picker; hand it the loader of the capability
+  // catalog and the positions preview, which it reads once the collapsed
+  // section is opened. This host handed down no `WidgetContext` before, so it
+  // now states the verdict the scope table rules for its type
+  // (`conditionScopeForMetadataType('dashboard')`) rather than inventing one;
+  // the dashboard form declares no `condition` row, so nothing renders
+  // differently for it.
+  const metadataClient = useMetadataClient();
+  const loadCapabilityAudience = useCapabilityAudienceLoader(metadataClient);
+  const widgetContext = React.useMemo<WidgetContext>(
+    () => ({ conditionScope: conditionScopeForMetadataType('dashboard'), loadCapabilityAudience }),
+    [loadCapabilityAudience],
+  );
+
   return (
     <InspectorShell
       kindLabel={tr('engine.inspector.dashboard.kind')}
@@ -316,6 +335,7 @@ export function DashboardDefaultInspector({
             value={draft}
             hiddenFields={['name', 'label', 'description', 'widgets']}
             readOnly={readOnly}
+            widgetContext={widgetContext}
             issues={issues}
             revealIssues={revealIssues}
             onInlineIssueFieldsChange={onInlineIssueFieldsChange}

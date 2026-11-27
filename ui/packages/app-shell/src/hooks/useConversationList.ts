@@ -38,6 +38,11 @@ export interface ConversationListItem {
   updatedAt?: string;
   /** Preview text derived from the most recent message, if available. */
   preview?: string;
+  /**
+   * `AiConversationSchema.metadata` (`@objectstack/spec/api`) as the list row
+   * carries it; absent when the row carries none or a value that is not a record.
+   */
+  metadata?: Record<string, unknown>;
 }
 
 export interface UseConversationListOptions {
@@ -65,6 +70,11 @@ interface ServerConversation {
   updatedAt?: string;
   preview?: unknown;
   messages?: Array<{ role: string; content: unknown }>;
+  metadata?: unknown;
+}
+
+function readMetadata(value: unknown): Record<string, unknown> | undefined {
+  return value && typeof value === 'object' && !Array.isArray(value) ? (value as Record<string, unknown>) : undefined;
 }
 
 const PLACEHOLDER_TITLES = new Set([
@@ -142,6 +152,7 @@ function normalize(row: ServerConversation): ConversationListItem {
     createdAt: row.createdAt,
     updatedAt: row.updatedAt,
     preview,
+    metadata: readMetadata(row.metadata),
   };
 }
 

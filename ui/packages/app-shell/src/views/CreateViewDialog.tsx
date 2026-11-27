@@ -52,6 +52,9 @@ import type { ListViewVisualization } from '@object-ui/core';
 import { slugify } from './metadata-admin/createDerive.js';
 import { romanizeHan, useHanRomanizer } from './metadata-admin/romanizeHan.js';
 import { datasetOptionLabel, useObjectDatasetBinding } from './studio-design/objectDatasets.js';
+import { usePickerLoad } from './metadata-admin/loadState.js';
+import type { CapabilityAudience } from './capabilityAudience.js';
+import { ViewAudiencePicker } from './ViewAudiencePicker.js';
 import {
   deriveFieldOptions,
   isImageLikeField,
@@ -1082,6 +1085,14 @@ export interface InPlaceViewRequest {
   scope: 'personal' | 'shared';
   /** Carry the list's unsaved filters and sort into the new view. */
   includeCurrent: boolean;
+  /**
+   * objectstack#34908 — a shared view's audience gate as the card's picker
+   * left it: the capabilities a reader must all hold (`[]` = no gate). Present
+   * only when the card offered the picker, and then it is authoritative over
+   * any gate the new view would otherwise inherit from the open one; absent,
+   * the host builds the body as before.
+   */
+  requiredPermissions?: string[];
 }
 
 export interface CreateViewCardProps {
@@ -1112,6 +1123,15 @@ export interface CreateViewCardProps {
   onCreate: (request: InPlaceViewRequest) => boolean | Promise<boolean>;
   /** Back to the view list. */
   onBack: () => void;
+  /**
+   * objectstack#34908 — read the audience catalog (the capabilities the
+   * environment knows, the permission sets granting each, the positions
+   * holding them). Given ⇒ the shared scope offers 「Who sees this view」;
+   * read once the reader picks Shared. Absent ⇒ no picker.
+   */
+  loadAudience?: () => Promise<CapabilityAudience>;
+  /** The open view's gate, the picker's starting value (the new view starts from the open one). */
+  initialRequiredPermissions?: readonly string[];
 }
 
 /**
@@ -1138,6 +1158,8 @@ export function CreateViewCard({
   shownFields,
   onCreate,
   onBack,
+  loadAudience,
+  initialRequiredPermissions,
 }: CreateViewCardProps) {
   const { t } = useObjectTranslation();
   const allTypes = useMemo(() => buildViewTypeMeta(t), [t]);
@@ -1159,6 +1181,12 @@ export function CreateViewCard({
   const [includeCurrent, setIncludeCurrent] = useState(true);
   const [scope, setScope] = useState<'personal' | 'shared'>(canCreatePersonal ? 'personal' : 'shared');
   const [submitting, setSubmitting] = useState(false);
+  const [requiredPermissions, setRequiredPermissions] = useState<string[]>(() => [...(initialRequiredPermissions ?? [])]);
+  const offersAudience = scope === 'shared' && !!loadAudience;
+  const audience = usePickerLoad<CapabilityAudience>(useMemo(
+    () => (offersAudience ? loadAudience! : null),
+    [offersAudience, loadAudience],
+  ));
   const submittingRef = useRef(false);
   const baseId = useId();
   // Loads the pinyin dictionary for a Chinese name, so the key reads as it.
@@ -1202,7 +1230,12 @@ export function CreateViewCard({
     submittingRef.current = true;
     setSubmitting(true);
     try {
-      await onCreate({ config, scope, includeCurrent: hasUnsavedConditions && includeCurrent });
+      await onCreate({
+        config,
+        scope,
+        includeCurrent: hasUnsavedConditions && includeCurrent,
+        ...(offersAudience ? { requiredPermissions } : {}),
+      });
     } finally {
       submittingRef.current = false;
       setSubmitting(false);
@@ -1335,8 +1368,13 @@ export function CreateViewCard({
         )}
         {scope === 'shared' && (
           <p className="text-xs text-muted-foreground" data-testid="create-view-card-shared-hint">
-            {t('view.switcher.scopeHint', { defaultValue: 'Shared views are seen by everyone who can see this list' })}
+            {t('view.switcher.scopeHint', {
+              defaultValue: 'Shared views are seen by everyone who can see this list, unless the view is limited to the holders of a capability',
+            })}
           </p>
+        )}
+        {offersAudience && (
+          <ViewAudiencePicker audience={audience} value={requiredPermissions} onChange={setRequiredPermissions} disabled={submitting} />
         )}
 
         <Button
