@@ -1659,6 +1659,10 @@ export const koMetadataForms: NonNullable<TranslationData['metadataForms']> = {
         label: "잠근 작업자",
         helpText: "뷰 구성을 잠근 사용자"
       },
+      requiredPermissions: {
+        label: "Required Permissions",
+        helpText: "Who sees this view: the capabilities a person must hold, every one listed. Permission sets grant capabilities, and a position passes on the ones its permission sets grant. Leave it empty and everyone who can see the list sees this view. To show it to several groups, pick one capability and grant it to each group's permission set. The server enforces it: anyone else does not find the view in the list and is refused if they open it directly. The gate applies to you too: list a capability you do not hold, or misspell one, and you can no longer open this view either."
+      },
       object: {
         label: "객체"
       }
@@ -1874,6 +1878,10 @@ export const koMetadataForms: NonNullable<TranslationData['metadataForms']> = {
         label: "필터",
         description: "위젯 전체에 적용되는 기본 필터와 전역 필터."
       },
+      access: {
+        label: "Access",
+        description: "Who can see this dashboard."
+      },
       advanced: {
         label: "고급",
         description: "접근성과 성능 조정."
@@ -2054,6 +2062,10 @@ export const koMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       },
       "globalFilters.targetWidgets": {
         label: "대상 위젯"
+      },
+      requiredPermissions: {
+        label: "Required Permissions",
+        helpText: "Who sees this dashboard: the capabilities a person must hold, every one listed. Permission sets grant capabilities, and a position passes on the ones its permission sets grant. Leave it empty and everyone sees this dashboard. To show it to several groups, pick one capability and grant it to each group's permission set. The server enforces it: anyone else does not find the dashboard in the list and is refused if they open it directly. The gate applies to you too: list a capability you do not hold, or misspell one, and you can no longer open this dashboard either."
       }
     }
   },
