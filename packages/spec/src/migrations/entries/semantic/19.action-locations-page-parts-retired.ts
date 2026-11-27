@@ -19,17 +19,17 @@ export const entry: SemanticMigration = {
     + 'the order and the buttons of an object\'s actions are its `actionLayout`',
   reason:
     'With the object\'s `actionLayout` deciding which actions are buttons and in what order, a location only '
-    + 'says what the action acts on. The D2 conversion `action-locations-acted-on` rewrites existing sources and '
-    + 'stored rows, and every action is drawn where it was drawn before. It leaves two sites as stored, each with '
-    + 'a TODO: an action in the ⋯ menu only that is on the list toolbar too (the fold would reach the toolbar), '
-    + 'and a block whose own `location` is `record_more` or an `action:group` at `record_header` with a ⋯-only '
+    + 'says what the action acts on. The D2 conversion `action-locations-acted-on` maps every old word to its new '
+    + 'one, in a source the migration edits and in a stored row it reads, and every action is drawn where it '
+    + 'was drawn before. It leaves three sites as stored, each with a TODO: an action in the ⋯ menu only that is on the list toolbar too (the fold would reach the toolbar), '
+    + 'a block whose own `location` is `record_more`, and an `action:group` at `record_header` with a ⋯-only '
     + 'member (the ⋯ menu has no location of its own now). Code is the other part no conversion reaches: a '
     + 'plugin or a hand-written component that compares a location to an old word no longer matches anything, '
     + 'silently',
   acceptanceCriteria:
     'No action, page row or page block names `list_toolbar`, `list_item`, `record_header` or `record_more`; '
-    + 'each is refused at parse with the word that replaced it. Every TODO `os migrate meta --from 18` reports is '
-    + 'rewritten by hand, and no plugin code compares a location to an old word.',
+    + 'each is refused at parse with the word that replaced it. Every TODO the migration reports is rewritten '
+    + 'by hand, and no plugin code compares a location to an old word.',
   conversionIds: ['action-locations-acted-on'],
   relevantWhen: { kind: 'stack-declares', keys: ['actions', 'objects', 'pages'] },
 };

@@ -101,6 +101,7 @@ import { FlowSchema } from '../automation/flow.zod';
 import { JobSchema } from '../system/job.zod';
 import { TranslationBundleSchema, TranslationItemSchema } from '../system/translation.zod';
 import { PROTOCOL_MAJOR } from '../kernel/protocol-version';
+import { ActionLocationSchema } from '../ui/action.zod';
 import { EmailTemplateDefinitionSchema } from '../system/email-template.zod';
 import {
   ActionButtonPropsSchema,
@@ -339,6 +340,11 @@ const JOIN: Readonly<Record<string, readonly Renderer[]>> = {
   // #35926: a relationship field's boolean `inlineEdit`, refused by the enum's own error map.
   // #37712: an agent's `model.provider`, tombstoned on the model block.
   'agent-model-provider-removed': [tombstone(AIModelConfigSchema, 'agent.model', 'provider')],
+  // objectstack#36495: a retired page-part location word is an enum VALUE, so
+  // what an author meets is the enum's refusal of it, which names the release.
+  'action-locations-acted-on': (['list_toolbar', 'list_item', 'record_header', 'record_more'] as const).map((word) =>
+    refusal(`action.locations ${word}`, () => ActionLocationSchema.safeParse(word)),
+  ),
   'field-inline-edit-boolean-removed': [
     refusal(
       'field.inlineEdit: true',

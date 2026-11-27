@@ -147,10 +147,23 @@ const RELATED_LIST_LOCATIONS: readonly ActionLocation[] = ACTION_LOCATIONS.filte
   (location) => RELATED_LIST_DRAWS[location] !== null,
 );
 
-/** `` `list` (a header button), … `` — for a hint. */
-const RELATED_LIST_PLACEMENTS = RELATED_LIST_LOCATIONS.map(
-  (location) => `\`${location}\` (${RELATED_LIST_DRAWS[location]})`,
-).join(', ');
+/**
+ * `` `list` (a header button), `record`, `record_row` or `record_related` (a
+ * row-menu item) `` — for a hint: locations that draw the same thing share
+ * one parenthesis, in the spec's own order, so the one-line fix stays short.
+ */
+const RELATED_LIST_PLACEMENTS = (() => {
+  const groups = new Map<string, ActionLocation[]>();
+  for (const location of RELATED_LIST_LOCATIONS) {
+    const draws = RELATED_LIST_DRAWS[location]!;
+    groups.set(draws, [...(groups.get(draws) ?? []), location]);
+  }
+  return [...groups].map(([draws, locations]) => {
+    const names = locations.map((l) => `\`${l}\``);
+    const list = names.length > 1 ? `${names.slice(0, -1).join(', ')} or ${names[names.length - 1]}` : names[0];
+    return `${list} (${draws})`;
+  }).join(', ');
+})();
 
 /**
  * The actions a related list resolves an id against, for each object this

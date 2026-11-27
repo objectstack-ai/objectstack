@@ -385,7 +385,8 @@ header's buttons and put it straight into the header's 「More」 (`⋯`) menu, 
 Protocol 19 replaced the page-part words: `list_toolbar` is `list`, `list_item` is
 `record_row`, `record_header` and `record_more` are `record_page` (`record` when the action
 was on list rows as well), and an action that was only in the `⋯` menu keeps that place with
-`component: 'action:menu'`. `os migrate meta --from 18` rewrites them for you.
+`component: 'action:menu'`. Run `os migrate meta --from 18` to list the mechanical edits for existing
+sources; `--write` applies the ones it can prove, and you apply the rest by hand.
 </Callout>
 
 ### Choose the header's buttons

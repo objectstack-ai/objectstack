@@ -142,7 +142,7 @@ Namespace `record`.
 | :--- | :--- | :--- | :--- |
 | `actionNames` | `array` of `string` |  | Action names to expose, in order — resolved from the actions declared on the object. With no names (and no host-supplied actions) nothing is looked up: the bar renders its empty placeholder on a design / preview surface and nothing at runtime |
 | `requiredPermissions` | `array` of `string` |  | [ADR-0066] Capabilities the user must ALL hold — names that permission sets grant through `systemPermissions`, not object actions: `read` or `update` here is an ordinary capability name, not the object's read or edit permission. When the client has resolved the user's capabilities and any of these is missing, this block does not render its content; wherever it would otherwise render, an insufficient-permissions notice takes its place. Presentation only: it authorises nothing, and the data API still serves the same data to the same user. A client that cannot resolve the user's capabilities (no permission provider, or one that does not report `systemPermissions`) renders this block as if they were held — it fails open. |
-| `location` | `enum`: `list`, `record_row`, `record`, `record_page`, `record_related`, `record_section` |  | Which declared action location this bar renders |
+| `location` | `enum`: `list`, `record`, `record_page`, `record_row`, `record_related`, `record_section` |  | Which declared action location this bar renders |
 | `align` | `enum`: `start`, `center`, `end` |  | — |
 | `inline` | `boolean` |  | Render in the flow instead of folding into the record header |
 | `variant` | `string` |  | Passed to the Button primitive; a per-action variant overrides it |

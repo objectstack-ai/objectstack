@@ -310,7 +310,7 @@ const ACTION_FIXTURES: readonly Fixture[] = [
       params: [{ field: 'amount' }], locations: ['record_row'],
     });
   },
-  (lang) => mountAction(lang, { name: 'a4', type: 'modal', variant: 'ghost', component: 'action:group', mode: 'custom', locations: ['record_page'], component: 'action:menu' }),
+  (lang) => mountAction(lang, { name: 'a4', type: 'modal', variant: 'ghost', component: 'action:group', mode: 'custom', locations: ['record_page'] }),
   (lang) => mountAction(lang, { name: 'a5', type: 'form', variant: 'link', locations: ['record_page'], component: 'action:menu' }),
   (lang) => mountAction(lang, { name: 'a6', type: 'url', locations: ['record_page'], component: 'action:menu' }),
   (lang) => mountAction(lang, { name: 'a7', type: 'script', body: { language: 'js' }, locations: ['record_page'], component: 'action:menu' }),

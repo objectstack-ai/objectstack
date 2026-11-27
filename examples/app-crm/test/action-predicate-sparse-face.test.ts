@@ -39,8 +39,8 @@ const source =
 
 describe('#8990 — crm_convert_lead visible on a sparse list row', () => {
 
-  it('reaches record_row, so the sparse binding is the real one', () => {
-    expect(ConvertLeadAction.locations).toContain('record_row');
+  it('reaches the list row (`record` covers `record_row`), so the sparse binding is the real one', () => {
+    expect(ConvertLeadAction.locations).toContain('record');
   });
 
   it('is has()-guarded on the column it reads', () => {

@@ -824,8 +824,8 @@ const PAGE_PART_LOCATIONS_RETIRED_TAIL =
   ' Protocol 19 names what an action acts on, not the part of the page it sits in: `list` (acts on '
   + 'no record), `record` (acts on one record: the record page and each list row), and the narrow '
   + 'words `record_page`, `record_row`, `record_related` and `record_section`. Which actions are '
-  + 'buttons and in what order is the object\'s `actionLayout`. `os migrate meta --from 18` rewrites '
-  + 'every location for you, keeping every action where it is drawn today.';
+  + 'buttons and in what order is the object\'s `actionLayout`. '
+  + 'Run `os migrate meta --from 18` to list the mechanical edits for existing sources; `--write` applies the ones it can prove, and you apply the rest by hand.';
 const PAGE_PART_LOCATIONS_RETIRED: Readonly<Record<string, string>> = {
   list_toolbar: '`list_toolbar` became `list` in @objectstack/spec 19: write `list`.'
     + PAGE_PART_LOCATIONS_RETIRED_TAIL,
