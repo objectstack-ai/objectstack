@@ -203,7 +203,9 @@ async function loadDatasourceRows(engine: DataEngineLike | undefined): Promise<A
       // driver factory reads since #4456. The direct sys_metadata read here
       // bypasses the metadata service's own converting loaders, so the pass
       // must happen locally.
-      out.push(applyConversionsToStoredItem(DS_META_TYPE, parsed));
+      const item = applyConversionsToStoredItem(DS_META_TYPE, parsed);
+      // The seam answers `undefined` for a row the chain yields no item of.
+      if (item !== undefined) out.push(item);
     } catch {
       /* skip corrupt row */
     }

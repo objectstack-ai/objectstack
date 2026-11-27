@@ -569,7 +569,6 @@ export const ShowcaseTranslationBundle = {
           showcase_bulk_reassign: { label: '重新分配…' },
           showcase_quick_view: { label: '快速查看' },
           showcase_log_time: { label: '记录工时' },
-          showcase_ask_about_task: { label: '问 AI' },
           showcase_new_task: { label: '新建任务' },
           showcase_archive_task: {
             label: '归档',

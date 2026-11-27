@@ -150,6 +150,17 @@ export interface ConversionContext {
    * conversion calls it optionally and leaves the site unchanged either way.
    */
   reportTodo?: (detail: ConversionTodoDetail) => void;
+  /**
+   * The pass reads metadata AT REST — a stored row, a stored flow, a built
+   * artifact — rather than an author's sources. `applyConversions` sets it
+   * exactly when it replays retired entries (`includeRetired`, which only the
+   * data-at-rest doors and the fixture CI pass); `os migrate meta`, which runs
+   * over sources, leaves it unset. A conversion whose rewrite of a source
+   * depends on what the author can still decide reads it: the retired
+   * `ask_ai` action type (`action-type-ask-ai-removed`, ADR-0160 D7) deletes
+   * from sources only an action nothing names, and at rest every one.
+   */
+  atRest?: boolean;
 }
 
 /**

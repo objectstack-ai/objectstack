@@ -26,7 +26,7 @@ describe('useAiSurfaceEnabled', () => {
   it('is enabled when the catalog serves at least one agent (cloud / agents present)', () => {
     mockAgents.mockReturnValue(agentsResult(['ask'], false));
     const { result } = renderHook(() => useAiSurfaceEnabled());
-    expect(result.current).toEqual({ enabled: true, isLoading: false, buildServed: false, focusServed: false });
+    expect(result.current).toEqual({ enabled: true, isLoading: false, buildServed: false });
   });
 
   it('reports loading on the first frame before the catalog fetch has started', () => {
@@ -34,13 +34,13 @@ describe('useAiSurfaceEnabled', () => {
     // yet", not "no agents", so the guard must keep waiting (not redirect).
     mockAgents.mockReturnValue(agentsResult([], false));
     const { result } = renderHook(() => useAiSurfaceEnabled());
-    expect(result.current).toEqual({ enabled: false, isLoading: true, buildServed: false, focusServed: false });
+    expect(result.current).toEqual({ enabled: false, isLoading: true, buildServed: false });
   });
 
   it('reports loading while the catalog fetch is in flight', () => {
     mockAgents.mockReturnValue(agentsResult([], true));
     const { result } = renderHook(() => useAiSurfaceEnabled());
-    expect(result.current).toEqual({ enabled: false, isLoading: true, buildServed: false, focusServed: false });
+    expect(result.current).toEqual({ enabled: false, isLoading: true, buildServed: false });
   });
 
   it('is disabled — not loading — once a fetch resolves empty (Community Edition: no agents)', () => {
@@ -53,7 +53,7 @@ describe('useAiSurfaceEnabled', () => {
 
     mockAgents.mockReturnValue(agentsResult([], false));
     rerender();
-    expect(result.current).toEqual({ enabled: false, isLoading: false, buildServed: false, focusServed: false });
+    expect(result.current).toEqual({ enabled: false, isLoading: false, buildServed: false });
   });
 });
 
@@ -71,18 +71,6 @@ describe('useAiSurfaceEnabled — buildServed reads the build agent itself (obje
   ])('%s in the catalog: building is served', (_served, names) => {
     mockAgents.mockReturnValue(agentsResult(names, false));
     const { result } = renderHook(() => useAiSurfaceEnabled());
-    expect(result.current).toEqual({ enabled: true, isLoading: false, buildServed: true, focusServed: false });
-  });
-});
-
-describe('useAiSurfaceEnabled — focusServed reads `capabilities.focus` (objectstack#37142)', () => {
-  it('is served only when an agent in the catalog advertises focus', () => {
-    mockAgents.mockReturnValue({
-      ...agentsResult([], false),
-      agents: [{ name: 'ask', label: 'ask', capabilities: { focus: true } }],
-    } as never);
-    expect(renderHook(() => useAiSurfaceEnabled()).result.current.focusServed).toBe(true);
-    mockAgents.mockReturnValue(agentsResult(['ask'], false));
-    expect(renderHook(() => useAiSurfaceEnabled()).result.current.focusServed).toBe(false);
+    expect(result.current).toEqual({ enabled: true, isLoading: false, buildServed: true });
   });
 });

@@ -37,7 +37,7 @@ import {
 } from '@object-ui/components';
 import { Edit, Trash2, MoreVertical } from 'lucide-react';
 import { evalRowPredicate, hasDeclaredPredicate, isActionSwitchedOff, type CrudAffordances } from '@object-ui/core';
-import { useObjectTranslation, useRowPredicate, useCapabilityGate, useDrawsAction, usePredicateScope } from '@object-ui/react';
+import { useObjectTranslation, useRowPredicate, useCapabilityGate, usePredicateScope } from '@object-ui/react';
 import { orderRowMenuActions } from '../rowActionArrangement';
 
 const ROW_ACTION_FALLBACKS: Record<string, string> = {
@@ -638,12 +638,9 @@ export function useRowActionPlan(
   // rendered. Unknown capabilities fail OPEN (see `useCapabilityGate`); the
   // server remains the authority.
   const mayInvoke = useCapabilityGate();
-  // [ADR-0160 D7] …and an `ask_ai` row action is absent where the provider has
-  // no in-app assistant.
-  const drawsAction = useDrawsAction();
   const gatedActionDefs = React.useMemo(
-    () => (rowActionDefs ?? []).filter(d => mayInvoke((d as any)?.requiredPermissions) && !isActionSwitchedOff(d) && drawsAction(d)),
-    [rowActionDefs, mayInvoke, drawsAction],
+    () => (rowActionDefs ?? []).filter(d => mayInvoke((d as any)?.requiredPermissions) && !isActionSwitchedOff(d)),
+    [rowActionDefs, mayInvoke],
   );
   // What this row will ACTUALLY render, per-record predicates applied — the
   // guard and the items read one visibility source, so they cannot disagree.

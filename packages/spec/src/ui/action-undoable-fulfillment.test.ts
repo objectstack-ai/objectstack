@@ -30,7 +30,6 @@ const shapeByType: Record<string, Record<string, unknown>> = {
   modal: { type: 'modal', target: 'lead_reassign_modal' },
   form: { type: 'form', target: 'lead_reassign_form' },
   api: { type: 'api', target: 'lead' },
-  ask_ai: { type: 'ask_ai' },
 };
 
 /** The two shapes some runtime fulfils — the closed accepted set. */

@@ -1038,6 +1038,21 @@ export class DatabaseLoader implements MetadataLoader {
    * open-namespace conflict guard; flows canonicalize at `registerFlow`.
    */
   private rowToData(row: Record<string, unknown>): Record<string, unknown> | null {
+    return this.convertRow(row, false);
+  }
+
+  /**
+   * The body a row's IDENTITY is read from (its name, its bundle member): the
+   * converted body, or the stored one where the conversion chain yields no item
+   * of the row (ADR-0160 D7 — a stored `ask_ai` action row). Such a row is
+   * served as nothing ({@link rowToData} answers `null`), and it must still be
+   * found by name, so the delete door can take it out.
+   */
+  private rowIdentityData(row: Record<string, unknown>): Record<string, unknown> | null {
+    return this.convertRow(row, true);
+  }
+
+  private convertRow(row: Record<string, unknown>, identity: boolean): Record<string, unknown> | null {
     if (!row || !row.metadata) return null;
 
     const payload = typeof row.metadata === 'string'
@@ -1046,7 +1061,7 @@ export class DatabaseLoader implements MetadataLoader {
 
     const singular = PLURAL_TO_SINGULAR[row.type as string] ?? (row.type as string);
     if (singular === 'flow') return payload as Record<string, unknown>;
-    return applyConversionsToStoredItem(singular, payload as Record<string, unknown>, {
+    const converted = applyConversionsToStoredItem(singular, payload as Record<string, unknown>, {
       onNotice: (n) => {
         const key = `${n.conversionId}|${singular}|${String(row.name ?? '')}`;
         if (this.storedConversionWarned.has(key)) return;
@@ -1056,6 +1071,8 @@ export class DatabaseLoader implements MetadataLoader {
         );
       },
     });
+    if (converted !== undefined) return converted;
+    return identity ? (payload as Record<string, unknown>) : null;
   }
 
   /**
@@ -1356,8 +1373,8 @@ export class DatabaseLoader implements MetadataLoader {
     // holds it once named (`namedRowColumnOf`): a row whose object the column
     // cannot store keeps the object-less binding's place.
     const memberOf = (of: Record<string, unknown>) => {
-      const column = namedRowColumnOf(type, this.rowToData(of), of.bundle_member);
-      return column !== undefined ? column : (storedRowMemberOf(type, this.rowToData(of), of.bundle_member) ?? null);
+      const column = namedRowColumnOf(type, this.rowIdentityData(of), of.bundle_member);
+      return column !== undefined ? column : (storedRowMemberOf(type, this.rowIdentityData(of), of.bundle_member) ?? null);
     };
     const target = memberOf(row);
     const ofPackage = rows.filter((other) => other !== row && other.package_id === read.packageId);
@@ -1366,8 +1383,8 @@ export class DatabaseLoader implements MetadataLoader {
     // written before their object was named are named first, and this row's
     // object is named in the same update — otherwise two of the package's
     // bindings would share the object-less place of the unique key.
-    const owned = namedRowColumnOf(type, this.rowToData(row), row.bundle_member) !== undefined;
-    if (owned) await this.nameUnnamedRows(type, name, unnamedRowsOf(type, ofPackage, (of) => this.rowToData(of)));
+    const owned = namedRowColumnOf(type, this.rowIdentityData(row), row.bundle_member) !== undefined;
+    if (owned) await this.nameUnnamedRows(type, name, unnamedRowsOf(type, ofPackage, (of) => this.rowIdentityData(of)));
     const naming = owned && typeof target === 'string' && row.bundle_member !== target ? { bundle_member: target } : {};
     await this._update(this.tableName, read.id, { package_id: read.packageId, ...naming });
     // [#37039] The handed-out body answers the column as this update left it, not as the
@@ -1915,7 +1932,7 @@ export class DatabaseLoader implements MetadataLoader {
     const rowsOfName = slot && member !== undefined ? slot.rows : [];
     const existing = member === undefined
       ? (slot ? slot.rows[0] ?? null : await this._findOne(this.tableName, { where: this.baseFilter(type, name) }))
-      : rowsOfName.find((row) => (storedRowMemberOf(type, this.rowToData(row), row.bundle_member) ?? null) === member) ?? null;
+      : rowsOfName.find((row) => (storedRowMemberOf(type, this.rowIdentityData(row), row.bundle_member) ?? null) === member) ?? null;
     // [#32540 C9] The restored body may be bound to an object the slot holds no
     // row of (a row written before held one binding and was later re-bound
     // to another object): it is restored as that binding's own row, in the
@@ -1946,7 +1963,7 @@ export class DatabaseLoader implements MetadataLoader {
     // [#32540 C3] A rollback is a write of the slot too: its rows written
     // before their object was named are named first.
     if (member !== undefined && !isBundledStoreType(type)) {
-      await this.nameUnnamedRows(type, name, unnamedRowsOf(type, rowsOfName, (row) => this.rowToData(row)));
+      await this.nameUnnamedRows(type, name, unnamedRowsOf(type, rowsOfName, (row) => this.rowIdentityData(row)));
     }
 
     const previousChecksum = existing?.checksum as string | undefined;
@@ -2144,7 +2161,7 @@ export class DatabaseLoader implements MetadataLoader {
     // (`storeRowSlotKey`): an action bound to an object by its package, object
     // and name, so the write counts the holders of its `(object, name)` as
     // `storeWriteKey` does, never every package holding the name.
-    const memberOf = (row: Record<string, unknown>) => storedRowMemberOf(type, this.rowToData(row), row.bundle_member);
+    const memberOf = (row: Record<string, unknown>) => storedRowMemberOf(type, this.rowIdentityData(row), row.bundle_member);
     const slotOf = (row: Record<string, unknown>) => storeRowSlotKey(type, name, storedRowPackageId(row), memberOf(row));
     const bySlot = new Map<string, Record<string, unknown>>();
     for (const row of rows) {
@@ -2184,7 +2201,7 @@ export class DatabaseLoader implements MetadataLoader {
       const buckets = new Set([key, ...replaces].map((slot) => storeRowKey(name, slotPackageOf(slot))));
       const unnamed = isBundledStoreType(type)
         ? []
-        : unnamedRowsOf(type, rows.filter((row) => buckets.has(storeRowKey(name, storedRowPackageId(row)))), (row) => this.rowToData(row));
+        : unnamedRowsOf(type, rows.filter((row) => buckets.has(storeRowKey(name, storedRowPackageId(row)))), (row) => this.rowIdentityData(row));
       return { existing, packageId: slotPackageOf(key), rows, member: member ?? null, unnamed };
     }
     const existing = bySlot.get(key) ?? replaces.map((replaced) => bySlot.get(replaced)).find(Boolean) ?? null;
@@ -2244,7 +2261,7 @@ export class DatabaseLoader implements MetadataLoader {
     for (const row of rows) {
       if (row === except || bucket(row.package_id) !== bucket(into.packageColumn)) continue;
       if (typeof row.bundle_member === 'string' && row.bundle_member !== '') continue;
-      const member = storedRowMemberOf(type, this.rowToData(row), row.bundle_member);
+      const member = storedRowMemberOf(type, this.rowIdentityData(row), row.bundle_member);
       if (typeof member !== 'string' || member.length <= STORED_MEMBER_MAX_LENGTH) continue;
       const where = bucket(into.packageColumn) === '' ? 'with no package' : `of package "${bucket(into.packageColumn)}"`;
       throw new Error(
@@ -2318,7 +2335,7 @@ export class DatabaseLoader implements MetadataLoader {
       if (slot?.unnamed !== undefined && !isBundledStoreType(type) && (!existing || Object.keys(binding).length > 0)) {
         this.refuseUnnameableHolder(type, name, slot.rows, {
           packageColumn: slot.packageId ?? existing?.package_id,
-          column: existing ? namedRowColumnOf(type, this.rowToData(existing), existing.bundle_member) : slot.member,
+          column: existing ? namedRowColumnOf(type, this.rowIdentityData(existing), existing.bundle_member) : slot.member,
         }, existing);
       }
       await this.nameUnnamedRows(type, name, slot?.unnamed);

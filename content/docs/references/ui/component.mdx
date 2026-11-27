@@ -218,14 +218,14 @@ const result = ActionButtonPropsSchema.parse(data);
 | **icon** | `string` | optional | Lucide icon name rendered inside the button, left or right of the label per `iconPosition`. Read on this component — the renderer resolves it through `lucide-react`'s `icons` map via the shared `resolveIcon` helper every `action:*` site uses (a PascalCase normaliser plus a one-entry rename map), NOT the `LazyIcon` slot the container icons use; the two paths accept different spellings, and an unknown name here renders nothing rather than a fallback glyph. |
 | **iconPosition** | `Enum<'left' \| 'right'>` | optional (default: `"left"`) | Icon position relative to label |
 | **disabled** | `boolean` | optional (default: `false`) | Disable the button |
-| **action** | `{ type?: Enum<'script' \| 'url' \| 'modal' \| 'flow' \| 'api' \| 'form' \| 'ask_ai'>; name?: string; label?: string \| Record<string, string>; target?: string; … }` | optional | Inline action executed on click |
+| **action** | `{ type?: Enum<'script' \| 'url' \| 'modal' \| 'flow' \| 'api' \| 'form'>; name?: string; label?: string \| Record<string, string>; target?: string; … }` | optional | Inline action executed on click |
 | **aria** | `{ ariaLabel?: string \| Record<string, string>; ariaDescribedBy?: string; role?: string }` | optional | ARIA accessibility attributes |
 
 ### Nested Shape: `ElementButtonProps.action`
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **type** | `Enum<'script' \| 'url' \| 'modal' \| 'flow' \| 'api' \| 'form' \| 'ask_ai'>` | optional (default: `"script"`) | Action functionality type — the dispatch route. The declarative single-record field write is not a type: it is `operation: 'update'` + `patch` on the default `script` route. |
+| **type** | `Enum<'script' \| 'url' \| 'modal' \| 'flow' \| 'api' \| 'form'>` | optional (default: `"script"`) | Action functionality type — the dispatch route. The declarative single-record field write is not a type: it is `operation: 'update'` + `patch` on the default `script` route. |
 | **name** | `string` | optional | Machine name (lowercase snake_case) |
 | **label** | `string \| Record<string, string>` | optional | Display label |
 | **target** | `string` | optional | URL, Script Name, Flow ID, or API Endpoint. Supports $`{param.X}` and $`{ctx.X}` interpolation. For type:'url': an http:// or https:// URL, a mailto: address, or an in-app path starting with / or ./ (a console route; a record is /apps/APP/OBJECT/record/ID, APP being the app's route segment — see onSuccess.navigate) — every other scheme and a protocol-relative //host are refused. |

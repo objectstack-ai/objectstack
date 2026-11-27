@@ -695,17 +695,6 @@ const RUNNER_TEXT = {
     key: 'actions.undo',
     defaultValue: 'Undo',
   },
-  // `ask_ai`'s two refusals reuse the record-id dance's locale keys
-  // (`serverActionHandler.ts` `RECORD_SELECTION_REFUSAL`): the same sentence
-  // for the same situation, already in every pack.
-  askAiNoRecord: {
-    key: 'actions.selectRowFirst',
-    defaultValue: 'This action runs on a single record — select a row first.',
-  },
-  askAiSeveralRecords: {
-    key: 'actions.selectExactlyOneRow',
-    defaultValue: 'This action runs on a single record — select exactly one row.',
-  },
 } as const;
 
 type RunnerText = { readonly key: string; readonly defaultValue: string };
@@ -863,23 +852,6 @@ export type ResultDialogHandler = (
   data: unknown,
   action?: ActionDef,
 ) => Promise<void>;
-
-/** The record an `ask_ai` action hands the assistant: the object's machine name and the record id. */
-export interface AssistantFocus {
-  object: string;
-  id: string;
-}
-
-/**
- * ADR-0160 D7 — the host's in-app assistant, as the `ask_ai` executor reaches
- * it. Called with the record the action runs on, it pins that record as the
- * conversation's focus and expands the assistant. It sends no message and
- * makes no server call. A host sets one only where it draws the assistant's
- * pin control (the assistant surface on, and the AI service advertising that
- * it honours a focus); with none set, an `ask_ai` action is absent from every
- * surface that asks {@link ActionRunner.drawsAction}.
- */
-export type AssistantFocusHandler = (focus: AssistantFocus) => void;
 
 /**
  * One entry of a param's option list, as the RESOLVED param carries it.
@@ -1287,26 +1259,6 @@ function isUpdateOperationAction(action: ActionDef): boolean {
 }
 
 /**
- * What a launch of an `ask_ai` action on a runner with no in-app assistant is
- * told. Not a locale-pack text: such an action is not drawn
- * ({@link ActionRunner.drawsAction}), so only a surface that skipped that
- * question reaches it, and the sentence is for its developer.
- */
-const ASK_AI_UNAVAILABLE = 'The in-app assistant is not available here, so `ask_ai` has nothing to open.';
-
-/**
- * Whether `action` is an `ask_ai` action (ADR-0160 D7), read on the declared
- * type the way {@link resolveDispatchType} reads it (`type`, then the legacy
- * `actionType`). A typeless action is never one: the type has no default
- * spelling and no handler-name dispatch.
- */
-export function isAskAiAction(action: unknown): boolean {
-  if (!action || typeof action !== 'object') return false;
-  const { type, actionType } = action as { type?: unknown; actionType?: unknown };
-  return (type || actionType) === 'ask_ai';
-}
-
-/**
  * The row a dispatch carries — the clicked row a row surface stashes under
  * `params._rowRecord` — or `undefined` when it carries none. The record its
  * copy templates bind as `record` (see `ActionRunner.templateEvaluatorFor`).
@@ -1490,7 +1442,6 @@ export class ActionRunner {
   private navigationHandler: NavigationHandler | null;
   private paramCollectionHandler: ParamCollectionHandler | null;
   private resultDialogHandler: ResultDialogHandler | null;
-  private assistantFocusHandler: AssistantFocusHandler | null;
   private translate: RunnerTranslate | null;
   private displayLocale: (() => string | undefined) | null;
   private tenantCurrency: (() => string | undefined) | null;
@@ -1521,7 +1472,6 @@ export class ActionRunner {
     flow: (action) => this.executeFlow(action),
     api: (action) => this.executeAPI(action),
     form: (action) => this.executeForm(action),
-    ask_ai: (action) => this.executeAskAi(action),
     navigation: (action) => this.executeNavigation(action),
   };
 
@@ -1535,7 +1485,6 @@ export class ActionRunner {
     this.navigationHandler = null;
     this.paramCollectionHandler = null;
     this.resultDialogHandler = null;
-    this.assistantFocusHandler = null;
     this.translate = null;
     this.displayLocale = null;
     this.tenantCurrency = null;
@@ -1628,27 +1577,6 @@ export class ActionRunner {
    */
   setResultDialogHandler(handler: ResultDialogHandler): void {
     this.resultDialogHandler = handler;
-  }
-
-  /**
-   * Set (or, with `null`, clear) the in-app assistant the `ask_ai` executor
-   * hands its record to — see {@link AssistantFocusHandler}. Whether one is
-   * set is also what {@link ActionRunner.drawsAction} answers for an `ask_ai`
-   * action, so the action is drawn exactly where a click can be served.
-   */
-  setAssistantFocusHandler(handler: AssistantFocusHandler | null): void {
-    this.assistantFocusHandler = handler;
-  }
-
-  /**
-   * Whether a surface draws `action` at all on this runner — `false` only for
-   * an `ask_ai` action on a runner with no in-app assistant (ADR-0160 D7: it
-   * is then absent, not disabled). Every other action is drawn or hidden by
-   * its own gates (`visible`, `requiredPermissions`, the served activation
-   * state), which this does not answer.
-   */
-  drawsAction(action: unknown): boolean {
-    return !isAskAiAction(action) || this.assistantFocusHandler !== null;
   }
 
   registerHandler(actionName: string, handler: ActionRunnerHandler): void {
@@ -2034,19 +1962,6 @@ export class ActionRunner {
   }
 
   /**
-   * Why `action` cannot run over a selection of records, one dispatch per row
-   * (a list's bulk action bar), or `undefined` when it can. Only an `ask_ai`
-   * action is refused (ADR-0160 D7): it focuses the assistant on ONE record,
-   * so a per-row run would pin each row in turn and report every one done.
-   * Read on the type alone, as the list surfaces that leave it out read it: a
-   * host that registers its own `ask_ai` handler replaces the executor, not
-   * the one-record meaning of the type, so it is refused here too.
-   */
-  bulkRefusal(action: ActionDef): string | undefined {
-    return isAskAiAction(action) ? this.runnerText(RUNNER_TEXT.askAiSeveralRecords) : undefined;
-  }
-
-  /**
    * The early refusal of the handler {@link dispatchCollected} would route
    * this action to, in the translator's language when it names a key —
    * `undefined` when there is none. An update-operation action never reaches
@@ -2054,15 +1969,6 @@ export class ActionRunner {
    */
   private refusalBeforeInput(action: ActionDef, actionType: string): string | undefined {
     if (isUpdateOperationAction(action)) return undefined;
-    // `ask_ai` runs on exactly one record: a launch that names none (a list
-    // header with no row selected) or several is refused before its
-    // `confirmText` asks anything, and a list header leaves it out (it is
-    // absent, not greyed, where no single record is held).
-    if (actionType === 'ask_ai' && !this.handlers.has('ask_ai')) {
-      if (!this.assistantFocusHandler) return ASK_AI_UNAVAILABLE;
-      const focus = this.askAiFocus(action);
-      return 'refusal' in focus ? this.runnerText(focus.refusal) : undefined;
-    }
     const handler = actionType ? this.handlers.get(actionType) : undefined;
     const refusal = handler?.refuseBeforeInput?.(action, this.context);
     if (!refusal?.error) return undefined;
@@ -3054,56 +2960,6 @@ export class ActionRunner {
   }
 
   /**
-   * The record an `ask_ai` dispatch runs on, or the refusal naming why there
-   * is not exactly one. The object is the one the runner's context names (a
-   * related-list row's dispatch names the child object, objectui#13063); the
-   * record is, in order, the row a row surface stashed (`params._rowRecord`,
-   * read by `recordIdField` like the record-id dance), the record the context
-   * names (a record page, a related-list row), or the one row selected in a
-   * list header. Several selected rows are refused, not guessed between.
-   */
-  private askAiFocus(action: ActionDef): AssistantFocus | { refusal: RunnerText } {
-    const object = readContextObjectName(this.context);
-    const idField = typeof action.recordIdField === 'string' && action.recordIdField ? action.recordIdField : 'id';
-    const asId = (value: unknown): string | undefined =>
-      (typeof value === 'string' && value !== '') || typeof value === 'number' ? String(value) : undefined;
-    const row = dispatchRow(action);
-    let id = asId(row?.[idField]);
-    if (id === undefined && !row) {
-      const record = this.context.record as Record<string, unknown> | undefined;
-      id = asId(record?.[idField]) ?? (idField === 'id' ? asId(this.context.recordId) : undefined);
-    }
-    if (id === undefined && !row) {
-      const selected = Array.isArray(this.context.selectedRecords) ? this.context.selectedRecords : [];
-      if (selected.length > 1) return { refusal: RUNNER_TEXT.askAiSeveralRecords };
-      if (selected.length === 1) id = asId((selected[0] as Record<string, unknown> | undefined)?.[idField]);
-    }
-    if (!object || id === undefined) return { refusal: RUNNER_TEXT.askAiNoRecord };
-    return { object, id };
-  }
-
-  /**
-   * `ask_ai` (ADR-0160 D7) — focus the in-app assistant on the record the
-   * action runs on and expand it, through the host's
-   * {@link AssistantFocusHandler}: the same setter the assistant's own pin
-   * control calls. It sends no message and makes no server call. A success is
-   * silent unless the action declares its own `successMessage` (the
-   * navigation rule, `announceNavigation`): opening a panel is not an outcome
-   * to announce.
-   *
-   * With no handler set the action is not drawn ({@link ActionRunner.drawsAction});
-   * a launch that reaches here anyway — a stale surface, a host that never
-   * asked — is refused rather than reported done.
-   */
-  private async executeAskAi(action: ActionDef): Promise<ActionResult> {
-    if (!this.assistantFocusHandler) return { success: false, error: ASK_AI_UNAVAILABLE };
-    const focus = this.askAiFocus(action);
-    if ('refusal' in focus) return { success: false, error: this.runnerText(focus.refusal) };
-    this.assistantFocusHandler(focus);
-    return this.announceNavigation(action, { success: true });
-  }
-
-  /**
    * `navigation` — objectui's alias of the spec's `url` (`ObjectUiLocalActionType`).
    *
    * Kept because `{ type: 'navigation', to: … }` is authored today
@@ -3500,7 +3356,6 @@ export class ActionRunner {
     scoped.navigationHandler = this.navigationHandler;
     scoped.paramCollectionHandler = this.paramCollectionHandler;
     scoped.resultDialogHandler = this.resultDialogHandler;
-    scoped.assistantFocusHandler = this.assistantFocusHandler;
     scoped.translate = this.translate;
     scoped.displayLocale = this.displayLocale;
     scoped.tenantCurrency = this.tenantCurrency;
