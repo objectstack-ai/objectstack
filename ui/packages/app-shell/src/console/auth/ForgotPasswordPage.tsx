@@ -6,6 +6,7 @@ import { Link } from 'react-router-dom';
 import { ForgotPasswordForm, type AuthLinkComponentProps } from '@object-ui/auth';
 import { useObjectTranslation } from '@object-ui/i18n';
 import { AuthPageLayout } from './AuthPageLayout.js';
+import { passwordDoorRefusalMessages } from './signInRefusalMessages.js';
 
 const RouterLink = ({ href, className, children }: AuthLinkComponentProps) => (
   <Link to={href} className={className}>{children}</Link>
@@ -21,6 +22,7 @@ export function ForgotPasswordPage() {
         title={t('auth.forgotPassword.title')}
         description={t('auth.forgotPassword.description')}
         linkComponent={RouterLink}
+        errorMessages={passwordDoorRefusalMessages(t)}
         labels={{
           emailLabel: t('auth.forgotPassword.emailLabel'),
           emailPlaceholder: t('auth.forgotPassword.emailPlaceholder'),

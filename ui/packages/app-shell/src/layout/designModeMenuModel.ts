@@ -26,7 +26,7 @@
 
 import { inMenuOrder } from '../views/metadata-admin/previews/AppNavCanvas.js';
 import { clearedLabel, renamedLabel } from '../views/metadata-admin/previews/navItemLabel.js';
-import type { I18nLabel } from '@objectstack/spec/ui';
+import { AI_CHAT_COMPONENT_REF, AiChatNavParamsSchema, type AiChatNavParams, type I18nLabel } from '@objectstack/spec/ui';
 
 /** One menu entry, as the app document holds it. */
 export type MenuEntry = Readonly<Record<string, unknown>> & { readonly id?: unknown; readonly type?: unknown };
@@ -40,8 +40,13 @@ export interface MenuPlace {
   readonly index: number;
 }
 
-/** The kinds of existing thing the picker adds (objectstack#36363 item 2). */
-export const MENU_TARGET_KINDS = ['object', 'view', 'dashboard', 'report', 'page', 'url'] as const;
+/**
+ * The kinds the picker adds (objectstack#36363 item 2): existing things, a
+ * link, and the app's AI inquiry page (`aiChat`, objectstack#37832), which
+ * like a link lists nothing and is offered only while the app has none
+ * ({@link aiChatOffered}).
+ */
+export const MENU_TARGET_KINDS = ['object', 'view', 'dashboard', 'report', 'page', 'url', 'aiChat'] as const;
 export type MenuTargetKind = (typeof MENU_TARGET_KINDS)[number];
 
 export function isGroup(entry: MenuEntry): boolean {
@@ -326,12 +331,17 @@ export function menuTargets(menu: Menu): Set<string> {
   return out;
 }
 
-/** The menu entry that opens `name` of `kind`, with `id`; a link takes its `label` and `url`. */
+/**
+ * The menu entry that opens `name` of `kind`, with `id`; a link takes its
+ * `label` and `url`. The AI inquiry page takes `name` as its label and
+ * `params` as its copy (`AiChatNavParamsSchema`), none when absent.
+ */
 export function entryFor(
   kind: MenuTargetKind,
   name: string,
   id: string,
   link?: { label: string; url: string },
+  params?: AiChatNavParams,
 ): MenuEntry {
   switch (kind) {
     case 'object':
@@ -349,7 +359,153 @@ export function entryFor(
       return { id, type: 'page', pageName: name };
     case 'url':
       return { id, type: 'url', label: link?.label ?? name, url: link?.url ?? name };
+    case 'aiChat':
+      return {
+        id,
+        type: 'component',
+        label: name,
+        icon: 'sparkles',
+        componentRef: AI_CHAT_COMPONENT_REF,
+        ...(params ? { params } : {}),
+      };
   }
+}
+
+/** Whether the entry is the app's AI inquiry page: a `component` entry of `componentRef` `ai:chat`. */
+export function isAiChatEntry(entry: MenuEntry): boolean {
+  return entry.type === 'component' && entry.componentRef === AI_CHAT_COMPONENT_REF;
+}
+
+/** Every AI inquiry page entry of the menu, at every depth. */
+function aiChatEntriesOf(menu: Menu): MenuEntry[] {
+  const out: MenuEntry[] = [];
+  const walk = (entries: Menu) => {
+    for (const entry of entries) {
+      if (isAiChatEntry(entry)) out.push(entry);
+      walk(childrenOf(entry));
+    }
+  };
+  walk(menu);
+  return out;
+}
+
+/**
+ * Whether the picker offers 「AI inquiry」 (objectstack#37832): only while the
+ * app would still have no AI inquiry page after the save, so the picker
+ * agrees with the spec's one-per-app rule (`checkAppSingleAiChatEntry`).
+ *
+ * Not offered when `menu` (the staged menu, at any depth) holds one, nor
+ * when `stored` (the app's navigation as stored) holds one the reader was not
+ * shown: such an entry is not in `served`, so the save keeps it. A stored one
+ * the reader was shown counts through `menu` alone, so removing it in the
+ * mode offers the kind again. `undefined` (the stored menu not read yet):
+ * not offered, since the answer is not known; `null` (the read failed): the
+ * staged menu alone, as the save refuses anyway.
+ */
+export function aiChatOffered(menu: Menu, served: Menu, stored: Menu | null | undefined): boolean {
+  if (stored === undefined) return false;
+  if (aiChatEntriesOf(menu).length > 0) return false;
+  if (stored === null) return true;
+  const shown = new Set(storedEntriesById(served, stored).values());
+  return aiChatEntriesOf(stored).every((entry) => shown.has(entry));
+}
+
+/**
+ * `menu` with the entry `id` made the app's home (objectstack#37832,
+ * 「Set as home」): moved to the first place of the top level, and nothing
+ * else; `landing` is never written. The home follows the app's landing rule
+ * (ui ADR-0057 Amendment A4): a declared `landing` comes first; with none,
+ * from 768 px up the first entry shown lands; below 768 px the app root is
+ * the app's menu, where the entry is its first row.
+ */
+export function asHome(menu: Menu, id: string): Menu {
+  return moveEntry(menu, id, null, 0);
+}
+
+/** Whether the entry `id` is not already the first entry of the top level. */
+export function canBeHome(menu: Menu, id: string): boolean {
+  const place = placeOf(menu, id);
+  return !!place && (place.parentId !== null || place.index > 0);
+}
+
+/**
+ * The AI inquiry page's copy as the form holds it (objectstack#37832): each
+ * text as typed, and the suggested questions one per line.
+ */
+export interface AiChatForm {
+  readonly title: string;
+  readonly subtitle: string;
+  readonly placeholder: string;
+  readonly suggestions: string;
+}
+
+/** The fields of {@link AiChatForm}, each named for the `params` key it writes. */
+export type AiChatFormField = keyof AiChatForm;
+
+/** What the form says of a field the schema refuses: the issue's code and, for a bound, its limit. */
+export interface AiChatFormIssue {
+  readonly field: AiChatFormField;
+  readonly code: string;
+  readonly origin?: string;
+  readonly maximum?: number;
+  readonly message: string;
+}
+
+/** The form's answer: the params to store (`undefined` for none), or the issues the schema raised. */
+export type AiChatFormVerdict =
+  | { readonly ok: true; readonly params: AiChatNavParams | undefined }
+  | { readonly ok: false; readonly issues: readonly AiChatFormIssue[] };
+
+/**
+ * The `params` the form writes, judged by `AiChatNavParamsSchema`
+ * (objectstack#37832): each text trimmed, and a field left empty left out, so
+ * the page draws its default copy for it; the suggestions are the non-empty
+ * lines. A form with every field empty writes no `params`. Whatever the
+ * schema refuses, the form refuses, field by field.
+ */
+export function aiChatParamsOf(form: AiChatForm): AiChatFormVerdict {
+  const params: Record<string, unknown> = {};
+  for (const key of ['title', 'subtitle', 'placeholder'] as const) {
+    const text = form[key].trim();
+    if (text) params[key] = text;
+  }
+  const suggestions = form.suggestions
+    .split('\n')
+    .map((line) => line.trim())
+    .filter((line) => line !== '');
+  if (suggestions.length > 0) params.suggestions = suggestions;
+  if (Object.keys(params).length === 0) return { ok: true, params: undefined };
+  const verdict = AiChatNavParamsSchema.safeParse(params);
+  if (verdict.success) return { ok: true, params: verdict.data };
+  return {
+    ok: false,
+    issues: verdict.error.issues.map((issue) => {
+      const bound = issue as { origin?: unknown; maximum?: unknown };
+      return {
+        field: String(issue.path[0]) as AiChatFormField,
+        code: issue.code,
+        ...(typeof bound.origin === 'string' ? { origin: bound.origin } : {}),
+        ...(typeof bound.maximum === 'number' ? { maximum: bound.maximum } : {}),
+        message: issue.message,
+      };
+    }),
+  };
+}
+
+/**
+ * The form an entry's `params` fill: a record the schema takes, else an
+ * empty form (the spec refuses a malformed record when the app is saved, so
+ * one is never salvaged key by key).
+ */
+export function aiChatFormOf(params: unknown): AiChatForm {
+  const verdict = params === undefined ? null : AiChatNavParamsSchema.safeParse(params);
+  const copy = verdict?.success ? verdict.data : {};
+  return {
+    title: copy.title ?? '',
+    subtitle: copy.subtitle ?? '',
+    placeholder: copy.placeholder ?? '',
+    suggestions: (copy.suggestions ?? []).join('\n'),
+  };
 }
 
 /** The {@link targetKeyOf} key the picker's row `name` of `kind` would add. */
