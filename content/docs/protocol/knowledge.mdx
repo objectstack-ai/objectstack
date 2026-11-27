@@ -200,15 +200,9 @@ starts and follows the type from then on, with no restart:
 
 A deployment that holds a `knowledge_source` item but mounts no knowledge
 service says so once at boot, naming the items: nothing loads, indexes or
-searches them. Such an item is one the stack does not ship — saved at run time
-or installed in a package after the boot — since a shipped one mounts the
-service. **The first one saved at run time** on such a deployment is kept and
-not served: the service is mounted at boot, never while the process runs, and
-the boot composes its services before it reads the metadata store, so a plain
-restart does not mount it either. Its save is said once at `warn`, naming the
-fix — `requires: ['knowledge']` (or, on a host that composes its own kernel,
-`KnowledgeServicePlugin` and a store), then a restart; the next boot loads and
-builds it.
+searches them until `KnowledgeServicePlugin` and an adapter are mounted. Such
+an item is one the stack does not ship — saved at run time or installed in a
+package after the boot — since a shipped one mounts the service.
 
 #### Who may author one
 

@@ -16,20 +16,6 @@
  * A statement at `warn`, never a boot refusal: a package may ship a source to
  * a deployment that chose not to run retrieval, and its objects, pages and
  * flows must keep serving there.
- *
- * [ADR-0161 K8 item 12] Since a `knowledge_source` the stack ships mounts the
- * service by itself, the items this line names are the ones the stack does
- * not ship: saved at run time (Studio, the metadata API, MCP) or installed in
- * a package after the boot composed its services. A kernel takes no plugin
- * once it has booted, and the composition is decided before the metadata
- * store is read, so such an item is not served — not now, and not by a plain
- * restart either — until the stack asks for the service:
- * `requires: ['knowledge']`, then a restart. That is what happens to the
- * FIRST item saved at run time on a deployment with no knowledge service
- * (ADR-0161 row 3b, item 4): it is kept, and said once at its save, in the
- * words {@link describeSavedUnservedKnowledgeSource} gives
- * ({@link watchSavedUnservedKnowledgeSources}); every later boot says it again
- * here.
  */
 
 import { KNOWLEDGE_SERVICE } from '@objectstack/spec/contracts';
@@ -54,67 +40,10 @@ export function describeUnservedKnowledgeSources(names: readonly string[], servi
   return (
     `[ObjectQLPlugin] this deployment holds ${count} knowledge_source ${count === 1 ? 'item' : 'items'} ` +
     `(${shown}${rest > 0 ? `, and ${rest} more` : ''}), but no '${KNOWLEDGE_SERVICE}' service is registered, so ` +
-    `${count === 1 ? 'it is' : 'none is'} loaded, indexed or searched. ${UNSERVED_REMEDY} or remove the ` +
+    `${count === 1 ? 'it is' : 'none is'} loaded, indexed or searched. Add KnowledgeServicePlugin ` +
+    '(@objectstack/service-knowledge) and a knowledge adapter to the composition, or remove the ' +
     `${count === 1 ? 'item' : 'items'}.`
   );
-}
-
-/**
- * What mounts the service for an item the stack does not ship. A source the
- * stack ships in `knowledgeSources` mounts it by itself, so the remedy is the
- * token (or the plugin, for a host that composes its own kernel).
- */
-const UNSERVED_REMEDY =
-  "Declare requires: ['knowledge'] in the stack and restart — the service and the deployment's store are mounted " +
-  'at boot, never while the process runs — or, on a host that composes its own kernel, add KnowledgeServicePlugin ' +
-  '(@objectstack/service-knowledge) and a knowledge store;';
-
-/**
- * The statement for one `knowledge_source` saved while no knowledge service is
- * mounted (ADR-0161 row 3b, item 4): the item is kept, it is not served, and
- * what serves it.
- */
-export function describeSavedUnservedKnowledgeSource(name: string): string {
-  return (
-    `[ObjectQLPlugin] knowledge_source '${name}' was saved, and no '${KNOWLEDGE_SERVICE}' service is registered on ` +
-    'this deployment, so it is kept and is not loaded, indexed or searched: a knowledge_source mounts the service ' +
-    `only when the stack ships it. ${UNSERVED_REMEDY} the next boot then loads and builds it.`
-  );
-}
-
-/** The slice of the metadata protocol {@link watchSavedUnservedKnowledgeSources} reads. */
-interface MutationSignal {
-  onMetadataMutation?(listener: (evt: { type?: string; name?: string; state?: string } | undefined) => void): unknown;
-}
-
-/**
- * Say {@link describeSavedUnservedKnowledgeSource} at `warn` when a
- * `knowledge_source` is saved (not a draft, not a delete) while no knowledge
- * service is registered — once per item name for the life of the process.
- * Armed at `kernel:bootstrapped`, beside the boot line: every plugin has
- * registered its services, and none registers one later. Answers the
- * unsubscribe, or `undefined` when there is no protocol or no mutation signal.
- */
-export function watchSavedUnservedKnowledgeSources(host: UnservedKnowledgeSourcesHost): (() => void) | undefined {
-  const service = (name: string): unknown => {
-    try {
-      return host.getService(name) ?? undefined;
-    } catch {
-      return undefined;
-    }
-  };
-  if (service(KNOWLEDGE_SERVICE) !== undefined) return undefined;
-  const protocol = service('protocol') as MutationSignal | undefined;
-  if (typeof protocol?.onMetadataMutation !== 'function') return undefined;
-  const said = new Set<string>();
-  const unsubscribe = protocol.onMetadataMutation((evt) => {
-    if (evt?.type !== KNOWLEDGE_SOURCE_TYPE || evt.state === 'draft' || evt.state === 'deleted') return;
-    const name = typeof evt.name === 'string' && evt.name !== '' ? evt.name : undefined;
-    if (name === undefined || said.has(name)) return;
-    said.add(name);
-    host.logger?.warn?.(describeSavedUnservedKnowledgeSource(name));
-  });
-  return typeof unsubscribe === 'function' ? (unsubscribe as () => void) : undefined;
 }
 
 /** What {@link announceUnservedKnowledgeSources} reads of its host. */

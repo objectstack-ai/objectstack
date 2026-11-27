@@ -40,7 +40,6 @@ Which store is mounted depends on the platform database:
 - **More than one replica** on MySQL, MongoDB or a remote libSQL database: each replica keeps its own local `knowledge.db` and indexes only the record writes that replica itself handles, so replicas answer from indexes that differ. Give them one store: save a shared `libsql://` URL in `turso_url`, or run on PostgreSQL, where the vectors live in the one database.
 - **An install without the libSQL client**: `@objectstack/knowledge-turso` is an optional dependency of the CLI, because its client is a native module. Where it could not be installed the server warns at boot that the store was not mounted, and sources naming `turso` answer `SERVICE_UNAVAILABLE`.
 - **Without a source or the token** nothing is mounted: no knowledge service, no store and no Knowledge settings page. `knowledge-memory` is never mounted for you.
-- **The first source saved at run time on a deployment with neither** (in Studio, the metadata API or MCP) is kept and not served: the service is mounted when the server starts, never while it runs, and it is the app's own sources that mount it. The save is logged once at `warn`, and every boot after says it again, naming the fix: add `requires: ['knowledge']` and restart — the next boot loads and builds the source.
 - **Mounting it yourself** still works: an app whose `plugins` already hold `KnowledgeServicePlugin` keeps its own, and the runtime adds neither a second service nor a store.
 
 ## Writing a source
