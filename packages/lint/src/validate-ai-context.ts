@@ -11,7 +11,7 @@
  * wrong — and is exactly why the author has to hear it here instead: a typo in
  * a pack ships as a pack that quietly reads less than it says.
  *
- * Five verdicts, each a `warning` (the pack loads and reads what resolves):
+ * Six verdicts, each a `warning` (the pack loads and reads what resolves):
  *
  * - `ai-context-field-unknown`: a name in `fields`, a `related` entry's
  *   `fields`, `where` or `orderBy`, or `body.field` that the object does not
@@ -20,6 +20,13 @@
  *   any field (a `where` or `orderBy` field the child lacks leaves the whole list
  *   out of every answer, ADR-0160 D1/D3 second amendment — the tool never
  *   runs a filter with one of its conditions removed);
+ * - `ai-context-field-unprovisioned`: a name in any of those positions, or a
+ *   related list's link field, that resolves only BECAUSE it is an injected
+ *   system column, on an ADR-0015 `external` object: the platform registers
+ *   the anchor without provisioning a column (`unprovisionedInjectedColumnsFor`,
+ *   the spec's provenance derivation every unprovisioned-anchor rule here
+ *   reads), so the name resolves and the read finds no value behind it. An
+ *   author-declared column of the same name is the author's and never judged;
  * - `ai-context-sort-field-unsortable`: a `related` entry's `orderBy` field
  *   the child does not offer as a sort — the sortability projection's
  *   `sortable: false` (`resolveObjectSortability`): a formula, or a field
@@ -54,7 +61,12 @@ import { AI_CONTEXT_BODY_FIELD_TYPES, aiContextWhereFields } from '@objectstack/
 import { resolveObjectSortability } from '@objectstack/spec/api';
 import { REFERENCE_VALUE_TYPES, referenceTargetOf } from '@objectstack/spec/data';
 import { closureDependencyRemedy, recordsOf } from './object-graph.js';
-import { injectedColumnDefsFor } from './system-fields.js';
+import {
+  injectedColumnDefsFor,
+  unprovisionedAnchorFix,
+  unprovisionedAnchorVerdict,
+  unprovisionedInjectedColumnsFor,
+} from './system-fields.js';
 
 export type AiContextSeverity = 'warning';
 
@@ -71,6 +83,7 @@ export interface AiContextFinding {
 
 export const AI_CONTEXT_OBJECT_UNKNOWN = 'ai-context-object-unknown';
 export const AI_CONTEXT_FIELD_UNKNOWN = 'ai-context-field-unknown';
+export const AI_CONTEXT_FIELD_UNPROVISIONED = 'ai-context-field-unprovisioned';
 export const AI_CONTEXT_RELATED_LINK_UNKNOWN = 'ai-context-related-link-unknown';
 export const AI_CONTEXT_BODY_NOT_LONG_TEXT = 'ai-context-body-not-long-text';
 export const AI_CONTEXT_SORT_FIELD_UNSORTABLE = 'ai-context-sort-field-unsortable';
@@ -121,6 +134,28 @@ export function validateAiContext(
   const out: AiContextFinding[] = [];
   const objects = new Map<string, AnyRec>();
   for (const o of recordsOf(stack.objects)) if (str(o.name)) objects.set(str(o.name), o);
+  // [ADR-0015] Each object's injected columns with no storage behind them —
+  // empty on every object whose storage the platform provisions. Existence
+  // (the field map above) and provenance are separate questions: a name this
+  // set holds resolves, and is judged here instead of as unknown.
+  const anchorsOf = new Map<string, ReadonlySet<string>>();
+  const unprovisionedOf = (object: string): ReadonlySet<string> => {
+    let anchors = anchorsOf.get(object);
+    if (!anchors) anchorsOf.set(object, (anchors = unprovisionedInjectedColumnsFor(objects.get(object))));
+    return anchors;
+  };
+  /** The finding for a name that resolves on an unprovisioned anchor of `object`. */
+  const unprovisioned = (object: string, name: string, where: string, path: string, subject: string, consequence: string) =>
+    out.push({
+      severity: 'warning',
+      rule: AI_CONTEXT_FIELD_UNPROVISIONED,
+      where,
+      path,
+      // One verdict sentence, the shared short anchor clause; why the anchor
+      // has no storage and how to vouch for it is `os explain ai-context-field-unprovisioned`.
+      message: `${subject}: ${unprovisionedAnchorVerdict(object, name)}, so ${consequence}`,
+      hint: unprovisionedAnchorFix(object, name),
+    });
 
   const packs = Array.isArray(stack.aiContexts) ? (stack.aiContexts as unknown[]) : [];
   packs.forEach((raw, i) => {
@@ -161,7 +196,12 @@ export function validateAiContext(
     };
     const unknownFields = (names: string[], fields: Map<string, AnyRec>, object: string, where: string, path: string) => {
       names.forEach((name, k) => {
-        if (fields.has(name)) return;
+        if (fields.has(name)) {
+          if (unprovisionedOf(object).has(name)) {
+            unprovisioned(object, name, where, `${path}[${k}]`, `names field '${name}'`, 'the pack reads it empty on every record');
+          }
+          return;
+        }
         out.push({
           severity: 'warning',
           rule: AI_CONTEXT_FIELD_UNKNOWN,
@@ -201,6 +241,11 @@ export function validateAiContext(
             hint: `Name a long-text field of '${root}' as the body, or list '${bodyField}' in \`fields\` instead`,
           });
         }
+        // Type and storage are separate questions: no injected column is long
+        // text, so this finding rides beside the one above, naming the cause.
+        if (def && unprovisionedOf(root).has(bodyField)) {
+          unprovisioned(root, bodyField, `${at} · body`, `aiContexts[${i}].body.field`, `\`body.field\` names '${bodyField}'`, 'the pack carries no body');
+        }
       }
     }
 
@@ -228,8 +273,10 @@ export function validateAiContext(
           hint: `Name a field of '${child}' (check the spelling), or remove it from \`${key}\``,
         });
       };
+      const noRows = 'a condition on it can never match a real value and the list reads no rows';
       for (const name of aiContextWhereFields(entry.where)) {
         if (!childFields.has(name)) listLeftOut(name, 'where', `${path}.where`);
+        else if (unprovisionedOf(child).has(name)) unprovisioned(child, name, where, `${path}.where`, `\`where\` names field '${name}'`, noRows);
       }
       const orderBy = Array.isArray(entry.orderBy) ? (entry.orderBy as unknown[]) : [];
       // Judged by the projection the doors refuse by, never by a second reading of `type` or `sortable`.
@@ -240,6 +287,10 @@ export function validateAiContext(
         if (!childFields.has(name)) {
           listLeftOut(name, 'orderBy', `${path}.orderBy[${k}].field`);
           return;
+        }
+        if (unprovisionedOf(child).has(name)) {
+          unprovisioned(child, name, where, `${path}.orderBy[${k}].field`, `\`orderBy\` sorts by field '${name}'`,
+            'the order finds no column and the list is read in an arbitrary order');
         }
         const verdict = sortability[name];
         if (verdict?.sortable !== false) return;
@@ -258,7 +309,15 @@ export function validateAiContext(
       if (!root || !objects.has(root)) return;
       const named = str(entry.field);
       const links = [...childFields.keys()].filter((name) => referenceOf(childFields.get(name)) === root);
-      if (named ? referenceOf(childFields.get(named)) === root : links.length === 1) return;
+      const link = named ? (referenceOf(childFields.get(named)) === root ? named : undefined) : links.length === 1 ? links[0] : undefined;
+      if (link !== undefined) {
+        // The link is a name the rule reads too: an injected reference to the
+        // root (`owner_id` → `sys_user`) on an external child matches no row.
+        if (unprovisionedOf(child).has(link)) {
+          unprovisioned(child, link, where, named ? `${path}.field` : path, `the list links to '${root}' through '${link}'`, noRows);
+        }
+        return;
+      }
       out.push({
         severity: 'warning',
         rule: AI_CONTEXT_RELATED_LINK_UNKNOWN,

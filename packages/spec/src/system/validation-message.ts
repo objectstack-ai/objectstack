@@ -68,6 +68,14 @@
  * as structured `scope` entries, so a client renders its own text from them
  * instead of parsing this one.
  *
+ * `import_reference_scope_unqueryable` is `reference_not_found`'s sentence for a
+ * scoped lookup that asked nothing: the engine's filter seam refused its reads
+ * because the scope names a target field the engine cannot filter by (a
+ * formula), as that refusal's declared `code` and `fields` say. Any other
+ * refusal keeps the plain sentence. The remedy names the target field the
+ * `dependsOn` entry filters by (its `param`), never a row column. `{{scope}}` is
+ * the same composition as above.
+ *
  * `import_duplicate_match_key` is the importer's ROW refusal for rows of one
  * file that share a match key (`DUPLICATE_MATCH_KEY`, `core/import-runner.ts`):
  * not a cell's failure, but a sentence in the same row report, so it is read in
@@ -196,6 +204,7 @@ export const BUILTIN_VALIDATION_MESSAGES: Record<string, Record<string, string>>
     import_reference_ambiguous: '{{label}}: "{{value}}" matches more than one record — use a unique value or the record id',
     import_reference_not_found: '{{label}}: no record matches "{{value}}"',
     import_reference_out_of_scope: '{{label}}: no record matches "{{value}}" ({{scope}})',
+    import_reference_scope_unqueryable: '{{label}}: "{{value}}" could not be looked up within {{scope}}: the target field this lookup\'s dependsOn filters by cannot be filtered on, so point that dependsOn entry at a stored field',
     import_duplicate_match_key: 'Rows {{rows}} of this import have the same match key ({{label}}), so none of them was written: keep one row per key and import again',
     import_blank_match_key: 'The row has no match key: every key set ({{label}}) has a blank field on it',
     import_multi_value_match_key: 'The match key cannot use {{label}}: a match key compares one value per field, and a field holding a list or a structured value has no one value to compare — match on single-value fields (a code, a name, an email) instead',
@@ -251,6 +260,7 @@ export const BUILTIN_VALIDATION_MESSAGES: Record<string, Record<string, string>>
     import_reference_ambiguous: '{{label}}:“{{value}}”匹配到多条记录,请改用唯一值或记录 ID',
     import_reference_not_found: '{{label}}:未找到与“{{value}}”匹配的记录',
     import_reference_out_of_scope: '{{label}}:在 {{scope}} 下未找到与“{{value}}”匹配的记录',
+    import_reference_scope_unqueryable: '{{label}}:无法在 {{scope}} 范围内查找“{{value}}”:该查找字段的 dependsOn 所筛选的目标字段无法用于筛选,请把这条 dependsOn 改为指向一个存储字段',
     import_duplicate_match_key: '本次导入的第 {{rows}} 行匹配键({{label}})相同,因此均未写入:每个匹配键只保留一行后重新导入',
     import_blank_match_key: '该行没有匹配键:每组匹配键({{label}})在该行都有空白字段',
     import_multi_value_match_key: '不能用{{label}}作为匹配键:匹配键每个字段只比较一个值,而列表或结构化值没有单一的值可比较,请改用单值字段(如编码、名称、邮箱)匹配',
@@ -303,6 +313,7 @@ export const BUILTIN_VALIDATION_MESSAGES: Record<string, Record<string, string>>
     import_reference_ambiguous: '{{label}}:「{{value}}」に複数のレコードが一致します。一意の値かレコード ID を指定してください',
     import_reference_not_found: '{{label}}:「{{value}}」に一致するレコードが見つかりません',
     import_reference_out_of_scope: '{{label}}:{{scope}} の範囲に「{{value}}」に一致するレコードが見つかりません',
+    import_reference_scope_unqueryable: '{{label}}:{{scope}} の範囲で「{{value}}」を検索できません。この参照項目の dependsOn が絞り込みに使う参照先の項目では絞り込めないため、その dependsOn を保存される項目に向けてください',
     import_duplicate_match_key: 'このインポートの {{rows}} 行目は一致キー({{label}})が同じため、いずれも書き込まれませんでした。キーごとに 1 行だけ残して、もう一度インポートしてください',
     import_blank_match_key: 'この行には一致キーがありません。どの一致キーの組み合わせ({{label}})にも空欄の項目があります',
     import_multi_value_match_key: '{{label}} は一致キーに使えません。一致キーは項目ごとに 1 つの値を比較しますが、リストや構造化された値を持つ項目には比較できる 1 つの値がありません。単一値の項目(コード、名前、メールアドレスなど)で照合してください',
@@ -355,6 +366,7 @@ export const BUILTIN_VALIDATION_MESSAGES: Record<string, Record<string, string>>
     import_reference_ambiguous: '{{label}}: «{{value}}» coincide con más de un registro; use un valor único o el id del registro',
     import_reference_not_found: '{{label}}: ningún registro coincide con «{{value}}»',
     import_reference_out_of_scope: '{{label}}: ningún registro coincide con «{{value}}» ({{scope}})',
+    import_reference_scope_unqueryable: '{{label}}: no se pudo buscar «{{value}}» dentro de {{scope}}: el campo de destino por el que filtra el dependsOn de esta búsqueda no se puede usar como filtro, así que apunte esa entrada de dependsOn a un campo almacenado',
     import_duplicate_match_key: 'Las filas {{rows}} de esta importación tienen la misma clave de coincidencia ({{label}}), así que no se escribió ninguna: deje una sola fila por clave e importe de nuevo',
     import_blank_match_key: 'La fila no tiene clave de coincidencia: cada conjunto de claves ({{label}}) tiene un campo vacío en ella',
     import_multi_value_match_key: 'La clave de coincidencia no puede usar {{label}}: una clave de coincidencia compara un valor por campo, y un campo que contiene una lista o un valor estructurado no tiene un único valor que comparar; use campos de un solo valor (un código, un nombre, un correo) en su lugar',

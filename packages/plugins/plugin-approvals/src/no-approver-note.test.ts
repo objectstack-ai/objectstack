@@ -12,7 +12,7 @@
 
 import { describe, it, expect } from 'vitest';
 import { noApproverNoteText, noApproverNotice, noApproverWho, submitterRefusalUserMessage } from './no-approver-note.js';
-import { interpolate, type ApprovalTextParam } from './approval-notification-text.js';
+import { interpolate, type ApprovalScalarParam, type ApprovalTextParam } from './approval-notification-text.js';
 import type { ApprovalSentenceRender } from './admin-rescue-note.js';
 import { approvalMessages, enMessages, NO_APPROVER_NOTICE_MAX_SLOTS } from './translations/messages.js';
 
@@ -31,7 +31,10 @@ const renderIn = (locale: Locale, drop: string[] = []): ApprovalSentenceRender =
  * A notice's body as the messaging service renders it for a recipient in
  * `locale` (`NotificationTextRenderer`): a keyed param is its key in that
  * locale, a `messages.*` key from the catalog and a `positions.*` key from
- * `pack`, else its fallback; then the body's template is filled.
+ * `pack`, else its fallback; [#36853] a list param is each item's sentence
+ * filled with its own params the same way, joined by the separator entry;
+ * then the body's template is filled. The real renderer's half is
+ * `admin-rescue-named-slate.integration.test.ts`.
  */
 const deliveredIn = (
   locale: Locale,
@@ -39,13 +42,27 @@ const deliveredIn = (
   pack: Record<string, string> = {},
 ): string => {
   const catalog = approvalMessages[locale] as Record<string, string>;
+  const keyed = (key: string): string | undefined =>
+    key.startsWith('messages.') ? catalog[key.slice('messages.'.length)] : pack[key];
+  const scalar = (param: ApprovalScalarParam): string => {
+    if (typeof param === 'string') return param;
+    // [#35384] An object-label param is resolved off the object's metadata, which no notice here names.
+    if ('object' in param) return param.fallback;
+    return keyed(param.key) ?? param.fallback;
+  };
   const params: Record<string, string> = {};
   for (const [name, param] of Object.entries(notice.params)) {
-    if (typeof param === 'string') { params[name] = param; continue; }
-    // [#35384] An object-label param is resolved off the object's metadata, which no notice here names.
-    if ('object' in param) { params[name] = param.fallback; continue; }
-    const looked = param.key.startsWith('messages.') ? catalog[param.key.slice('messages.'.length)] : pack[param.key];
-    params[name] = looked ?? param.fallback;
+    if (typeof param === 'object' && 'list' in param) {
+      params[name] = param.list.map((item) => {
+        const sentence = keyed(item.key);
+        if (sentence === undefined) return item.fallback;
+        const own: Record<string, string> = {};
+        for (const [hole, value] of Object.entries(item.params ?? {})) own[hole] = scalar(value);
+        return interpolate(sentence, own);
+      }).join(keyed(param.separator.key) ?? param.separator.fallback);
+      continue;
+    }
+    params[name] = scalar(param);
   }
   return interpolate(catalog[notice.id], params);
 };
@@ -135,18 +152,32 @@ describe('[#36308] the submitter\'s notice', () => {
   });
 });
 
-describe('[#36463] the submitter\'s notice names several slots in the reader\'s language', () => {
+describe('[#36463 · #36853] the submitter\'s notice names several slots in the reader\'s language', () => {
   const declared = (name: string) => (name === 'legal' ? 'Legal Counsel' : undefined);
 
-  it('a slate of two slots spells each inline, keyed, in the slate\'s order', () => {
+  it('a slate of two slots rides `{{who}}` as a list: one keyed clause per slot, in the slate\'s order', () => {
     const notice = noApproverNotice({ slots: ['position:legal', 'team:ops'] }, declared);
     expect(notice).toEqual({
-      id: 'approvalNoApproverHoldingSlots2',
+      id: 'approvalNoApproverHolding',
       params: {
-        type1: { key: 'messages.approvalApproverTypePosition', fallback: 'position' },
-        value1: { key: 'positions.legal.label', fallback: 'Legal Counsel' },
-        type2: { key: 'messages.approvalApproverTypeTeam', fallback: 'team' },
-        value2: 'ops',
+        who: {
+          list: [
+            {
+              key: 'messages.approvalNoApproverSlot',
+              params: {
+                type: { key: 'messages.approvalApproverTypePosition', fallback: 'position' },
+                value: { key: 'positions.legal.label', fallback: 'Legal Counsel' },
+              },
+              fallback: "position 'Legal Counsel'",
+            },
+            {
+              key: 'messages.approvalNoApproverSlot',
+              params: { type: { key: 'messages.approvalApproverTypeTeam', fallback: 'team' }, value: 'ops' },
+              fallback: "team 'ops'",
+            },
+          ],
+          separator: { key: 'messages.approvalNoApproverSlotSeparator', fallback: ', ' },
+        },
       },
     });
     // The acceptance: a zh-CN submitter reads it entirely in Chinese, the
@@ -162,9 +193,9 @@ describe('[#36463] the submitter\'s notice names several slots in the reader\'s 
       + "must add a member who holds position 'Legal Counsel', team 'ops'; that member can then decide it.");
   });
 
-  it('for every slate size it spells, in every pack, the notice reads the timeline\'s sentence for the same slate', () => {
+  it('for every slate size, past the sentences #36463 spelled, in every pack, the notice reads the timeline\'s sentence for the same slate', () => {
     const kinds = ['position:legal', 'team:ops', 'department:west', 'org_membership_level:admin', 'role:admin'];
-    for (let n = 2; n <= NO_APPROVER_NOTICE_MAX_SLOTS; n++) {
+    for (let n = 2; n <= NO_APPROVER_NOTICE_MAX_SLOTS + 4; n++) {
       const slate = Array.from({ length: n }, (_, i) => `${kinds[i % kinds.length]}_${i}`);
       for (const locale of Object.keys(approvalMessages) as Locale[]) {
         expect(deliveredIn(locale, noApproverNotice({ slots: slate })), `${locale} ${n}`)
@@ -173,11 +204,15 @@ describe('[#36463] the submitter\'s notice names several slots in the reader\'s 
     }
   });
 
-  it('a slate of more slots than it spells keeps one English `who` inside the reader\'s sentence', () => {
-    const slate = Array.from({ length: NO_APPROVER_NOTICE_MAX_SLOTS + 1 }, (_, i) => `team:t${i}`);
+  it('a slate of nine slots names no English approver type in any pack but `en`, whose literal is the English the row stores', () => {
+    const slate = Array.from({ length: NO_APPROVER_NOTICE_MAX_SLOTS + 1 }, (_, i) => `${i % 2 ? 'team' : 'department'}:t${i}`);
     const notice = noApproverNotice({ slots: slate });
     expect(notice.id).toBe('approvalNoApproverHolding');
-    expect(notice.params).toEqual({ who: noApproverWho(slate) });
+    expect(interpolate(enMessages.approvalNoApproverHolding, notice.params)).toBe(noApproverNoteText({ slots: slate }));
+    for (const locale of Object.keys(approvalMessages) as Locale[]) {
+      if (locale === 'en') continue;
+      expect(deliveredIn(locale, notice), locale).not.toMatch(/team|department/);
+    }
   });
 });
 

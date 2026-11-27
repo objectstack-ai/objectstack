@@ -138,7 +138,9 @@ import { usePermissions } from '@object-ui/permissions';
 import {
   omitServerResolvedDefaults,
   optionListDefault,
+  resolveColSpan,
   resolveSectionGroupReferences,
+  sectionedGridLayout,
 } from '@object-ui/plugin-form/core';
 // ADR-0059's published door for a host that renders field widgets OUTSIDE the
 // form renderer: `resolveFormWidgetType` + `getLazyFieldWidget` hand back the
@@ -631,6 +633,14 @@ interface RenderableSection {
    * and the renderer draws it as it arrives, the way `ObjectForm` draws its own.
    */
   description?: string;
+  /**
+   * Fields per row this section DRAWS (objectstack-ai/objectstack#37665): the
+   * answer of `@object-ui/plugin-form`'s `sectionedGridLayout`, the rule the
+   * Setup canvas, the dialog and the record form share. The form view's own
+   * `columns` is the grid width and caps the section's count; an undeclared
+   * section takes the form's count; with neither declared it is the shared
+   * undeclared count, which is what this page always drew.
+   */
   columns: 1 | 2 | 3 | 4;
   collapsible: boolean;
   collapsed: boolean;
@@ -663,11 +673,15 @@ interface RenderableSection {
 
 // ─── Helpers ─────────────────────────────────────────────────────────
 
-/** Coerce a `columns` literal into a numeric 1..4. */
-export function normalizeColumns(c: unknown): 1 | 2 | 3 | 4 {
-  const n = typeof c === 'string' ? parseInt(c, 10) : (c as number);
-  if (n === 1 || n === 2 || n === 3 || n === 4) return n;
-  return 2;
+/**
+ * A section's DECLARED `columns`, as the shared layout rule reads it: the
+ * spec's `'1'`–`'4'` string arm as the number `FormSectionSchema`'s parse
+ * transforms it to (a document that reached this page without that parse
+ * still says what its author wrote), anything else as written. Nothing is
+ * defaulted here: an undeclared count resolves in `sectionedGridLayout`.
+ */
+export function declaredSectionColumns(c: unknown): unknown {
+  return typeof c === 'string' && /^[1-4]$/.test(c) ? Number(c) : c;
 }
 
 /** Normalize field options from various Object schema shapes into `{value,label}`. */
@@ -857,8 +871,17 @@ export function buildSections(
       objectDef: objectSchema,
     },
   ) ?? []) as unknown as Array<FormSectionSpec & Pick<ObjectFormSection, 'visibleWhenFault'>>;
+  // objectstack-ai/objectstack#37665: the form view's own `columns` is the
+  // grid width and every section's count is resolved against it by the one
+  // rule the Setup canvas draws with, so the published page and its preview
+  // agree. Each section here is a grid of its own, so the page reads the
+  // per-section count rather than the shared field grid.
+  const grid = sectionedGridLayout(
+    form.columns,
+    sections.map((sec) => declaredSectionColumns(sec.columns)),
+  );
   return sections.map((sec) => {
-    const cols = normalizeColumns(sec.columns);
+    const cols = grid.sectionColumns(declaredSectionColumns(sec.columns)) as 1 | 2 | 3 | 4;
     const fields: RenderableField[] = [];
     for (const entry of sec.fields ?? []) {
       const override: FormFieldSpec =
@@ -914,7 +937,28 @@ export function buildSections(
         maxSize: def.maxSize,
         // objectui#10177 — the authored render hint, view over object.
         widget: override.widget ?? def.widget,
-        colSpan: override.colSpan ?? 1,
+        // The cell count, resolved by the record form's own resolver
+        // (`resolveColSpan`) against this section's column count: `span:
+        // 'full'` first, then an authored `colSpan` (clamped to the grid),
+        // then the `span: 'auto'` wide-type default — the FormFieldSchema
+        // `span` contract. This row read `colSpan` alone, so `span: 'full'`
+        // and a textarea rendered one cell wide on this page.
+        // `FormFieldSpec` does not declare `span`; the served entry carries it.
+        colSpan: resolveColSpan(
+          {
+            name: override.field,
+            type: mapFieldTypeToFormType(def.type ?? 'text', {
+              multiple: override.multiple ?? def.multiple,
+            }),
+            colSpan: override.colSpan,
+            span: (override as { span?: 'auto' | 'full' }).span,
+            // The wide default reads the OBJECT field's own `multiple`, as the
+            // spec and the record form (`sectionFields.ts`) do; a form-level
+            // `multiple` changes the widget above, not the default width.
+            field: { multiple: def.multiple },
+          },
+          cols,
+        ) as 1 | 2 | 3 | 4,
         // Carried whole for the widget — see `RenderableField.meta`. Only the
         // served object field, never a synthesized stand-in: the `text`
         // fallback above describes a missing definition, not metadata.

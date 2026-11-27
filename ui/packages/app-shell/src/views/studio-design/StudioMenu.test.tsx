@@ -77,6 +77,7 @@ vi.mock('../metadata-admin/useMetadata', async (importOriginal) => {
 
 import { useAppShellBranding } from '@object-ui/layout';
 import { StudioMenu, StudioMenuProvider, StudioMenuTrigger } from './StudioMenu';
+import { StudioEntryPermissionsProvider } from './studioEntryPermissions';
 import { STUDIO_MENU_ADVANCED_COOKIE, STUDIO_MENU_COOKIE } from './studioMenuModel';
 import { STUDIO_ACCENT, STUDIO_ACCENT_HSL } from './studio-tokens';
 
@@ -125,12 +126,16 @@ function Shell({ segment }: { segment: string }) {
   );
 }
 
-function renderAt(path: string, segment = PKG) {
+/** `held`: the capability set Studio's entry gate read, when the test names one. */
+function renderAt(path: string, segment = PKG, held?: readonly string[]) {
+  const routes = (
+    <Routes>
+      <Route path="*" element={<Shell segment={segment} />} />
+    </Routes>
+  );
   return render(
     <MemoryRouter initialEntries={[path]}>
-      <Routes>
-        <Route path="*" element={<Shell segment={segment} />} />
-      </Routes>
+      {held ? <StudioEntryPermissionsProvider value={held}>{routes}</StudioEntryPermissionsProvider> : routes}
       <Where />
     </MemoryRouter>,
   );
@@ -148,6 +153,7 @@ beforeEach(() => {
   setWidth(1280);
   reads.entries = SERVED;
   // The package holds objects, flows, permission sets and hooks; no app, page or position.
+  // (A position is 常用 since objectstack#37564: drawn on a package all the same, dimmed.)
   reads.sweep = {
     countsByType: { object: 3, flow: 2, permission: 1, hook: 27 },
     packagesByType: { object: [PKG], flow: [PKG], permission: [PKG], hook: [PKG] },
@@ -274,9 +280,9 @@ describe('the group labels (objectstack#37201)', () => {
       'studio-menu-advanced-group-security',
     ]);
     // Inside the closed fold: out of the accessibility tree until it opens.
+    // objectstack#37565 — the environment directory left the menu for Setup.
     expect(within(screen.getByTestId('studio-menu-advanced-group-security')).getAllByRole('link', { hidden: true }).map((a) => a.getAttribute('data-testid'))).toEqual([
       'studio-menu-entry-owd',
-      'studio-menu-entry-environment',
     ]);
   });
 });
@@ -323,8 +329,10 @@ describe('a package that holds nothing yet (objectstack#37201)', () => {
   it('lists every served 常用 type, holding one or not; a 高级 type only when held', () => {
     reads.entries = [
       ...SERVED,
+      { type: 'dataset', domain: 'data' },
       { type: 'dashboard', domain: 'ui' },
       { type: 'report', domain: 'ui' },
+      { type: 'assignment_rule', domain: 'security' },
       { type: 'agent', domain: 'ai' },
       { type: 'tool', domain: 'ai' },
       { type: 'skill', domain: 'ai' },
@@ -336,21 +344,53 @@ describe('a package that holds nothing yet (objectstack#37201)', () => {
     const all = links(screen.getByTestId('studio-menu'));
     expect(all[0]).toBe('overview');
     const common = all.slice(1).filter((k) => !links(foldRegion()).includes(k));
+    // objectstack#37564 — dataset and position are 常用 by name (ADR-0084, amended 2026-11-26).
     expect(common).toEqual([
       'type:object',
+      'type:dataset',
       'type:app',
       'type:page',
       'type:dashboard',
       'type:report',
       'type:flow',
       'type:permission',
+      'type:position',
       'type:agent',
       'type:tool',
       'type:skill',
     ]);
     for (const k of common) expect(entry(k)).toHaveAttribute('data-empty', 'true');
     expect(screen.queryByTestId('studio-menu-entry-type:hook')).toBeNull();
-    expect(screen.queryByTestId('studio-menu-entry-type:position')).toBeNull();
+    expect(screen.queryByTestId('studio-menu-entry-type:assignment_rule')).toBeNull();
+  });
+});
+
+describe('dataset and position are 常用, placed by name (objectstack#37564, ADR-0084 amended 2026-11-26)', () => {
+  const keysIn = (testId: string) =>
+    within(screen.getByTestId(testId))
+      .queryAllByRole('link', { hidden: true })
+      .map((a) => a.getAttribute('data-testid')!.replace('studio-menu-entry-', ''));
+
+  it('dataset is drawn under Data directly after object, position under Access directly after permission set, both above the fold', () => {
+    // Served as the registry serves it: a dataset is a `data` type.
+    reads.entries = [{ type: 'dataset', domain: 'data' }, ...SERVED];
+    renderAt(`/studio/${PKG}/data`);
+    expect(keysIn('studio-menu-group-data')).toEqual(['type:object', 'type:dataset']);
+    expect(keysIn('studio-menu-group-security')).toEqual(['type:permission', 'type:position']);
+    expect(foldRegion().contains(entry('type:dataset'))).toBe(false);
+    expect(foldRegion().contains(entry('type:position'))).toBe(false);
+    // The package holds none of either: drawn all the same, as any empty 常用 type is.
+    expect(entry('type:dataset')).toHaveAttribute('data-empty', 'true');
+    expect(entry('type:position')).toHaveAttribute('data-empty', 'true');
+    expect(entry('type:dataset')).toHaveAttribute('href', `/studio/${PKG}/metadata/dataset?package=${PKG}`);
+    expect(entry('type:position')).toHaveAttribute('href', `/studio/${PKG}/metadata/position?package=${PKG}`);
+  });
+
+  it('CONTROL: a type the rule sorts 高级 stays inside the fold, and the UI group draws no dataset', () => {
+    reads.entries = [{ type: 'dataset', domain: 'data' }, ...SERVED];
+    renderAt(`/studio/${PKG}/data`);
+    expect(foldRegion().contains(screen.getByTestId('studio-menu-entry-type:hook'))).toBe(true);
+    expect(keysIn('studio-menu-group-ui')).toEqual(['type:app', 'type:page']);
   });
 });
 
@@ -422,17 +462,22 @@ describe('the 「高级」 fold (objectstack#37201)', () => {
 describe('~org and ~all draw no fold (objectstack#37201)', () => {
   it.each([
     ['~org', '/studio/~org/metadata/flow?source=runtime'],
-    ['~all', '/studio/~all/metadata'],
+    // objectstack#37565 — the leg's root redirects to Setup; an item page is what still draws this menu.
+    ['~all', '/studio/~all/metadata/permission/admin?scope=environment'],
   ])('%s: its entries flat, in the table\'s order, under their groups\' labels', (segment, path) => {
-    renderAt(path, segment);
+    renderAt(path, segment, ['studio.access', 'setup.access']);
     expect(screen.queryByTestId('studio-menu-advanced-toggle')).toBeNull();
     expect(screen.queryByTestId('studio-menu-advanced')).toBeNull();
     const security = screen.getByTestId('studio-menu-group-security');
     expect(within(security).getAllByRole('link').map((a) => a.getAttribute('data-testid'))).toEqual([
       'studio-menu-entry-type:permission',
       'studio-menu-entry-type:position',
-      'studio-menu-entry-environment',
     ]);
+    // objectstack#37565 — each catalog row opens its list on Setup's directory page, for whoever may open Setup.
+    expect(within(security).getByTestId('studio-menu-entry-type:position')).toHaveAttribute(
+      'href',
+      '/apps/setup/component/security/access-directory/position?scope=environment',
+    );
     for (const a of within(security).getAllByRole('link')) expect(a).toBeVisible();
     expect(security.querySelector('[data-sidebar="group-label"]')).toHaveTextContent(/^Access$/);
     expect(screen.getByTestId('studio-menu-entry-orgFlows')).toBeVisible();
@@ -441,6 +486,24 @@ describe('~org and ~all draw no fold (objectstack#37201)', () => {
     expect(automation.querySelector('[data-sidebar="group-label"]')).toHaveTextContent(/^Automation$/);
     expect(screen.queryByTestId('studio-menu-group-count-automation')).toBeNull();
     expect(within(automation).getAllByRole('link').map((a) => a.getAttribute('data-testid'))).toEqual(['studio-menu-entry-orgFlows']);
+  });
+
+  // objectstack#37565 — Setup's page is no door for a principal who may not open Setup: the row keeps Studio's list.
+  it.each([
+    ['~org', '/studio/~org/metadata/flow?source=runtime', ['studio.access']],
+    ['~all', '/studio/~all/metadata/permission/admin?scope=environment', ['studio.access']],
+    ['~all', '/studio/~all/metadata/permission/admin?scope=environment', undefined],
+  ] as const)('%s on %s, holding %j: a catalog row keeps its list in Studio', (segment, path, held) => {
+    renderAt(path, segment, held);
+    const security = screen.getByTestId('studio-menu-group-security');
+    expect(within(security).getByTestId('studio-menu-entry-type:position')).toHaveAttribute(
+      'href',
+      '/studio/~all/metadata/position?scope=environment',
+    );
+    expect(within(security).getByTestId('studio-menu-entry-type:permission')).toHaveAttribute(
+      'href',
+      '/studio/~all/metadata/permission?scope=environment',
+    );
   });
 });
 
@@ -484,13 +547,13 @@ describe('全部类型 All types (objectstack#37360, ADR-0084 amended 2026-11-25
   });
 
   it('CONTROL: the fold still leaves out a 高级 type the package holds none of', () => {
-    reads.entries = [...SERVED, { type: 'email_template', domain: 'system' }];
+    reads.entries = [...SERVED, { type: 'email_template', domain: 'system' }, { type: 'assignment_rule', domain: 'security' }];
     renderAt(`/studio/${PKG}/data`);
     fireEvent.click(fold());
     expect(entry('allTypes')).toBeVisible();
     expect(entry('type:hook')).toBeVisible();
     expect(screen.queryByTestId('studio-menu-entry-type:email_template')).toBeNull();
-    expect(screen.queryByTestId('studio-menu-entry-type:position')).toBeNull();
+    expect(screen.queryByTestId('studio-menu-entry-type:assignment_rule')).toBeNull();
   });
 
   it.each([

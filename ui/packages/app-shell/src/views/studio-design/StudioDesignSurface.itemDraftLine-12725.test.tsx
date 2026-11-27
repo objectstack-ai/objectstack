@@ -176,7 +176,7 @@ async function openTask() {
   // objectstack#36904 — the object designer opens on the object's address.
   await waitFor(() => expect(within(header()).getAllByText('Task')[0]).toBeInTheDocument(), SLOW);
   expect(headerStatus()).toBeNull();
-  expect(screen.queryByTestId('studio-changes-count')).toBeNull();
+  expect(screen.queryByTestId('studio-menu-overview-pending')).toBeNull();
 }
 
 /** The copilot's tool wrote drafts server-side, and its result landed. */
@@ -193,7 +193,7 @@ describe('the item header\'s draft line follows the badge\'s ledger (objectui#12
     await copilotDrafts(COPILOT_DRAFTS);
 
     await waitFor(() => expect(headerStatus()).toHaveTextContent(draftLine(2)));
-    expect(screen.getByTestId('studio-changes-count')).toHaveTextContent('2');
+    expect(screen.getByTestId('studio-menu-overview-pending')).toHaveTextContent('2');
     // The longer sentence says what N counts.
     expect(headerStatus()).toHaveAccessibleDescription(tFormat('engine.studio.itemDraftPendingTitle', 'en', { count: 2 }));
     // The pillar's own reading re-read the object, which has no draft of its own here.
@@ -211,7 +211,7 @@ describe('the item header\'s draft line follows the badge\'s ledger (objectui#12
 
     expect(mockClient.publishPackageDrafts).toHaveBeenCalledWith(PACKAGE_ID);
     await waitFor(() => expect(headerStatus()).toBeNull());
-    expect(screen.queryByTestId('studio-changes-count')).toBeNull();
+    expect(screen.queryByTestId('studio-menu-overview-pending')).toBeNull();
   });
 
   it('is gone after a discard takes the item off the ledger', async () => {
@@ -224,7 +224,7 @@ describe('the item header\'s draft line follows the badge\'s ledger (objectui#12
     await copilotDrafts(COPILOT_DRAFTS.slice(1));
 
     await waitFor(() => expect(headerStatus()).toBeNull());
-    expect(screen.getByTestId('studio-changes-count')).toHaveTextContent('1');
+    expect(screen.getByTestId('studio-menu-overview-pending')).toHaveTextContent('1');
   });
 
   it('CONTROL: a draft of another item is counted by the badge and marks no header', async () => {
@@ -233,7 +233,7 @@ describe('the item header\'s draft line follows the badge\'s ledger (objectui#12
       { type: 'object', name: 'acme_project', label: 'Project', packageId: PACKAGE_ID, updatedAt: null, updatedBy: 'u1' },
     ]);
 
-    await waitFor(() => expect(screen.getByTestId('studio-changes-count')).toHaveTextContent('1'));
+    await waitFor(() => expect(screen.getByTestId('studio-menu-overview-pending')).toHaveTextContent('1'));
     expect(headerStatus()).toBeNull();
   });
 });
@@ -264,7 +264,7 @@ describe('the item header\'s draft line after the copilot\'s undo, the object op
     await copilotDrafts([]);
 
     await waitFor(() => expect(headerStatus()).toBeNull());
-    expect(screen.queryByTestId('studio-changes-count')).toBeNull();
+    expect(screen.queryByTestId('studio-menu-overview-pending')).toBeNull();
     await waitFor(() => expect(objectDraftReads()).toBe(before + 1));
     expect(screen.queryByText(t('engine.studio.unpublishedDraft', 'en'))).toBeNull();
   });
@@ -294,7 +294,7 @@ describe('a draft an agent stages outside the tab reaches the open item when the
 
     switchTab(false);
 
-    await waitFor(() => expect(screen.getByTestId('studio-changes-count')).toHaveTextContent('2'), SLOW);
+    await waitFor(() => expect(screen.getByTestId('studio-menu-overview-pending')).toHaveTextContent('2'), SLOW);
     await waitFor(() => expect(headerStatus()).toHaveTextContent(draftLine(2)));
     // The Data pillar re-read its open object on the same pulse — where its
     // draft marks are read from (objectstack#32610).

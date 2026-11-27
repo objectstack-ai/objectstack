@@ -240,6 +240,16 @@
         "must_contain": ["actionLayout", "pinned", "more", "$export"],
         "must_not_contain": ["'clone', 'share']", "definePage"]
       }
+    },
+    {
+      "id": 25,
+      "prompt": "`crm_account` declares the field groups `basic_info` and `contact_info`. A 'New Intake' button opens an intake form on its own page; the team wants each group two columns wide there, and asks for the same two columns in the ordinary New dialog. Write the metadata and say what each surface does.",
+      "expected_output": "A named form under `formViews` whose sections reference the groups and declare the count, `sections: [{ group: 'basic_info', columns: 2 }, { group: 'contact_info', columns: 2 }]`, opened by a `type: 'form'` action whose `target` names it. The answer says the form page reads each section's `columns` (1 to 4, one column on a phone), and that the New and Edit dialog is built from the object's `fieldGroups`, never from this form view, at a column count the platform derives and nobody authors. Not `columns` on the form view itself (the form page does not read it), not a `columns` key on a `fieldGroups` entry, not `modalSize`, and not an answer that two columns cannot be authored anywhere.",
+      "files": [],
+      "assertions": {
+        "must_contain": ["formViews", "group: 'contact_info', columns: 2", "type: 'form'", "fieldGroups"],
+        "must_not_contain": ["modalSize:", "formViews.default"]
+      }
     }
   ]
 }

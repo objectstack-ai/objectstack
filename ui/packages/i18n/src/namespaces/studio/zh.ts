@@ -2427,7 +2427,7 @@ const STUDIO_ZH: Record<string, string> = {
   'engine.studio.data.columnMenu': '排序与隐藏',
   'engine.studio.data.draftObjectTitle': '未发布的新对象',
   'engine.studio.data.draftObjectHint':
-    '「记录」网格查询真实数据,而这个对象发布前还没有数据表。请先在「表单 · 布局」里设计字段与分组,然后点顶栏「发布」— 发布后这里就是它的实时数据网格。',
+    '「记录」网格查询真实数据,而这个对象发布前还没有数据表。请先在「表单 · 布局」里设计字段与分组,然后到「概览 › 待发布」发布 — 发布后这里就是它的实时数据网格。',
   'engine.studio.data.goDesignFields': '去「表单 · 布局」设计字段',
   'engine.studio.data.form.layout': '布局',
   'engine.studio.data.form.preview': '预览',
@@ -2531,7 +2531,7 @@ const STUDIO_ZH: Record<string, string> = {
   'engine.studio.access.title': '权限矩阵',
   'engine.studio.access.subtitle': '对象权限 · 字段级读写',
   'engine.studio.access.bannerTitle':
-    '这里只列出本应用的对象，保存时只改本应用的授权，其他应用给出的授权保持不变。改动在点击顶栏「保存」后立即生效（与数据、界面一致）。',
+    '这里只列出本应用的对象，保存时只改本应用的授权，其他应用给出的授权保持不变。改动在点击页头「保存」后立即生效（与数据、界面一致）。',
   'engine.studio.access.banner': '本应用对象 · 保存后生效',
   // objectstack#29674 — the note on an open set the base's pair adds: its matrix lists the base's objects too.
   'engine.studio.access.bannerPair': '本应用及 {package} 对象 · 保存后生效',
@@ -2541,7 +2541,7 @@ const STUDIO_ZH: Record<string, string> = {
   'engine.studio.copilot.subject.access': '权限',
   'engine.studio.copilot.subject.flow': '流程',
   'engine.studio.access.bannerTitlePair':
-    '这个权限集属于 {package} 的定制，所以除本应用的对象外也列出 {package} 的对象；保存时只改这部分授权，其他应用给出的授权保持不变。改动在点击顶栏「保存」后立即生效。',
+    '这个权限集属于 {package} 的定制，所以除本应用的对象外也列出 {package} 的对象；保存时只改这部分授权，其他应用给出的授权保持不变。改动在点击页头「保存」后立即生效。',
   'engine.studio.access.bannerTitleReadOnly':
     '这里只列出本应用的对象。这个应用是只读的：可以查看它的权限集，但不能修改。',
   // ADR-0090 D5/D9 — 待确认的受众绑定建议(isDefault 权限集,管理员确认后生效,服务端绝不自动绑定)
@@ -3105,7 +3105,7 @@ const STUDIO_ZH: Record<string, string> = {
   'engine.studio.desktopHint': 'Studio 专为桌面屏幕设计。',
   'engine.studio.notFound.package': '未找到包。本部署没有安装 ID 为“{id}”的包，因此无处可构建。',
   'engine.studio.notFound.packageList': '打开软件包列表',
-  'engine.studio.notFound.allMetadata': '打开「全部元数据」',
+  'engine.studio.notFound.allMetadata': '打开「组织流程」',
   'engine.studio.notFound.pillar': '页面不存在。Studio 没有“{pillar}”这一栏，请在上方选择数据、自动化、界面、权限或全部元数据。',
   'engine.studio.aiCopilot': 'AI 助手',
   // objectui#12725 — Studio 右栏：属性或 AI 助手二选一。
@@ -3139,6 +3139,7 @@ const STUDIO_ZH: Record<string, string> = {
   'engine.studio.menu.owd': '默认共享',
   'engine.studio.menu.diagnostics': '诊断',
   'engine.studio.menu.environment': '岗位与权限',
+  'engine.setup.accessDirectory.notAllowed': '打开此页需要 {capability} 权限，即进入 Studio 所需的权限。',
   // objectstack#37201 — the 「高级」 fold (ADR-0084, amended 2026-11-25), and a 常用 type with no item yet.
   'engine.studio.menu.advanced': '高级',
   'engine.studio.menu.emptyType': '还没有：打开列表新建第一项',
@@ -3179,6 +3180,14 @@ const STUDIO_ZH: Record<string, string> = {
   'engine.studio.backToAppTitle': '离开 Studio，回到 {app}',
   'engine.studio.backToAppTitleNoApp': '离开 Studio，回到你的应用',
   'engine.studio.mark': '应用搭建',
+  // objectstack#37456 — the package row of the top left (ADR-0084, amended
+  // 2026-11-26): the way back, then the package switcher. Studio's row reads
+  // `engine.studio.mark` for its name.
+  'engine.studio.pkg.switcher': '切换软件包',
+  'engine.studio.pkg.search': '搜索软件包',
+  'engine.studio.pkg.noMatches': '没有匹配的软件包',
+  'engine.studio.pkg.newPackage': '新建软件包',
+  'engine.studio.pkg.orgScope': '组织元数据',
   // objectstack#37139 — 应用名或包名右侧的「⋯」软件包菜单。
   'engine.studio.packageMenu.trigger': '软件包操作',
   'engine.studio.packageMenu.editInfo': '编辑软件包信息',
@@ -3226,8 +3235,8 @@ const STUDIO_ZH: Record<string, string> = {
   'engine.studio.customize.overrides': '覆盖 {package}',
   'engine.studio.customize.overridesTitle': '此项在本部署中替换 {package} 中的同名项，取自 {package} {basedOn}。',
   'engine.studio.customize.draftFooter': '编辑会保存为本部署定制的草稿；发布后生效。',
-  // objectstack#36511 — 同一行脚注在 Studio 各栏里:点顶栏「保存」即生效。
-  'engine.studio.customize.saveFooter': '点击顶栏「保存」后，编辑写入本部署的定制并生效。',
+  // objectstack#36511 — 同一行脚注在 Studio 各栏里:点页头「保存」即生效(objectstack#37455)。
+  'engine.studio.customize.saveFooter': '点击页头「保存」后，编辑写入本部署的定制并生效。',
   'engine.studio.customize.restore': '恢复软件包原版',
   'engine.studio.customize.restoreConfirm': '恢复 {package} 的「{item}」？',
   'engine.studio.customize.restoreBody': '本部署对「{item}」的定制会被删除，重新使用 {package} 的版本。',
@@ -3261,7 +3270,7 @@ const STUDIO_ZH: Record<string, string> = {
   'engine.studio.org.none': '没有不属于软件包的流程。要修改软件包中的流程，请打开它所在的软件包，使用“新建类似”。',
   // objectstack#36748 — the package dialog's new-app step, run by 「同时创建应用」 (objectstack#37134).
   'engine.studio.newApp.nameTaken': '应用「{label}」已经在用标识「{name}」。请在“高级”中换一个命名空间。',
-  'engine.studio.newApp.appFailed': '「{name}」已创建，但应用没能上线：{reason}。可以在 Studio 顶栏点「创建应用」重试。',
+  'engine.studio.newApp.appFailed': '「{name}」已创建，但应用没能上线：{reason}。可以在软件包菜单里打开「应用」，点「新建」重试。',
   'engine.studio.area.assignments.position': '此岗位的任职人员在设置中分配。',
   'engine.studio.area.assignments.permission': '此权限集分配给哪些人，在设置中管理。',
   'engine.studio.area.assignments.open': '在设置中打开',
@@ -3988,6 +3997,7 @@ const STUDIO_ZH: Record<string, string> = {
   'engine.bookPreview.tree': '解析后的目录树',
   'engine.bookPreview.audience.public': '公开',
   'engine.bookPreview.audience.permissionSet': '权限集：{name}',
+  'engine.bookPreview.audience.systemPermission': '系统权限：{name}',
   'engine.bookPreview.audience.org': '组织',
   'engine.bookPreview.slug': 'URL 标识：{slug}',
   'engine.bookPreview.noGroups': '尚无分组',
@@ -4226,7 +4236,7 @@ const STUDIO_ZH: Record<string, string> = {
   'engine.draftConflict.publishedOverwriteDescription':
     '你的{type}「{name}」将代替已保存的版本生效，你打开之后保存的那些修改会丢失。',
   'engine.studio.inspector.props': '属性',
-  'engine.studio.inspector.draftFooter': '编辑在点击顶栏「保存」后生效。',
+  'engine.studio.inspector.draftFooter': '编辑在点击页头「保存」后生效。',
   'engine.studio.inspector.collapse': '收起属性',
   'engine.studio.inspector.expand': '展开属性',
   'engine.studio.inspector.emptyLine1': '在画布里点选一个积木,',

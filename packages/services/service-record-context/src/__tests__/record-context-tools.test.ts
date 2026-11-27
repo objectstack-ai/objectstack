@@ -2,6 +2,7 @@
 
 import { describe, expect, it } from 'vitest';
 import { mapDataError } from '@objectstack/types';
+import { injectedSystemColumnDefs } from '@objectstack/spec/data';
 import {
   AI_CONTEXT_MAX_FIELDS,
   AI_CONTEXT_MAX_RELATED,
@@ -443,10 +444,10 @@ describe('get_record_context — a read of a related object that fails is a fail
     for (const word of ['policy_revision', 'secret_note', 'acme_private', 'store down']) {
       expect(failed.message).not.toContain(word);
     }
-    // The original is the host's, on `cause` (which no door puts on the wire), and at the foot of the
-    // stack, which the doors' fault line prints where it prints no `cause`.
+    // The original is the host's, on `cause` (which no door puts on the wire and the doors' fault line
+    // prints). The failure's own stack does not repeat it: the fault line renders the `cause` chain.
     expect(failed.cause).toBe(original);
-    expect(failed.stack).toContain(`Caused by: ${original instanceof Error ? original.stack : String(original)}`);
+    expect(failed.stack ?? '').not.toContain('Caused by:');
   };
 
   it.each([
@@ -1281,5 +1282,153 @@ describe('get_record_context — pack selection by (package, name) (ADR-0150 add
     const door = fakeDoor(twoHolders());
     expect(await recordContextReadSet({ objectName: 'policy', context: 'hr-brief' }, door)).toEqual({ pack: 'hr-brief', objects: ['policy'] });
     expect(await recordContextReadSet({ objectName: 'policy', context: 'brief' }, door)).toEqual({ objects: ['policy'] });
+  });
+});
+
+/**
+ * [ADR-0160 D1/D3] A context pack that names a system column the platform
+ * injects (`owner_id`, `created_at`) on an object that does not declare it.
+ *
+ * The executor judges every name against the definitions its door hands it.
+ * The real doors hand the registry's definition, which carries the injected
+ * columns: measured over one real kernel (the `/mcp` door, the real protocol,
+ * `SqlDriver`, `sys_user` registered), the served listing of an object that
+ * declares neither column carries both, and `get_record_context` answers
+ * `owner_id` and `created_at` in the root's `fields` and a related list's
+ * `fields`, filters the list by a `where` on `owner_id` and orders it by
+ * `created_at`. The door below serves that shape (the spec's
+ * `injectedSystemColumnDefs`, the tables the registry's `applySystemFields`
+ * spreads, a declared field winning), and the executor reads every injected
+ * name as a field. `@objectstack/lint`'s `ai-context-field-unknown` judges
+ * the same names against the same injected map, so it does not warn on them.
+ */
+describe('get_record_context — an injected system column the object does not declare (ADR-0160 D1/D3)', () => {
+  type Def = Record<string, unknown>;
+
+  /** The definition as the registry serves it: the injected columns it carries, a declared field winning. */
+  const registered = (def: Def): Def => ({
+    ...def,
+    fields: { ...injectedSystemColumnDefs(def), ...(def.fields as Def) },
+  });
+
+  const SYS_USER = { name: 'sys_user', label: 'User', nameField: 'name', fields: { name: { name: 'name', type: 'text', label: 'Name' } } };
+
+  const PACK = {
+    name: 'policy_brief',
+    label: 'Policy brief',
+    object: 'policy',
+    fields: ['title', 'owner_id', 'created_at'],
+    related: [{
+      object: 'policy_revision',
+      field: 'policy',
+      fields: ['version', 'owner_id', 'created_at'],
+      where: { owner_id: 'u1' },
+      orderBy: [{ field: 'created_at', order: 'desc' as const }],
+    }],
+  };
+
+  /** The fixture app with the system columns on its rows, `sys_user` beside it, and {@link PACK}. */
+  function app(injected: boolean): FakeApp {
+    const base = policyApp();
+    const objects: FakeApp['objects'] = { ...base.objects, sys_user: SYS_USER };
+    if (injected) for (const name of ['policy', 'policy_revision']) objects[name] = registered(objects[name]);
+    return {
+      ...base,
+      objects,
+      records: {
+        ...base.records,
+        sys_user: [{ id: 'u1', name: 'Ann' }, { id: 'u2', name: 'Bo' }],
+        policy: base.records.policy.map((r) => ({ ...r, owner_id: 'u1', created_at: '2026-01-01T00:00:00Z' })),
+        policy_revision: [
+          { id: 'r1', version: 'v1', policy: 'p1', owner_id: 'u1', created_at: '2026-01-02T00:00:00Z' },
+          { id: 'r2', version: 'v2', policy: 'p1', owner_id: 'u1', created_at: '2026-01-03T00:00:00Z' },
+          { id: 'r3', version: 'v3', policy: 'p1', owner_id: 'u2', created_at: '2026-01-04T00:00:00Z' },
+        ],
+      },
+      packs: [PACK],
+    };
+  }
+
+  const BRIEF_CALL = { objectName: 'policy', recordId: 'p1', context: 'policy_brief' };
+
+  it('the fixture declares neither column; the registered definition carries both', () => {
+    const declared = policyApp().objects;
+    for (const name of ['policy', 'policy_revision']) {
+      expect(Object.keys(declared[name].fields as Def)).not.toContain('owner_id');
+      expect(Object.keys(declared[name].fields as Def)).not.toContain('created_at');
+      expect(Object.keys(registered(declared[name]).fields as Def)).toEqual(expect.arrayContaining(['owner_id', 'created_at']));
+    }
+  });
+
+  it('is read as a field: in the root\'s fields, a related list\'s fields, its where and its orderBy', async () => {
+    const out = await executeGetRecordContext(BRIEF_CALL, fakeDoor(app(true)));
+    expect(out.data.fields).toEqual([
+      { name: 'title', label: 'Title', value: 'Fire cover' },
+      { name: 'owner_id', label: 'Owner', value: 'u1', display: 'Ann' },
+      { name: 'created_at', label: 'Created At', value: '2026-01-01T00:00:00Z' },
+    ]);
+    expect(out.data.related?.[0]?.rows.map((r) => [r.id, r.fields.map((f) => [f.name, f.value])])).toEqual([
+      ['r2', [['version', 'v2'], ['owner_id', 'u1'], ['created_at', '2026-01-03T00:00:00Z']]],
+      ['r1', [['version', 'v1'], ['owner_id', 'u1'], ['created_at', '2026-01-02T00:00:00Z']]],
+    ]);
+    expect(out.notes).toEqual([]);
+  });
+
+  it('a door serving the declared fields alone leaves every such name out, silently: the executor reads what the door serves', async () => {
+    const out = await executeGetRecordContext(BRIEF_CALL, fakeDoor(app(false)));
+    expect(out.data.fields.map((f) => f.name)).toEqual(['title']);
+    expect(out.data.related ?? []).toEqual([]);
+    expect(out.notes).toEqual([]);
+  });
+
+  // The link resolution `@objectstack/lint`'s `ai-context-related-link-unknown`
+  // mirrors: `resolveRelatedLink` over the child's PUBLISHED definition, where
+  // the injected `owner_id` / `created_by` / `updated_by` each point at
+  // `sys_user`. Named, one of them is the link; omitted, the child has several
+  // and the list is an author defect, left out with nothing stated.
+  describe('a related list rooted on a sys_* object, linked through the child\'s injected references', () => {
+    const TASK = { name: 'task', label: 'Task', nameField: 'subject', fields: { subject: { name: 'subject', type: 'text', label: 'Subject' } } };
+    const userApp = (injected: boolean, field?: string): FakeApp => ({
+      objects: { sys_user: SYS_USER, task: injected ? registered(TASK) : TASK },
+      records: {
+        sys_user: [{ id: 'u1', name: 'Ann' }, { id: 'u2', name: 'Bo' }],
+        task: [
+          { id: 't1', subject: 'Call', owner_id: 'u1', created_by: 'u2', updated_by: 'u2' },
+          { id: 't2', subject: 'Mail', owner_id: 'u2', created_by: 'u1', updated_by: 'u2' },
+        ],
+      },
+      packs: [{
+        name: 'user_brief',
+        label: 'User brief',
+        object: 'sys_user',
+        fields: ['name'],
+        related: [{ object: 'task', ...(field !== undefined ? { field } : {}), fields: ['subject'] }],
+      }],
+    });
+    const USER_CALL = { objectName: 'sys_user', recordId: 'u1', context: 'user_brief' };
+    const rowsOf = async (a: FakeApp) => {
+      const out = await executeGetRecordContext(USER_CALL, fakeDoor(a));
+      expect(out.notes).toEqual([]);
+      return (out.data.related ?? []).map((r) => r.rows.map((row) => row.id));
+    };
+
+    it('the registered child carries the three injected references to sys_user; the declared one carries none', () => {
+      const fields = registered(TASK).fields as Record<string, Def>;
+      for (const name of ['owner_id', 'created_by', 'updated_by']) expect(fields[name]?.reference, name).toBe('sys_user');
+      expect(Object.keys(TASK.fields)).toEqual(['subject']);
+    });
+
+    it('a named injected reference is the link: each one reads its own rows', async () => {
+      expect(await rowsOf(userApp(true, 'owner_id'))).toEqual([['t1']]);
+      expect(await rowsOf(userApp(true, 'created_by'))).toEqual([['t2']]);
+    });
+
+    it('omitted, the child\'s several injected references leave the list out, silently', async () => {
+      expect(await rowsOf(userApp(true))).toEqual([]);
+    });
+
+    it('a door serving the declared fields alone has no link to resolve: the list is left out, silently', async () => {
+      expect(await rowsOf(userApp(false, 'owner_id'))).toEqual([]);
+    });
   });
 });

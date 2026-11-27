@@ -73,7 +73,6 @@ import {
   Gauge,
   Globe,
   Inbox,
-  KeyRound,
   Languages,
   LayoutGrid,
   ListChecks,
@@ -126,6 +125,8 @@ import {
 import { t, tFormat, translateMetadataType } from '../metadata-admin/i18n.js';
 import { studioMenuGroupLabel } from './studioMenuGroupLabel.js';
 import { StudioPendingDraftsContext } from './studioItemDraftStatus.js';
+import { useStudioEntryPermissions } from './studioEntryPermissions.js';
+import { holdsSetupAccess } from '../setup/accessDirectory.js';
 import { STUDIO_ACCENT, STUDIO_HEADER_ICON_BUTTON } from './studio-tokens.js';
 import {
   STUDIO_MENU_ADVANCED_COOKIE,
@@ -144,6 +145,9 @@ import {
   type StudioMenuGroupModel,
   type StudioMenuTier,
 } from './studioMenuModel.js';
+
+/** What the collapsed rail does not draw: the search and the fold's toggle. */
+const RAIL_HIDDEN = 'group-data-[state=collapsed]:group-data-[collapsible=icon]:hidden';
 
 /** The fold's cookie lives as long as the menu's own collapse cookie (the sidebar primitive's 7 days). */
 const ADVANCED_COOKIE_MAX_AGE = 60 * 60 * 24 * 7;
@@ -200,7 +204,6 @@ const STUDIO_MENU_KIND_ICONS: Readonly<Record<Exclude<StudioMenuEntry['kind'], '
   orgFlows: Building2,
   owd: ShieldCheck,
   diagnostics: Activity,
-  environment: KeyRound,
   allTypes: AppWindow,
 };
 
@@ -311,6 +314,11 @@ export interface StudioMenuProps {
    * `?` included); `false` keeps the author where they are.
    */
   onReenterPillar?: (search: string) => boolean;
+  /**
+   * objectstack#37456 — what the column draws above its search: the top
+   * left's two rows (`StudioTopLeft`), or the rail's head while collapsed.
+   */
+  head?: React.ReactNode;
 }
 
 /**
@@ -335,6 +343,7 @@ function StudioMenuBody({
   segment,
   locale,
   onReenterPillar,
+  head,
   data,
 }: StudioMenuProps & { data: StudioMenuData }): React.ReactElement {
   const scope = studioMenuScope(segment);
@@ -350,7 +359,9 @@ function StudioMenuBody({
     entry.kind === 'type' ? (labels.get(entry.type ?? '') ?? entry.type ?? '') : t(STUDIO_MENU_ENTRY_LABEL_KEYS[entry.kind], locale);
 
   const current = studioMenuCurrentKey({ segment, pathname, search });
-  const menu = buildStudioMenu({ scope, types, counts, settled: data.countsAnswered });
+  // objectstack#37565 — the catalog's lists open on Setup's page only for whoever may open Setup.
+  const setupDirectory = holdsSetupAccess(useStudioEntryPermissions());
+  const menu = buildStudioMenu({ scope, types, counts, settled: data.countsAnswered, setupDirectory });
   const searching = query.trim().length > 0;
   const matching = menu
     .map((g) => ({ ...g, entries: g.entries.filter((e) => studioMenuEntryMatches(e, labelOf(e), query)) }))
@@ -387,7 +398,8 @@ function StudioMenuBody({
     const Icon = studioMenuEntryIcon(entry, group);
     return (
       <SidebarMenuItem key={entry.key}>
-        <SidebarMenuButton asChild isActive={isCurrent}>
+        {/* objectstack#37456 — on the collapsed rail an entry is its icon, named by its tooltip. */}
+        <SidebarMenuButton asChild isActive={isCurrent} tooltip={label}>
           <Link
             to={entry.to}
             aria-current={isCurrent ? 'page' : undefined}
@@ -492,7 +504,9 @@ function StudioMenuBody({
 
   return (
     <Sidebar
-      collapsible="offcanvas"
+      // objectstack#37456 — collapsed, the column is a rail of icons that
+      // keeps the app's logo and the way back (ADR-0084, amended 2026-11-26).
+      collapsible="icon"
       // Docked below the surface's header, inside the body row, rather than
       // fixed to the window's full height as the app sidebar is.
       className="!absolute !h-full"
@@ -500,7 +514,8 @@ function StudioMenuBody({
       {/* Studio's accent over everything the menu draws, docked or in the
           phone drawer (the primitive puts its own class on the docked frame only). */}
       <div data-studio-accent="" data-testid="studio-menu-accent" className={cn('flex min-h-0 flex-1 flex-col', STUDIO_ACCENT)}>
-        <SidebarHeader className="border-b p-2">
+        <SidebarHeader className="gap-2 border-b p-2">
+          {head}
           <label htmlFor={searchId} className="sr-only">
             {t('engine.studio.menu.search', locale)}
           </label>
@@ -508,6 +523,7 @@ function StudioMenuBody({
             id={searchId}
             type="search"
             data-testid="studio-menu-search"
+            className={RAIL_HIDDEN}
             placeholder={t('engine.studio.menu.search', locale)}
             value={query}
             onChange={(e) => setQuery(e.target.value)}
@@ -527,7 +543,7 @@ function StudioMenuBody({
             {folded && (tiers.advanced.length > 0 || allTypes) && (
               <>
                 <div aria-hidden="true" data-testid="studio-menu-advanced-divider" className="mx-2 my-1 h-px bg-sidebar-border" />
-                <div className="px-2 py-1">
+                <div className={cn('px-2 py-1', RAIL_HIDDEN)}>
                   <button
                     type="button"
                     data-testid="studio-menu-advanced-toggle"

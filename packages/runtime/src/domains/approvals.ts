@@ -65,9 +65,11 @@
  */
 
 import { INTERNAL_ERROR_MESSAGE } from '@objectstack/types';
+import { operationUserMessage } from '@objectstack/core';
 import type { IApprovalService } from '@objectstack/spec/contracts';
 import type { HttpProtocolContext, HttpDispatcherResult } from '../http-dispatcher.js';
 import type { DomainHandlerDeps, DomainRoute } from '../domain-handler-registry.js';
+import { requestLocaleOf } from './own-door-bridge.js';
 
 /**
  * The one path this domain claims — exactly, with no sub-paths: the action
@@ -109,12 +111,13 @@ export async function handleApprovalsActRequest(
 ): Promise<HttpDispatcherResult> {
     const service = await deps.resolveService(context, APPROVALS_SLOT, context.environmentId) as
         Pick<IApprovalService, 'handleActionPage'> | undefined;
+    // [#37662] The `501` is the operation-message catalog's, in the request's
+    // top `Accept-Language` tag, as the own-door bridge answers its own.
     if (!service) {
         return {
             handled: true,
             response: deps.error(
-                'Approval action pages are not available: no approvals service is registered. '
-                + 'Register @objectstack/plugin-approvals to serve them.',
+                operationUserMessage('approvals_act_service_unregistered', { locale: requestLocaleOf(context) }),
                 501,
             ),
         };
@@ -123,8 +126,7 @@ export async function handleApprovalsActRequest(
         return {
             handled: true,
             response: deps.error(
-                'Approval action pages are not available: the registered approvals service '
-                + 'does not implement handleActionPage.',
+                operationUserMessage('approvals_act_member_missing', { locale: requestLocaleOf(context) }),
                 501,
             ),
         };

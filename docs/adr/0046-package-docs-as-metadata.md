@@ -601,6 +601,38 @@ straight from REST.
 > SEO/crawlability and tenant-from-host — are unchanged; they never depended on
 > the global flag.
 
+> **Amendment (objectstack#36029, 2026-11-26).** This section originally gave a
+> gated book one form, one named set (sketched above as `{ profile }`, shipped
+> as `{ permissionSet }` per ADR-0090). `book.audience` gains a fourth form
+> beside that one, `'org'` and `'public'`: `{ systemPermission: 'TOKEN' }`, a
+> strict object. It admits a signed-in caller whose own `systemPermissions`
+> list holds the named capability, through any permission set. That is the list
+> an app's `requiredPermissions` is judged on, so in a session a manual gated
+> this way opens for exactly the callers who can open its app. An anonymous
+> caller is denied, as is one whose list is absent or not a list (fail closed,
+> ADR-0049). The forms `{ permissionSet: X }` and `{ systemPermission: X }` read
+> two different lists and never satisfy each other. On the MCP docs tools, a
+> delegated OAuth grant is judged on the delegating person's own capabilities,
+> never the token's ceiling, as for the set form (ADR-0090 D10). A doc's
+> effective audience is still the union over the books that claim it.
+>
+> The set form names **one** set, and a capability such as `setup.access` is
+> granted by several (`organization_admin`, `admin_full_access`, any
+> delegated-admin set an application authors), so naming one shuts out the
+> holders of every other. The maintainer ruled option A, decide by system
+> permission (「A 按系统权限判定」, ruling record 7122770897), and PR #37591
+> implements it. The first consumers are `setup_manual` and `studio_manual`,
+> shipped by `@objectstack/setup` and `@objectstack/studio` and gated on
+> `setup.access` and `studio.access`. Before, no book claimed those packages'
+> docs, so they fell back to `org` and any signed-in member could read them at
+> their address; they now open only for callers who can open those apps.
+>
+> One authoring rule follows: a gated book claims its pages by name (a namespace
+> glob such as `setup_*`, or pinned `pages`), never by `include: '*'`. A package
+> scope leaves out only a doc stamped with *another* package, so a stored doc
+> bound to no package is in every scope, and a catch-all gated book would claim
+> it too and take it from every reader outside the audience.
+
 **Two frontend surfaces, addressed differently.** The URL must distinguish the
 authenticated app from the docs portal — and not only for the auth gate:
 

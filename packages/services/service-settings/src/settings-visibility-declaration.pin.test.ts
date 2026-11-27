@@ -74,7 +74,7 @@ describe('settings `visible` — declaration ⇄ evaluator', () => {
     expect(refusals).toEqual([]);
   });
 
-  it('the corpus is still the size the ruling measured — 10 manifests, 87 predicates', () => {
+  it('the corpus is still the size the ruling measured — 10 manifests, 110 predicates', () => {
     // If a bundled manifest gains or loses a `visible`, this number moves and
     // the reader is sent back to the measurement rather than trusting a stale
     // one. It is a tripwire on the premise, not a rule about how many
@@ -106,10 +106,15 @@ describe('settings `visible` — declaration ⇄ evaluator', () => {
     // service's passages too, so the target size applies to it.
     // 87 -> 83 with the retired third `knowledge.adapter` option: its group and
     // its three keys each carried one predicate over `data.adapter`.
-    // 83 -> 79 at #37104: `knowledge.adapter` itself was retired (nothing read
+    // 83 -> 110 when `ai` took several providers at once: each of its nine
+    // providers gained an on/off toggle (shown beside the default provider), a
+    // model list and its own Test connection, each with one predicate; the
+    // existing per-provider predicates kept their count, now read as "the
+    // default provider or turned on".
+    // 110 -> 106 at #37104: `knowledge.adapter` itself was retired (nothing read
     // it), so the four predicates over it went too: the `turso` group and its
     // two keys now always show, and `over_fetch` was retired with its own.
-    expect(predicates).toHaveLength(79);
+    expect(predicates).toHaveLength(106);
   });
 
   it('every bundled predicate is accepted by BOTH sides', () => {

@@ -56,6 +56,25 @@
  * ({@link skillBindingServed}); a skill that binds no tool is offered as
  * before, and a withheld skill is unknown to `prompts/get`, exactly like a
  * name no skill derives.
+ *
+ * ## A skill with `context` takes a record (ADR-0160 D8)
+ *
+ * A skill that names a context pack (`SkillSchema.context`) lists one optional
+ * prompt argument, the record id ({@link SKILL_PROMPT_RECORD_ARGUMENT}), when
+ * that name resolves to a pack ({@link skillPromptRecordContext}). Given, the
+ * prompt's one message carries the skill's instructions, one fixed platform
+ * line ({@link SKILL_PROMPT_RECORD_CONTEXT_LINE}) and the `get_record_context`
+ * call's arguments as one JSON object — `objectName`, `recordId`, `context`.
+ * The record id the client sent is only ever a JSON string value there, never
+ * joined into prose, and the pack is never inlined: the model reads it as the
+ * tool's answer, through the ordinary tool seams. Not given, or a name that
+ * resolves to no pack, and the prompt is byte-identical to the prompt of the
+ * same skill without the key. Parse requires such a skill to bind
+ * `get_record_context`, so the binding test above withholds it on a connection
+ * that does not serve the tool. The long-lived stdio server applies no binding
+ * filter (#37609); it hands this surface no pack listing unless it registers
+ * `get_record_context` (`MCPServerRuntime.bridgePrompts`), so there the skill
+ * is listed as before, without the argument and without the line.
  */
 
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
@@ -66,11 +85,18 @@ import {
   McpError,
 } from '@modelcontextprotocol/sdk/types.js';
 import {
+  RUNTIME_COMPATIBILITY_PACKAGE_ID,
   describePackageScopedHolder,
   packageScopedHolderSource,
   resolvePackageScopedHolders,
 } from '@objectstack/core';
-import { deriveAiFaceName } from '@objectstack/spec/ai';
+import {
+  AiContextSchema,
+  GET_RECORD_CONTEXT_TOOL_NAME,
+  deriveAiFaceName,
+  type AiContext,
+} from '@objectstack/spec/ai';
+import { stripReadDecorations } from '@objectstack/spec/kernel';
 
 /**
  * Skill-metadata access seam for the MCP prompt surface.
@@ -98,6 +124,45 @@ export interface McpSkillBridge {
    * alone, the environment item's face, as before.
    */
   packageNamespace?(packageId: string): string | undefined;
+  /**
+   * [ADR-0160 D8] The context packs (`ai_context`) visible in this
+   * environment, as raw rows: the listing `get_record_context` selects from,
+   * which a skill's `context` is resolved against
+   * ({@link skillPromptRecordContext}). Read decorations are stripped here,
+   * and a row that does not parse is no pack, as at the tool.
+   *
+   * OPTIONAL: a host without it offers no skill a record argument, and every
+   * prompt is the one it is without `context`.
+   */
+  listContextPacks?(): Promise<unknown[]>;
+  /**
+   * [ADR-0150 D3 step 2] A package's resolution closure: the packages other
+   * than itself whose items a bare name it writes may resolve to (its declared
+   * dependency closure plus every `sys` package; `packageResolutionClosure`,
+   * `@objectstack/metadata-core`). Read for a package-held skill whose
+   * `context` names no pack of its own package.
+   *
+   * OPTIONAL: without it a package-held skill resolves only its own package's
+   * pack, and a pack its package depends on is answered as no pack — never
+   * one picked environment-wide.
+   */
+  packageResolutionClosure?(packageId: string): ReadonlySet<string>;
+}
+
+/**
+ * [ADR-0160 D8] The `get_record_context` call a skill's prompt asks the model
+ * to make, less the record id the client supplies: what the skill's `context`
+ * resolved to.
+ */
+export interface SkillPromptRecordContext {
+  /** The resolved pack's root object: the call's `objectName`. */
+  objectName: string;
+  /**
+   * The resolved pack's AI face (ADR-0150's addendum of 2026-11-25, reader 2):
+   * `NS-NAME` for a package's pack, its bare name for an environment pack — the
+   * spelling the tool's `context` argument selects exactly that pack by.
+   */
+  context: string;
 }
 
 /**
@@ -122,6 +187,12 @@ export interface SkillPrompt {
   description?: string;
   /** The prompt body — the skill's `instructions`. */
   instructions: string;
+  /**
+   * [ADR-0160 D8] Present only when the skill's `context` resolves to a pack:
+   * the prompt then lists the record argument and, given one, asks for this
+   * call ({@link skillPromptResult}).
+   */
+  recordContext?: SkillPromptRecordContext;
 }
 
 function readString(source: Record<string, unknown>, key: string): string | undefined {
@@ -218,6 +289,7 @@ async function listSkillPromptsServedBy(
     ? (packageId: string) => bridge.packageNamespace!(packageId)
     : undefined;
   const out: SkillPrompt[] = [];
+  const contextOf = new Map<SkillPrompt, string>();
   const seen = new Set<string>();
   for (const row of rows) {
     const prompt = projectSkillPrompt(row, namespaceOf);
@@ -230,8 +302,103 @@ async function listSkillPromptsServedBy(
     if (seen.has(holding)) continue;
     seen.add(holding);
     out.push(prompt);
+    const context = readString(row as Record<string, unknown>, 'context');
+    if (context) contextOf.set(prompt, context);
+  }
+  // [ADR-0160 D8] The packs are read only when an offered skill names one.
+  if (contextOf.size > 0 && typeof bridge.listContextPacks === 'function') {
+    const packs = contextPackHoldings((await bridge.listContextPacks()) ?? [], namespaceOf);
+    const closureOf = typeof bridge.packageResolutionClosure === 'function'
+      ? (packageId: string) => bridge.packageResolutionClosure!(packageId)
+      : undefined;
+    for (const [prompt, context] of contextOf) {
+      const recordContext = skillPromptRecordContext({ context, packageId: prompt.packageId }, packs, closureOf);
+      if (recordContext) prompt.recordContext = recordContext;
+    }
   }
   return out;
+}
+
+/**
+ * [ADR-0160 D8] One context pack as a skill's `context` resolves against it:
+ * the parsed pack, its holder and its AI face — the three things the tool's
+ * pack selection reads (`selectContextPack`, `@objectstack/service-record-context`).
+ */
+export interface ContextPackHolding {
+  pack: AiContext;
+  /** The package holding the pack; absent for an environment pack. */
+  packageId?: string;
+  /** The pack's AI face: `NS-NAME` for a package's pack, its bare name otherwise. */
+  face: string;
+}
+
+/**
+ * The package a pack's row is bound to: a non-empty `_packageId` that is not
+ * one of the two spellings ADR-0150 D3 reads as "no package" (the package-less
+ * row's `sys_metadata` sentinel, the runtime's compatibility id) — the reading
+ * `get_record_context`'s pack selection takes of the same row.
+ */
+function packHolderOf(pack: AiContext): string | undefined {
+  const id = (pack as { _packageId?: unknown })._packageId;
+  return typeof id === 'string' && id !== '' && id !== 'sys_metadata' && id !== RUNTIME_COMPATIBILITY_PACKAGE_ID
+    ? id
+    : undefined;
+}
+
+/**
+ * [ADR-0160 D8] The packs of a listing as a skill's `context` resolves
+ * against them, in listing order. Read decorations are stripped and a row
+ * that does not parse is no pack, as at the tool; each face is derived by the
+ * one derivation (`deriveAiFaceName`) from the holder's namespace.
+ */
+export function contextPackHoldings(
+  rows: readonly unknown[],
+  packageNamespace?: (packageId: string) => string | undefined,
+): ContextPackHolding[] {
+  const out: ContextPackHolding[] = [];
+  for (const row of rows) {
+    const parsed = AiContextSchema.safeParse(stripReadDecorations(row));
+    if (!parsed.success) continue;
+    const pack = parsed.data as AiContext;
+    const packageId = packHolderOf(pack);
+    const namespace = packageId !== undefined ? packageNamespace?.(packageId) : undefined;
+    out.push({ pack, ...(packageId !== undefined ? { packageId } : {}), face: deriveAiFaceName({ name: pack.name, namespace }) });
+  }
+  return out;
+}
+
+/**
+ * [ADR-0160 D8; ADR-0150's addendum of 2026-11-25, reader 2] What a skill's
+ * `context` resolves to, or `undefined` when it names no pack.
+ *
+ * The key is a reference between items, a bare name, so it resolves by the
+ * one rule (`resolvePackageScopedHolders`, ADR-0150 D3) over the packs of
+ * that name: from the skill's own package (its own pack, else the one holder
+ * in its resolution closure), and as a caller with no package for a skill
+ * authored in the environment (the environment's own pack, else the one
+ * package holder). A refusal — two holders the rule cannot pick between, or
+ * holders all outside the skill's closure — resolves to no pack: ⛔ never one
+ * picked by order. The pack is handed on by its face, so the tool's selection
+ * reads back exactly the pack resolved here.
+ */
+export function skillPromptRecordContext(
+  skill: { context: string; packageId?: string },
+  packs: readonly ContextPackHolding[],
+  closureOf: (packageId: string) => ReadonlySet<string> = () => new Set<string>(),
+): SkillPromptRecordContext | undefined {
+  const named = packs.filter((p) => p.pack.name === skill.context);
+  if (named.length === 0) return undefined;
+  // A holder holds a name once (one slot per `(package, name)`); two rows of
+  // one holder are a malformed listing, never chosen between.
+  const holders = new Set(named.map((p) => p.packageId ?? null));
+  if (holders.size !== named.length) return undefined;
+  const resolution = resolvePackageScopedHolders<ContextPackHolding>(
+    { type: 'ai_context', name: skill.context, callerPackageId: skill.packageId ?? null },
+    packageScopedHolderSource(named.map((p) => [p.packageId ?? null, p] as const)),
+    closureOf,
+  );
+  if (resolution.status !== 'resolved') return undefined;
+  return { objectName: resolution.item.pack.object, context: resolution.item.face };
 }
 
 /**
@@ -421,8 +588,43 @@ export function skillPromptRefusalError(lookup: Extract<SkillPromptLookup, { sta
   });
 }
 
-/** The `prompts/list` entry of one face: a duplicate face is listed once, as the refusal it answers. */
-export function skillPromptListEntry(entry: SkillPromptFace): { name: string; title?: string; description?: string } {
+/** [ADR-0160 D8] The one argument a skill whose `context` resolves to a pack lists: the record id. */
+export const SKILL_PROMPT_RECORD_ARGUMENT = 'recordId';
+
+/** One MCP prompt argument, as `prompts/list` carries it. */
+export interface SkillPromptArgument {
+  name: string;
+  description: string;
+  required: false;
+}
+
+/** [ADR-0160 D8] The record argument's `prompts/list` entry. It names no object: the pack's root is the call's, never the listing's. */
+export function skillPromptRecordArgument(): SkillPromptArgument {
+  return {
+    name: SKILL_PROMPT_RECORD_ARGUMENT,
+    description:
+      'The id of the record this skill works on. Given, the prompt asks the model to read that record with '
+      + `${GET_RECORD_CONTEXT_TOOL_NAME} before it follows the instructions.`,
+    required: false,
+  };
+}
+
+/**
+ * [ADR-0160 D8] The fixed platform line a record-scoped prompt carries between
+ * the skill's instructions and the call's arguments. Platform-written and the
+ * same for every skill and record: no client value is ever joined into it.
+ */
+export const SKILL_PROMPT_RECORD_CONTEXT_LINE =
+  `Before you follow the instructions above, call the ${GET_RECORD_CONTEXT_TOOL_NAME} tool with exactly the `
+  + 'arguments in the JSON object on the next line, and work from the record it answers.';
+
+/**
+ * The `prompts/list` entry of one face: a duplicate face is listed once, as the refusal it answers.
+ * [ADR-0160 D8] A skill whose `context` resolves to a pack lists the record argument.
+ */
+export function skillPromptListEntry(
+  entry: SkillPromptFace,
+): { name: string; title?: string; description?: string; arguments?: SkillPromptArgument[] } {
   if (entry.prompts.length > 1) {
     return { name: entry.face, description: `Not served: ${duplicateSkillFaceMessage(entry)}` };
   }
@@ -431,11 +633,38 @@ export function skillPromptListEntry(entry: SkillPromptFace): { name: string; ti
     name: entry.face,
     ...(prompt.title ? { title: prompt.title } : {}),
     ...(prompt.description ? { description: prompt.description } : {}),
+    ...(prompt.recordContext ? { arguments: [skillPromptRecordArgument()] } : {}),
   };
 }
 
-/** The MCP `prompts/get` result for one projected skill. */
-export function skillPromptResult(prompt: SkillPrompt) {
+/**
+ * The MCP `prompts/get` result for one projected skill.
+ *
+ * [ADR-0160 D8] For a skill whose `context` resolved to a pack, a given
+ * record id ({@link SKILL_PROMPT_RECORD_ARGUMENT}) adds two parts to the one
+ * message, after the instructions: {@link SKILL_PROMPT_RECORD_CONTEXT_LINE},
+ * then the `get_record_context` call's arguments as one JSON object
+ * (`objectName`, `recordId`, `context`). The record id is only ever that
+ * object's string value — `JSON.stringify` escapes whatever it holds, so it
+ * cannot leave the value — and the pack is never inlined. No record id, or a
+ * skill whose `context` resolves to no pack: the result is exactly the one
+ * the skill has without the key, whatever arguments were sent. A record id
+ * that is not a non-empty string is refused (`-32602`).
+ */
+export function skillPromptResult(prompt: SkillPrompt, args?: Record<string, unknown>) {
+  const recordId = prompt.recordContext ? args?.[SKILL_PROMPT_RECORD_ARGUMENT] : undefined;
+  let text = prompt.instructions;
+  if (recordId !== undefined) {
+    if (typeof recordId !== 'string' || recordId.trim() === '') {
+      throw new McpError(
+        ErrorCode.InvalidParams,
+        `The "${SKILL_PROMPT_RECORD_ARGUMENT}" argument of prompt "${prompt.face}" is the id of a record: a non-empty `
+          + 'string. Send the id, or leave the argument out for the prompt without a record.',
+      );
+    }
+    const call = { objectName: prompt.recordContext!.objectName, recordId, context: prompt.recordContext!.context };
+    text = `${prompt.instructions}\n\n${SKILL_PROMPT_RECORD_CONTEXT_LINE}\n${JSON.stringify(call)}`;
+  }
   return {
     ...(prompt.description ? { description: prompt.description } : {}),
     messages: [
@@ -444,7 +673,7 @@ export function skillPromptResult(prompt: SkillPrompt) {
         // context handed TO the model, which is the `user` role in this
         // protocol (there is no `system` role in `prompts/get`).
         role: 'user' as const,
-        content: { type: 'text' as const, text: prompt.instructions },
+        content: { type: 'text' as const, text },
       },
     ],
   };
@@ -501,6 +730,7 @@ export function registerSkillPrompts(
     if (lookup.status === 'not-found') {
       throw new McpError(ErrorCode.InvalidParams, `Prompt "${wanted}" not found`);
     }
-    return skillPromptResult(lookup.prompt);
+    // [ADR-0160 D8] The record argument, read only for a skill that lists it.
+    return skillPromptResult(lookup.prompt, request.params.arguments);
   });
 }

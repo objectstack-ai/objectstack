@@ -56,6 +56,8 @@ import {
   smsTestActionHandler,
   storageTestActionHandler,
   aiTestActionHandler,
+  aiProviderTestActionHandlers,
+  registerAiModelRules,
 } from './manifests/index.js';
 import { settingsBuiltinTranslations } from './translations/index.js';
 
@@ -212,7 +214,7 @@ export class SettingsServicePlugin implements Plugin {
         // are contributed by `@objectstack/service-knowledge`, which registers
         // both handlers with them. `registerAction` refuses a namespace that is
         // not registered, so a default entry for `knowledge` would stop the boot.
-        ai: { test: aiTestActionHandler },
+        ai: { test: aiTestActionHandler, ...aiProviderTestActionHandlers },
       },
     };
   }
@@ -257,6 +259,9 @@ export class SettingsServicePlugin implements Plugin {
         continue;
       }
       this.service.registerManifest(m);
+      // The `ai` model configuration's save rule: a default or structured-output
+      // model is one of the models of a provider that is on (`ai-models.ts`).
+      if (m.namespace === 'ai') registerAiModelRules(this.service, m);
     }
     for (const ns of Object.keys(this.opts.actionHandlers ?? {})) {
       // A held namespace's handlers register with its manifest, or not at all.

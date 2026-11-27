@@ -60,7 +60,7 @@
  * dispatcher's `404 ROUTE_NOT_FOUND`: the route IS mounted, and what is
  * missing is the implementation behind it.
  *
- * ## The `501` is in the request's language when the bridge names its noun
+ * ## The `501` is in the request's language
  *
  * [#37273] The two `501` sentences are the operation-message catalog's
  * (`own_door_service_unregistered`, `own_door_member_missing`), rendered in
@@ -69,10 +69,10 @@
  * own for its 5xx). The bridge holds no `ExecutionContext` and no `i18n`
  * service, so the header is the only source and no `errors.own_door_*`
  * override is consulted. The door's noun is a catalog key too
- * ({@link OwnDoorBridge.nounKey}); a bridge that names none keeps its English
- * sentence whatever the language, so a sentence is never half translated.
- * Only the language moves: the English is byte-identical, the code and the
- * status are unchanged, and no `userMessage` is added. The slot, member and
+ * ({@link OwnDoorBridge.nounKey}), required so no bridge ships an English-only
+ * `501`; a plural noun ({@link OwnDoorBridge.nounPlural}) reads the `_plural`
+ * pair of sentences, so the English verb agrees. Only the language moves: the
+ * code and the status are unchanged, and no `userMessage` is added. The slot, member and
  * package names are identifiers and stay as written.
  */
 
@@ -105,9 +105,14 @@ export interface OwnDoorBridge {
     /**
      * [#37273] The operation-message catalog key of {@link noun} (its English
      * text is `noun`'s, byte for byte), which puts the bridge's `501` in the
-     * request's language. Absent, the `501` stays English.
+     * request's language. Required (#37610): a bridge cannot ship English-only.
      */
-    readonly nounKey?: string;
+    readonly nounKey: string;
+    /**
+     * [#37610] {@link noun} is plural (`the … doors`): the `501` reads the
+     * catalog's `_plural` sentences, so the English says "are".
+     */
+    readonly nounPlural?: true;
     /** The log tag, e.g. `personal-views`. */
     readonly tag: string;
 }
@@ -231,24 +236,25 @@ export async function handleOwnDoorBridgeRequest(
     }
 }
 
-/**
- * A `501` sentence of the catalog, in the request's top `Accept-Language` tag
- * when the bridge names its noun's key, in English otherwise (the noun would
- * stay English, and a sentence is never half translated).
- */
+/** A `501` sentence of the catalog, in the request's top `Accept-Language` tag. */
 function notImplementedSentence(
     bridge: OwnDoorBridge,
     context: HttpProtocolContext,
     messageKey: 'own_door_service_unregistered' | 'own_door_member_missing',
     params: Record<string, string>,
 ): string {
-    const caller = bridge.nounKey !== undefined ? { locale: requestLocaleOf(context) } : undefined;
-    const noun = bridge.nounKey !== undefined ? operationUserMessage(bridge.nounKey, caller) : bridge.noun;
-    return operationUserMessage(messageKey, caller, { door: capitalize(noun), slot: bridge.slot, ...params });
+    const caller = { locale: requestLocaleOf(context) };
+    const noun = operationUserMessage(bridge.nounKey, caller);
+    const key = bridge.nounPlural ? `${messageKey}_plural` : messageKey;
+    return operationUserMessage(key, caller, { door: capitalize(noun), slot: bridge.slot, ...params });
 }
 
-/** The request's top `Accept-Language` tag, from a fetch `Request` or a plain header record. */
-function requestLocaleOf(context: HttpProtocolContext): string | undefined {
+/**
+ * The request's top `Accept-Language` tag, from a fetch `Request` or a plain
+ * header record: the language of an own door's `501` (#37610: the comment and
+ * webhook redelivery doors read it too).
+ */
+export function requestLocaleOf(context: HttpProtocolContext): string | undefined {
     const headers = (context.request as { headers?: unknown } | undefined)?.headers as
         | { get?: (name: string) => string | null }
         | Record<string, unknown>

@@ -12,11 +12,12 @@
  * draws a different number of same-titled headings than the outline lists, the
  * field is opened rather than a heading that may be another one.
  */
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import { headingsOf } from '@objectstack/spec/ai';
 import {
   RECORD_SECTION_TARGET_ATTR,
   focusRecordSection,
+  loadSectionHeadingReader,
   locateSection,
   sectionCandidates,
 } from './recordSectionAnchor';
@@ -43,6 +44,9 @@ function row(field: string, inner: string): string {
   return `<div data-detail-field="${field}">${inner}</div>`;
 }
 
+// The markdown face's parse, loaded once, as the record page loads it.
+beforeAll(() => loadSectionHeadingReader());
+
 afterEach(() => {
   document.body.innerHTML = '';
   vi.useRealTimers();
@@ -60,24 +64,24 @@ describe('objectstack#37365 — sectionCandidates derives the anchor as the serv
     const server = headingsOf(MARKDOWN, false).map((h) => h.anchor);
     expect(server).toEqual(['intro', 'scope', 'scope-2']);
     expect(sectionCandidates(FIELDS, RECORD, 'scope')).toEqual([
-      { field: 'content', face: 'markdown', reading: 'scope', ordinal: 0, count: 2 },
+      { field: 'content', face: 'markdown', reading: 'scope', ordinal: 0, count: 2, unlisted: 0 },
     ]);
     expect(sectionCandidates(FIELDS, RECORD, 'scope-2')).toEqual([
-      { field: 'content', face: 'markdown', reading: 'scope', ordinal: 1, count: 2 },
+      { field: 'content', face: 'markdown', reading: 'scope', ordinal: 1, count: 2, unlisted: 0 },
     ]);
   });
 
   it('reads an html body as html', () => {
     expect(headingsOf(HTML, true).map((h) => h.anchor)).toContain('data-privacy');
     expect(sectionCandidates(FIELDS, RECORD, 'data-privacy')).toEqual([
-      { field: 'legal', face: 'html', reading: 'dataprivacy', ordinal: 0, count: 1 },
+      { field: 'legal', face: 'html', reading: 'dataprivacy', ordinal: 0, count: 1, unlisted: 0 },
     ]);
   });
 
   it('a `textarea` body is a candidate drawn as text', () => {
     const record = { ...RECORD, summary: '# Steps\n\nDo it.' };
     expect(sectionCandidates(FIELDS, record, 'steps')).toEqual([
-      { field: 'summary', face: 'text', reading: 'steps', ordinal: 0, count: 1 },
+      { field: 'summary', face: 'text', reading: 'steps', ordinal: 0, count: 1, unlisted: 0 },
     ]);
   });
 
@@ -109,7 +113,7 @@ describe('objectstack#37365 — locateSection finds the drawn heading', () => {
     const body = ['Scope', '=====', '', 'x', '', '# Scope', '', 'y'].join('\n');
     expect(headingsOf(body, false).map((h) => h.anchor)).toEqual(['scope']);
     const candidates = sectionCandidates(FIELDS, { content: body }, 'scope');
-    expect(candidates).toEqual([{ field: 'content', face: 'markdown', reading: 'scope', ordinal: 0, count: 1 }]);
+    expect(candidates).toEqual([{ field: 'content', face: 'markdown', reading: 'scope', ordinal: 0, count: 1, unlisted: 1 }]);
     document.body.innerHTML = row('content', '<h1 id="setext">Scope</h1><p>x</p><h1 id="atx">Scope</h1><p>y</p>');
     const target = locateSection(document.body, candidates);
     expect(target?.field.getAttribute('data-detail-field')).toBe('content');
@@ -134,6 +138,91 @@ describe('objectstack#37365 — locateSection finds the drawn heading', () => {
     // CONTROL: the body without the HTML block; `scope` is the drawn heading.
     const control = ['# Scope', '', 'y'].join('\n');
     expect(locateSection(document.body, sectionCandidates(FIELDS, { content: control }, 'scope'))?.heading?.id).toBe('real');
+  });
+
+  it('objectstack#37562 N6 — one unlisted same-titled heading plus one listed-but-undrawn heading opens the field, never a heading; CONTROL: the first Scope a paragraph line, the cited heading is marked', () => {
+    // A setext `Scope` the outline does not list, and `# Scope` inside a raw
+    // HTML block that the outline lists and the face does not draw: the face
+    // draws two `Scope`s and the outline lists two, so the count agrees while
+    // index 0 of the drawn ones is the setext heading, not the cited one.
+    const body = ['Scope', '=====', '', 'x', '', '<div>', '# Scope', '</div>', '', '# Scope', '', 'y'].join('\n');
+    expect(headingsOf(body, false).map((h) => h.anchor)).toEqual(['scope', 'scope-2']);
+    document.body.innerHTML = row(
+      'content',
+      '<h1 id="setext">Scope</h1><p>x</p><div># Scope</div><h1 id="atx">Scope</h1><p>y</p>',
+    );
+    for (const anchor of ['scope', 'scope-2']) {
+      const candidates = sectionCandidates(FIELDS, { content: body }, anchor);
+      expect(candidates).toEqual([
+        { field: 'content', face: 'markdown', reading: 'scope', ordinal: anchor === 'scope' ? 0 : 1, count: 2, unlisted: 1 },
+      ]);
+      const target = locateSection(document.body, candidates);
+      expect(target?.field.getAttribute('data-detail-field')).toBe('content');
+      expect(target?.heading).toBeUndefined();
+    }
+    // CONTROL: the first `Scope` a paragraph line, which no face draws as a
+    // heading; with the HTML block gone the outline and the face agree.
+    const control = ['Scope', '', 'x', '', '# Scope', '', 'y'].join('\n');
+    expect(sectionCandidates(FIELDS, { content: control }, 'scope')).toEqual([
+      { field: 'content', face: 'markdown', reading: 'scope', ordinal: 0, count: 1, unlisted: 0 },
+    ]);
+    document.body.innerHTML = row('content', '<p>Scope</p><p>x</p><h1 id="atx">Scope</h1><p>y</p>');
+    expect(locateSection(document.body, sectionCandidates(FIELDS, { content: control }, 'scope'))?.heading?.id).toBe('atx');
+  });
+
+  it.each([
+    ['a setext heading', ['Scope', '-----']],
+    ['a two-line setext heading', ['Sco', 'pe', '===']],
+    ['a setext heading inside a quote', ['> Scope', '> ---']],
+    ['a setext heading under a comment line', ['<!-- note -->', 'Scope', '---']],
+    ['a setext heading under a link definition', ['[a]: https://example.com', 'Scope', '===']],
+    ['a setext heading under indented code', ['    code', 'Scope', '---']],
+    ['an ATX heading behind a quote', ['> # Scope']],
+    ['an ATX heading in a list item', ['1. ## Scope']],
+    ['an ATX heading behind blanks', ['   # Scope']],
+    ['an ATX heading in a footnote', ['x[^1]', '', '[^1]: # Scope']],
+  ])('objectstack#37562 S1 — %s, which the face draws, counts as unlisted', (_shape, lines) => {
+    const value = [...lines, '', '# Scope'].join('\n');
+    expect(sectionCandidates(FIELDS, { content: value }, 'scope')[0]?.unlisted).toBe(1);
+  });
+
+  it("objectstack#37562 S1 — the footnote section's Footnotes label counts against a cited `Footnotes`; CONTROL: with no footnote, none", () => {
+    const value = ['# Footnotes', '', 'x[^1]', '', '[^1]: y'].join('\n');
+    expect(sectionCandidates(FIELDS, { content: value }, 'footnotes')[0]?.unlisted).toBe(1);
+    expect(sectionCandidates(FIELDS, { content: '# Footnotes\n\nx' }, 'footnotes')[0]?.unlisted).toBe(0);
+  });
+
+  it.each([
+    ['a raw heading tag', ['<h2>Scope</h2>']],
+    ['an indented code line', ['    # Scope']],
+    ['a lazy quote line over a rule', ['> Scope', '---']],
+    ['fenced code', ['```', 'Scope', '===', '> # Scope', '```']],
+    ['other titles, a rule under a blank line, a plain list item', ['Preface', '=======', '', '> # Intro', '', '---', '', '- Scope']],
+  ])('objectstack#37562 N1 — %s, which the face never draws, does not count', (_shape, lines) => {
+    const value = [...lines, '', '# Scope'].join('\n');
+    expect(sectionCandidates(FIELDS, { content: value }, 'scope')[0]?.unlisted).toBe(0);
+  });
+
+  it('an html body counts a heading tag left unclosed or opened inside another; CONTROL: hr and header tags count none', () => {
+    const unlisted = (value: string): number | undefined => sectionCandidates(FIELDS, { legal: value }, 'scope')[0]?.unlisted;
+    expect(unlisted('<h2>Scope</h2><p>x</p><h2>Scope')).toBe(1);
+    expect(unlisted('<h2>About <h2>Scope</h2><h2>Scope</h2>')).toBe(1);
+    expect(unlisted('<h2>Scope</h2><hr><header>Scope</header>')).toBe(0);
+  });
+
+  it('objectstack#37562 — before the face’s parse loads, a markdown count is not trusted; once it loads, the heading is marked', async () => {
+    vi.resetModules();
+    const fresh = await import('./recordSectionAnchor');
+    const candidates = fresh.sectionCandidates(FIELDS, RECORD, 'scope');
+    expect(candidates[0].unlisted).toBeUndefined();
+    document.body.innerHTML = row('content', '<h1>Intro</h1><h2 id="s">Scope</h2><h2>Scope</h2>');
+    expect(fresh.locateSection(document.body, candidates)?.heading).toBeUndefined();
+    const heading = document.getElementById('s')!;
+    heading.scrollIntoView = vi.fn();
+    fresh.focusRecordSection(document.body, candidates, 5000);
+    expect(heading.hasAttribute(RECORD_SECTION_TARGET_ATTR)).toBe(false);
+    await vi.waitFor(() => expect(heading.getAttribute(RECORD_SECTION_TARGET_ATTR)).toBe('true'), { timeout: 5000 });
+    expect(heading.scrollIntoView).toHaveBeenCalledTimes(1);
   });
 
   it('a heading with no letter or digit opens the field; CONTROL: a titled heading beside it is marked', () => {
@@ -198,6 +287,50 @@ describe('objectstack#37365 — focusRecordSection', () => {
     focusRecordSection(document.body, sectionCandidates(FIELDS, { ...RECORD, summary: '# Steps\n\nDo it.' }, 'steps'));
     expect(scroll).toHaveBeenCalledTimes(1);
     expect(document.querySelector(`[${RECORD_SECTION_TARGET_ATTR}]`)).toBeNull();
+  });
+
+  it('objectstack#37562 N7 — a heading that reads as nothing scrolls to the field at once; CONTROL: a titled heading not yet drawn still waits for the settle', () => {
+    vi.useFakeTimers();
+    const body = ['# ???', '', 'x', '', '# Intro', '', 'y'].join('\n');
+    const [blank, intro] = headingsOf(body, false);
+    document.body.innerHTML = row('content', '<p>loading</p>');
+    const field = document.querySelector<HTMLElement>('[data-detail-field="content"]')!;
+    const scroll = vi.fn();
+    field.scrollIntoView = scroll;
+    focusRecordSection(document.body, sectionCandidates(FIELDS, { content: body }, blank.anchor), 50);
+    expect(scroll).toHaveBeenCalledTimes(1);
+    vi.advanceTimersByTime(60);
+    expect(scroll).toHaveBeenCalledTimes(1);
+    expect(document.querySelector(`[${RECORD_SECTION_TARGET_ATTR}]`)).toBeNull();
+    // CONTROL: `Intro` is not drawn yet, so the page waits for it until the settle.
+    scroll.mockClear();
+    focusRecordSection(document.body, sectionCandidates(FIELDS, { content: body }, intro.anchor), 50);
+    expect(scroll).not.toHaveBeenCalled();
+    vi.advanceTimersByTime(60);
+    expect(scroll).toHaveBeenCalledTimes(1);
+  });
+
+  it('objectstack#37562 N3 — a body drawing a same-titled heading the outline does not list scrolls to the field at once; CONTROL: without it, an undrawn heading still waits for the settle', () => {
+    vi.useFakeTimers();
+    const body = ['Scope', '=====', '', 'x', '', '# Scope', '', 'y'].join('\n');
+    document.body.innerHTML = row('content', '<h1>Scope</h1><p>x</p><h1>Scope</h1><p>y</p>');
+    const field = document.querySelector<HTMLElement>('[data-detail-field="content"]')!;
+    const scroll = vi.fn();
+    field.scrollIntoView = scroll;
+    focusRecordSection(document.body, sectionCandidates(FIELDS, { content: body }, 'scope'), 50);
+    expect(scroll).toHaveBeenCalledTimes(1);
+    vi.advanceTimersByTime(60);
+    expect(scroll).toHaveBeenCalledTimes(1);
+    expect(document.querySelector(`[${RECORD_SECTION_TARGET_ATTR}]`)).toBeNull();
+    // CONTROL: the setext heading titled otherwise and `Scope` not drawn yet.
+    scroll.mockClear();
+    document.body.innerHTML = row('content', '<h1>Preface</h1><p>x</p><p>loading</p>');
+    document.querySelector<HTMLElement>('[data-detail-field="content"]')!.scrollIntoView = scroll;
+    const control = ['Preface', '=======', '', 'x', '', '# Scope', '', 'y'].join('\n');
+    focusRecordSection(document.body, sectionCandidates(FIELDS, { content: control }, 'scope'), 50);
+    expect(scroll).not.toHaveBeenCalled();
+    vi.advanceTimersByTime(60);
+    expect(scroll).toHaveBeenCalledTimes(1);
   });
 
   it('a heading never drawn settles on the field, with no error', () => {

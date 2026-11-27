@@ -6,7 +6,7 @@ fragments.
 
 ### State Machine — a `state_machine` validation rule (ADR-0020)
 
-Since **ADR-0020** there is **no `workflow` metadata type** and no
+There is **no `workflow` metadata type** and no
 `object.stateMachines` map. A record state machine is **one `state_machine`
 validation rule** in the object's `validations` array: a flat `field` +
 `{ from: [allowedTo] }` transition table. It is **enforced on the write path**:
@@ -28,12 +28,11 @@ const rule: StateMachineValidation = {
     open:      ['escalated', 'resolved'],
     escalated: ['open', 'resolved'],
     resolved:  ['open', 'closed'],
-    closed:    [],                 // final — no outgoing transitions
+    closed:    [],                 // final
   },
 };
 ```
 
-Notes:
 - **One rule per field.** Parallel lifecycles (`status` + `payment_status`)
   are separate `state_machine` rules.
 - **`initialStates`** gates INSERT: a record created in a state outside
@@ -61,7 +60,7 @@ Notes:
 
 ### Approvals (Flow Nodes)
 
-Since **ADR-0019** there is no standalone approval-process type. An approval is
+There is no standalone approval-process type (ADR-0019). An approval is
 authored as an **Approval node** (`type: 'approval'`) on an ordinary flow — the
 run **suspends** when it reaches the node and **resumes** down the node's
 `approve` / `reject` out-edge once a decision is recorded. Multi-step review is
@@ -123,24 +122,22 @@ the same literal goes inside `defineFlow(...)`, and `` cel`…` `` builds each
 
 ### Send-back for revision (ADR-0044)
 
-Approval centers also model **send back for revision** — distinct from
-`reject` (terminate) and from a comment thread (which keeps the request pending).
-Send-back is a **flow movement**: the request finalizes as `returned`, the run
+**Send back for revision** is distinct from `reject` (terminate) and from a
+comment thread (the request stays pending).
+It is a **flow movement**: the request finalizes as `returned`, the run
 walks a **`revise`** out-edge to an **`approval_revise`** node (the *revise
 window*) where the record unlocks and the submitter reworks it, and an explicit
 *resubmit* re-enters the approval node over a **declared back-edge**, opening
 round N+1 with a fresh approver slate.
 
-Three pieces author it:
-
-1. **`revise` out-edge** — a third branch label alongside `approve` / `reject`,
-   targeting an **`approval_revise`** node. It must be that node type: the window
+1. **`revise` out-edge** — targets an **`approval_revise`** node. It must be
+   that node type: the window
    is a *service-owned* pause (`resumeAuthority: 'service'`), ended only by
    `POST /api/v1/approvals/requests/:id/resubmit`; a `wait` is
    `resumeAuthority: 'any'`, so a raw run-resume would walk the back-edge
-   unchecked. The node takes **no config** — there is no signal to wait on.
+   unchecked. The node takes **no config**.
 2. **`type: 'back'` resubmit edge** — the edge from the revise window back into
-   the approval node MUST be typed `'back'`. This is the *only* thing that
+   the approval node MUST be typed `'back'`. This
    legalizes the cycle: `registerFlow` validates the graph **minus `back` edges**
    as a DAG, so an **unmarked** cycle is rejected. At
    run time a back-edge traverses normally.
@@ -173,7 +170,7 @@ A decision is recorded through `ApprovalService.decide()` (or the REST routes
 `POST /api/v1/approvals/requests/:id/approve` | `/reject`), a reject always
 with a non-blank `comment`, its reason (else `400 VALIDATION_ERROR`). That
 finalizes the `sys_approval_request` and **resumes** the suspended run down the
-matching branch — you never resume the flow by hand, and you *cannot*: the
+matching branch — you *cannot* resume the flow by hand: the
 `approval` node declares `resumeAuthority: 'service'`, so
 `POST /api/v1/automation/:name/runs/:runId/resume` answers **403** for a run
 parked on one (including via a `subflow` pause) and changes nothing.
@@ -337,9 +334,9 @@ Object-hook `ctx` is a different vocabulary — see **objectstack-data**
 | Field | Purpose |
 |:------|:--------|
 | `approvers` | Who may act (≥ 1 — see Approver Types above). Each approver may carry an optional **`group`** label (e.g. `{ type: 'position', value: 'crm_auditor', group: 'finance' }`) — with `behavior: 'per_group'`, approvers sharing a label form one group; unlabelled approvers each form their own |
-| `behavior` | `first_response` (first approver decides), `unanimous` (all must approve), `quorum` (`minApprovals` of N — M-of-N collective sign-off), or `per_group` (EACH approver `group` must reach `minApprovals` — one-from-each-group sign-off). In every mode a single rejection finalizes the node as `rejected`. Default `first_response` |
+| `behavior` | `first_response` (first approver decides), `unanimous` (all must approve), `quorum` (`minApprovals` of N), or `per_group` (EACH approver `group` must reach `minApprovals`). In every mode a single rejection finalizes the node as `rejected`. Default `first_response` |
 | `minApprovals` | Approvals required — total for `quorum`, per group for `per_group`. Omitted ⇒ ALL resolvable approvers under `quorum`, `1` per group; clamped at runtime so a misconfiguration can never deadlock |
-| `lockRecord` | Lock the triggering record from edits while pending. Default `true` |
+| `lockRecord` | Lock the record from edits while pending. Default `true` |
 | `approvalStatusField` | Business-object field to mirror `pending`/`approved`/`rejected`/`returned`/`recalled` onto (should be readonly) |
 | `onEmptyApprovers` | What an EMPTY resolved slate does: `admin_rescue` (default — request opens on the organization's administrators; never waves through, never kills the run), `fail` (node fails — treat an empty slate as a config bug), `auto_approve` (skip the request, continue down `approve` with `output.autoApproved = true` — opt-in because it silently waves the record through), `fallback` (request opens on the sibling `fallbackApprovers` instead — same shape as `approvers`, required by this policy and refused under any other; a fallback that itself resolves to nobody degrades to `admin_rescue`). Declare it explicitly on any node with an `expression` approver (linted) |
 | `excludeSubmitter` | `true` drops the run's submitter (`submitter_id`) from the resolved slate, whatever approver type produced them — segregation of duties; a slate it empties takes the `onEmptyApprovers` route, never a silent pass. `onEmptyApprovers: 'auto_approve'` is **refused** beside it (it would approve exactly the request this exists to stop): use `admin_rescue`, `fail` or `fallback`. Default `false` |
@@ -367,10 +364,15 @@ These are wired on the **graph**, not in node config:
 
 ### Approval Best Practices
 
-1. **Set `approvalStatusField`** to mirror status onto the row — views and
-   formulas can then filter on it without joining `sys_approval_request`.
-2. **Keep `lockRecord: true`** unless you have a strong reason to allow
-   edits while pending — otherwise approvers chase a moving target.
+1. **Set `approvalStatusField`**: views and formulas filter on status
+   without joining `sys_approval_request`.
+2. **Keep `lockRecord: true`**, or approvers chase a moving target. It locks
+   the record and its `master_detail` child rows only: a `lookup` child shown
+   in the record's details (`relatedList: 'primary'`) stays editable (warning
+   `approval-detail-editable-while-pending`). Deleting the pending record
+   still lands, cancelling the request and cascading its `master_detail` rows;
+   it is refused (`409 RECORD_LOCKED`) where the cascade lacks one transaction
+   or the child object declares a second cascading relation.
 3. **Notify the submitter from downstream nodes** wired to the `approve` /
    `reject` edges. Opening already tells each resolved approver
    (`approval.requested`); ⛔ no `notify` node for the opening: it tells
@@ -378,8 +380,8 @@ These are wired on the **graph**, not in node config:
 4. **A flow reacting to the mirrored status runs as the person who acted.**
    The `approvalStatusField` write is elevated but attributed — submit carries
    the submitter, approve / reject / recall / send-back the person who decided —
-   so a `record_change` flow on that field ("when the invoice is approved, do
-   X") stays `runAs: 'user'` and runs with the decider's own grants. Only the
+   so a `record_change` flow on that field stays `runAs: 'user'` and runs
+   with the decider's own grants. Only the
    two machine-driven transitions carry no user — an SLA `escalation`
    auto-decision and the release of a record whose run died — and a
    `runAs: 'user'` flow fired by one has its data steps refused: a flow that

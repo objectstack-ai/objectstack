@@ -101,6 +101,7 @@ export const koSourceHashes: Readonly<Record<string, string>> = {
   'apps.setup.navigation.nav_sso_providers.label': '7b06b6a6abf53ba4',
   'apps.setup.navigation.nav_scim_credentials.label': '2d94a32c33ca2957',
   'apps.setup.navigation.nav_api_keys.label': '8cda9851248b0490',
+  'apps.setup.navigation.nav_access_directory.label': '60b7217f289b11e9',
   'apps.setup.navigation.nav_approvals_inbox.label': '0a9269b20d0266c9',
   'apps.setup.navigation.nav_approval_requests.label': 'aafd0f7c6a376f55',
   'apps.setup.navigation.nav_approval_actions.label': 'd2ebad7acfd50978',

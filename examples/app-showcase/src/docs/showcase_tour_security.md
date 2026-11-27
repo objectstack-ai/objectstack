@@ -38,7 +38,8 @@ The other sets each demonstrate one axis:
 - `showcase_executive` — org-wide read via `readScope: 'org'` (depth, not a
   bypass).
 - `showcase_auditor` — **View-All** (`viewAllRecords`): reads every private
-  record, holds no write bit. High-privilege: suggested for the `everyone`
+  record, holds no write bit. **View All Fields** (`viewAllFields`) beside it
+  reads every field of those objects: View All widens records only. High-privilege: suggested for the `everyone`
   anchor (`isDefault: true`) it would fail the publish linter, and no door
   binds a set to `everyone` or `guest` by hand.
 - `showcase_ops` — **system permissions** (`setup.access` opens the Setup

@@ -4401,8 +4401,9 @@ export interface LocaleDescriptor {
  * Turn `II18nService.getLocales()` — a bare `string[]` — into the descriptor
  * list `GetLocalesResponseSchema` declares for `GET /i18n/locales`.
  *
- * Shared for the same reason `resolveObjectFieldLabels` is: both the
- * dispatcher domain and service-i18n serve this route, and when each kept its
+ * Shared for the same reason `resolveObjectFieldLabels` is: the dispatcher
+ * domain and service-i18n both once served this route (service-i18n's mount
+ * was retired by #23347; the dispatcher owns it), and when each kept its
  * own copy they diverged. service-i18n mapped to descriptors; the dispatcher
  * passed the raw `string[]` straight through, so the SAME endpoint returned
  * `['en','zh-CN']` or `[{code,label,isDefault}]` depending on which provider
@@ -6098,6 +6099,7 @@ export function resolveSettingsSourceLabel(
 //   metadataForms.<type>.fields.<field_path>.label      -- field label
 //   metadataForms.<type>.fields.<field_path>.helpText
 //   metadataForms.<type>.fields.<field_path>.placeholder
+//   metadataForms.<type>.fields.<field_path>.options.<value>  -- a select's choice name
 //
 // `field_path` is dot-notation for nested fields. Top-level form fields use
 // just the field name (e.g. `"name"`, `"description"`). Composite and
@@ -6168,6 +6170,27 @@ function lookupMetadataFormField(
   if (!bundle) return undefined;
   for (const code of localeChain(opts)) {
     const candidate = pickData(bundle, code)?.metadataForms?.[type]?.fields?.[fieldPath]?.[attr];
+    if (typeof candidate === 'string' && candidate.length > 0) return candidate;
+  }
+  return undefined;
+}
+
+/**
+ * The translated name of one choice of a form field's `options`, looked up at
+ * `metadataForms.<type>.fields.<field_path>.options.<value>` along the locale
+ * chain — keyed by the option's `value`, the shape
+ * `objects.<object>.fields.<field>.options` uses.
+ */
+function lookupMetadataFormFieldOption(
+  bundle: TranslationBundle | undefined,
+  type: string,
+  fieldPath: string,
+  value: string,
+  opts?: ResolveOptions,
+): string | undefined {
+  if (!bundle) return undefined;
+  for (const code of localeChain(opts)) {
+    const candidate = pickData(bundle, code)?.metadataForms?.[type]?.fields?.[fieldPath]?.options?.[value];
     if (typeof candidate === 'string' && candidate.length > 0) return candidate;
   }
   return undefined;
@@ -6270,6 +6293,16 @@ function translateFormField(
     if (tHelp) next.helpText = tHelp;
     const tPlaceholder = lookupMetadataFormField(bundle, type, path, 'placeholder', opts);
     if (tPlaceholder) next.placeholder = tPlaceholder;
+    // A select's choices: the console names each one by `options[].label`
+    // (fieldSpec.options wins over the schema enum), so the overlay goes on
+    // the option itself, matched by its value.
+    if (Array.isArray(field.options)) {
+      next.options = field.options.map((option: any) => {
+        if (!option || typeof option !== 'object' || typeof option.value !== 'string') return option;
+        const tOption = lookupMetadataFormFieldOption(bundle, type, path, option.value, opts);
+        return tOption ? { ...option, label: tOption } : option;
+      });
+    }
   }
 
   // Recurse into composite / repeater sub-fields. The `fields` array on
@@ -6295,8 +6328,13 @@ function translateFormField(
 }
 
 /**
- * Translate the labels, descriptions, helpTexts, and placeholders of a
- * metadata-type configuration form against the active translation bundle.
+ * Translate the labels, descriptions, helpTexts, placeholders and select
+ * option names of a metadata-type configuration form against the active
+ * translation bundle.
+ *
+ * A field's option is named at
+ * `metadataForms.<type>.fields.<field_path>.options.<value>`, keyed by the
+ * option's `value`; an option with no translation keeps its own `label`.
  *
  * A section's `label` and `description` are looked up at
  * `metadataForms.<type>.sections.<section_name>`, where `<section_name>` is

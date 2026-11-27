@@ -61,12 +61,13 @@ export interface CloudManagedNamespaceRule {
 /**
  * The hosted projection. ONE table, read by every door.
  *
- * `ai` hides per key: the provider and its per-provider sections (model and
- * credentials), the generation defaults (temperature, max output, timeout) and
- * the embedder (its provider, model and credentials). The conversation-title
- * and observability keys stay served. Its `test` / `test_embedder` buttons
- * exercise the hidden credentials, and `reset` clears every stored `ai` row,
- * hidden ones included, so all three are refused.
+ * `ai` hides per key: the providers, the default and structured-output models
+ * and the per-provider sections (models and credentials), the generation
+ * defaults (temperature, max output, timeout) and the embedder (its provider,
+ * model and credentials). The conversation-title
+ * and observability keys stay served. Its `test` / `test_embedder` buttons and
+ * each provider's `test_<provider>` exercise the hidden credentials, and `reset`
+ * clears every stored `ai` row, hidden ones included, so all of them are refused.
  */
 export const CLOUD_MANAGED_HIDDEN_SETTINGS: Readonly<Record<string, CloudManagedNamespaceRule>> = Object.freeze({
   storage: {
@@ -76,21 +77,28 @@ export const CLOUD_MANAGED_HIDDEN_SETTINGS: Readonly<Record<string, CloudManaged
   },
   ai: {
     keys: Object.freeze([
-      'provider',
-      'gateway_model', 'gateway_api_key',
-      'openai_api_key', 'openai_model', 'openai_base_url',
-      'anthropic_api_key', 'anthropic_model',
-      'google_api_key', 'google_model',
-      'deepseek_api_key', 'deepseek_model',
-      'dashscope_api_key', 'dashscope_model',
-      'cloudflare_account_id', 'cloudflare_gateway_id', 'cloudflare_api_key', 'cloudflare_model',
-      'siliconflow_api_key', 'siliconflow_model',
-      'openrouter_api_key', 'openrouter_model',
+      'provider', 'default_model',
+      'gateway_enabled', 'openai_enabled', 'anthropic_enabled', 'google_enabled', 'deepseek_enabled',
+      'dashscope_enabled', 'cloudflare_enabled', 'siliconflow_enabled', 'openrouter_enabled',
+      'gateway_model', 'gateway_models', 'gateway_api_key',
+      'openai_api_key', 'openai_model', 'openai_models', 'openai_base_url',
+      'anthropic_api_key', 'anthropic_model', 'anthropic_models',
+      'google_api_key', 'google_model', 'google_models',
+      'deepseek_api_key', 'deepseek_model', 'deepseek_models',
+      'dashscope_api_key', 'dashscope_model', 'dashscope_models',
+      'cloudflare_account_id', 'cloudflare_gateway_id', 'cloudflare_api_key', 'cloudflare_model', 'cloudflare_models',
+      'siliconflow_api_key', 'siliconflow_model', 'siliconflow_models',
+      'openrouter_api_key', 'openrouter_model', 'openrouter_models',
+      'structured_output_provider', 'structured_output_model',
       'temperature', 'max_tokens', 'request_timeout_ms',
       'embedder_provider', 'embedder_api_key', 'embedder_model', 'embedder_base_url',
       'embedder_dimensions', 'embedder_batch_size',
     ]),
-    actions: Object.freeze(['test', 'test_embedder', 'reset']),
+    actions: Object.freeze([
+      'test', 'test_embedder', 'reset',
+      'test_gateway', 'test_openai', 'test_anthropic', 'test_google', 'test_deepseek',
+      'test_dashscope', 'test_cloudflare', 'test_siliconflow', 'test_openrouter',
+    ]),
     provides: 'the AI provider, its model and credentials',
   },
 });

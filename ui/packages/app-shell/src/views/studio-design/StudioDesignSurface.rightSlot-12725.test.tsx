@@ -198,12 +198,15 @@ describe('Studio right slot — controls (objectui#12725)', () => {
 // objectstack#37455 — the slot's control left the top bar for the end of the
 // open page's title row: the item header's, and the list page's.
 describe('Studio right slot — its control ends the page\'s title row (objectstack#37455)', () => {
-  it('the sharing overview: the AI assistant ends its item header behind a hairline, not the top bar, and hides and shows the slot', async () => {
+  it('the sharing overview: the AI assistant ends its item header behind a hairline, not the left column, and hides and shows the slot', async () => {
     renderAt('owd');
     await waitFor(() => expect(slot()).toHaveAttribute('data-mode', 'copilot'));
     const itemHeader = screen.getByTestId('owd-item-header');
     const ai = await within(itemHeader).findByTestId('topbar-ai-assistant');
-    expect(within(screen.getByTestId('studio-shell-header')).queryByTestId('topbar-ai-assistant')).toBeNull();
+    // objectstack#37456 — there is no top bar to hold a second one, and the
+    // left column holds none.
+    expect(screen.queryByTestId('studio-shell-header')).toBeNull();
+    expect(within(screen.getByTestId('studio-top-left')).queryByTestId('topbar-ai-assistant')).toBeNull();
     expect(screen.getAllByTestId('topbar-ai-assistant')).toHaveLength(1);
     // The last control of the header's action slot, the hairline right before it.
     const actionSlot = ai.parentElement as HTMLElement;
@@ -221,10 +224,17 @@ describe('Studio right slot — its control ends the page\'s title row (objectst
     expect(slot()).toHaveAttribute('data-mode', 'copilot');
   });
 
-  it('a list page: the AI assistant ends the list\'s title row, inside the page, not the top bar', async () => {
+  it('a list page: the AI assistant ends the list\'s title row, inside the page, not the left column', async () => {
     renderAt('data');
-    const ai = await screen.findByTestId('topbar-ai-assistant', undefined, { timeout: 4000 });
-    expect(within(screen.getByTestId('studio-shell-header')).queryByTestId('topbar-ai-assistant')).toBeNull();
+    // objectstack#37456 — while the list loads it has no title row, and the
+    // pane's fallback holds the control (`StudioTitleRowFallback`); once the
+    // list's title row is drawn the control is there, and only there.
+    await waitFor(
+      () => expect(screen.getByTestId('topbar-ai-assistant').closest('[data-slot="studio-title-row-end"]')).not.toBeNull(),
+      { timeout: 4000 },
+    );
+    const ai = screen.getByTestId('topbar-ai-assistant');
+    expect(within(screen.getByTestId('studio-top-left')).queryByTestId('topbar-ai-assistant')).toBeNull();
     expect(screen.getByTestId('studio-pillars-host')).toContainElement(ai);
     expect(ai.closest('[data-slot="studio-title-row-end"]')).not.toBeNull();
     expect(screen.getAllByTestId('topbar-ai-assistant')).toHaveLength(1);
@@ -238,7 +248,7 @@ describe('Studio right slot — the rails read whether it squeezes the pillars (
   it('a page with no slot to show (the sharing overview, no copilot) keeps its host closed', async () => {
     copilot.available = false;
     renderAt('owd');
-    await screen.findByTestId('studio-shell-header');
+    await screen.findByTestId('owd-item-header');
     await act(async () => {});
     expect(slot()).not.toBeVisible();
     expect(screen.getByTestId('studio-pillars-host')).toHaveAttribute('data-studio-slot', 'closed');

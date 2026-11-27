@@ -116,9 +116,10 @@ function SetupPackages() {
   return <div data-testid="setup-packages">{search}</div>;
 }
 
-/** The "All metadata" area across packages. */
-function AllMetadata() {
-  return <div data-testid="all-metadata" />;
+/** Studio's package-less scope (`~org`), with the address it was opened at. */
+function OrgScope() {
+  const { pathname, search } = useLocation();
+  return <div data-testid="org-scope">{`${pathname}${search}`}</div>;
 }
 
 /** Holds the two capabilities Setup → Packages is shown under. */
@@ -140,7 +141,7 @@ function renderAt(
       <MemoryRouter initialEntries={[path]}>
         <Routes>
           <Route path="/apps/setup/component/developer/packages" element={<SetupPackages />} />
-          <Route path="/studio/~all/metadata" element={<AllMetadata />} />
+          <Route path="/studio/~org/metadata/*" element={<OrgScope />} />
           {/* objectstack#36904, objectstack#36903 — `/data` and `/automations` land on the area's object and flow lists. */}
           <Route path="/studio/:packageId/metadata/*" element={React.cloneElement(surface as React.ReactElement<{ area?: 'metadata' }>, { area: 'metadata' })} />
           <Route path="/studio/:packageId/:tab" element={<StudioPillarRedirect>{surface}</StudioPillarRedirect>} />
@@ -194,12 +195,19 @@ describe('Studio: a package id no package has renders "package not found" (objec
 
     const notFound = await screen.findByTestId('studio-package-not-found');
     expect(notFound).toHaveTextContent(tFormat('engine.studio.notFound.package', 'en', { id: PHANTOM }));
-    const header = screen.getByTestId('studio-shell-header');
+    // objectstack#37456 — no top bar, and no left column (its rows live in the menu)…
+    expect(screen.queryByTestId('studio-shell-header')).toBeNull();
+    // …but the way back the bar drew stays, on a strip of its own, to the apps home.
+    const strip = screen.getByTestId('studio-missing-package-strip');
+    const back = within(strip).getByTestId('studio-package-back');
+    expect(back).toHaveAccessibleName(t('engine.studio.backToAppTitleNoApp', 'en'));
+    expect(back).toHaveAttribute('data-target', '/home');
     expect(screen.queryByTestId('studio-menu')).toBeNull();
-    expect(within(header).queryByTestId('studio-menu-toggle')).toBeNull();
-    expect(within(header).queryByRole('button', { name: new RegExp(t('engine.studio.publish', 'en')) })).toBeNull();
-    expect(within(header).queryByRole('button', { name: new RegExp(t('engine.studio.changes', 'en')) })).toBeNull();
-    expect(within(header).queryByTitle(t('engine.studio.app.noneTitle', 'en'))).toBeNull();
+    expect(screen.queryByTestId('studio-menu-toggle')).toBeNull();
+    expect(screen.queryByTestId('studio-mobile-strip')).toBeNull();
+    expect(screen.queryByRole('button', { name: new RegExp(t('engine.studio.publish', 'en')) })).toBeNull();
+    expect(screen.queryByRole('button', { name: new RegExp(t('engine.studio.changes', 'en')) })).toBeNull();
+    expect(screen.queryByTitle(t('engine.studio.app.noneTitle', 'en'))).toBeNull();
     // The one list read the builder already makes — no second request.
     expect(packageListReads(fetchMock)).toBe(1);
   });
@@ -212,13 +220,14 @@ describe('Studio: a package id no package has renders "package not found" (objec
     expect(await screen.findByTestId('setup-packages')).toHaveTextContent('?face=admin');
   });
 
-  it('for a principal who may enter Studio but not Setup → Packages, it opens the "All metadata" area, never Setup (objectstack#36908)', async () => {
+  // objectstack#37565 — the cross-package directory moved to Setup; the way out is the package-less scope, for now.
+  it('for a principal who may enter Studio but not Setup → Packages, it opens the package-less scope, never Setup (objectstack#36908)', async () => {
     servePackages();
     renderAt(`/studio/${PHANTOM}/data`, <StudioDesignSurface />, STUDIO_ONLY);
     const notFound = await screen.findByTestId('studio-package-not-found');
     expect(within(notFound).queryByRole('button', { name: t('engine.studio.notFound.packageList', 'en') })).toBeNull();
     within(notFound).getByRole('button', { name: t('engine.studio.notFound.allMetadata', 'en') }).click();
-    expect(await screen.findByTestId('all-metadata')).toBeInTheDocument();
+    expect(await screen.findByTestId('org-scope')).toHaveTextContent('/studio/~org/metadata/flow?source=runtime');
     expect(screen.queryByTestId('setup-packages')).toBeNull();
   });
 

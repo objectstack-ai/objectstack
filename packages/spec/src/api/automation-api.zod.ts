@@ -6,6 +6,7 @@ import { ErrorCode } from './error-code-ledger.zod';
 import { FlowSchema } from '../automation/flow.zod';
 import { ExecutionLogSchema, ExecutionStatus, FlowRunSummarySchema } from '../automation/execution.zod';
 import { DroppedFieldsEventSchema } from '../data/data-engine.zod';
+import { FieldErrorSchema } from './errors.zod';
 
 /**
  * Automation API Protocol
@@ -428,6 +429,13 @@ export const TriggerFlowResponseSchema = lazySchema(() => BaseResponseSchema.ext
       + 'caller must distinguish WHY it failed. A closed union - the members and '
       + 'their transport mappings are documented on the contract '
       + '(`AutomationResult.code`, contracts/automation-service.ts).',
+    ),
+    // #37526 — mirrors `AutomationResult.fields`; the element IS the error
+    // envelope's `FieldErrorSchema`, the entries `VALIDATION_FAILED` serves.
+    fields: z.array(FieldErrorSchema).optional().describe(
+      'The field-addressed findings behind an `INVALID_SCREEN_INPUT` refusal, one per violated '
+      + 'screen field: its `name`, the field-level code it broke and the engine\'s English line. '
+      + 'Set with that code only. A transport serves it as `error.details.fields`',
     ),
     // `stranded` is the contract half of the #13937 shape-4 ruling (#14384);
     // the condition is #13909's. Mirrors `AutomationResult.status` member for

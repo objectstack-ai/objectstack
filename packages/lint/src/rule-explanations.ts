@@ -443,7 +443,8 @@ const DASHBOARD_FILTER_FIELD_NOT_INCLUDED_EXPLANATION: RuleExplanation = {
  * What an unprovisioned anchor is — the cause half of every read-side anchor
  * id (`dashboard-filter-field-unprovisioned`, `react-chart-field-unprovisioned`,
  * `sort-field-unprovisioned`, `searchable-field-unprovisioned`,
- * `page-field-unprovisioned`, `flow-template-field-unprovisioned`).
+ * `page-field-unprovisioned`, `flow-template-field-unprovisioned`,
+ * `ai-context-field-unprovisioned`).
  * The rule files share its verdict clause, `unprovisionedAnchorVerdict()`, or
  * its long form, `unprovisionedAnchorCause()`.
  */
@@ -458,7 +459,8 @@ const UNPROVISIONED_ANCHOR_CAUSE =
  * the converted anchor ids (`unprovisionedAnchorFix()`) names without the how:
  * `sort-field-unprovisioned`, `searchable-field-unprovisioned`,
  * `react-chart-field-unprovisioned`, `dashboard-filter-field-unprovisioned`,
- * `page-field-unprovisioned`, `flow-template-field-unprovisioned` and the hook,
+ * `page-field-unprovisioned`, `flow-template-field-unprovisioned`,
+ * `ai-context-field-unprovisioned` and the hook,
  * action and flow-node write-anchor ids write it out.
  */
 const UNPROVISIONED_ANCHOR_REMEDY =
@@ -833,10 +835,9 @@ const SECURITY_CBP_MASTER_REFERENCE_HIDDEN_EXPLANATION: RuleExplanation = {
       'parent record of this detail" ("no read permission" where read is the question), which names no master object, no master record and no check. The ' +
       'writer has no way to tell from the refusal which record to ask for access to.',
     'Reported for each permission set whose own entry for the master reference reads `readable: false` (an ' +
-      'omitted `readable` is `true`), on a detail this stack declares with one master. Not reported when the ' +
-      'same set holds Modify All on the detail, because that bit makes the entry inert ' +
-      '(`security-superuser-field-mask-inert`). Reported beside View All alone, where the set\'s own ' +
-      '`readable: false` binds.',
+      'omitted `readable` is `true`), on a detail this stack declares with one master. The set\'s own ' +
+      '`readable: false` binds beside any object-wide bit the set holds: View All and Modify All cast no ' +
+      'field vote, and a set\'s own row beats its own `viewAllFields`.',
     'This is a warning, not an error: hiding the reference is legal and no door refuses it. To fix it, make ' +
       'the reference readable (`readable: true`, or delete the entry) when the set\'s holders should see why ' +
       'a write is refused. Keep it hidden when a generic refusal is what is meant.',
@@ -1001,67 +1002,32 @@ const SECURITY_MODIFY_ALL_DELETE_WITHHELD_EXPLANATION: RuleExplanation = {
   ],
 };
 
-const SECURITY_SUPERUSER_FIELD_MASK_INERT_EXPLANATION: RuleExplanation = {
-  rule: 'security-superuser-field-mask-inert',
-  covers: 'why a field mask beside Modify All restricts nothing',
-  paragraphs: [
-    '`modifyAllRecords` (Modify All) is the super-user write bypass on an object. A set that holds it votes ' +
-      'on every field of that object when the field permissions are merged: `readable: true` and ' +
-      '`editable: true`, on its own field entries too (ADR-0066 D2 as amended). The merge is a union, so a ' +
-      '`readable: false` the same set declares on that object hides the field from none of the set\'s ' +
-      'holders, and its edit lock (`editable: false`, or `editable` omitted, which parses to false) holds ' +
-      'none of them back either. The stored set still reads as masked, which is why an author or a reviewer ' +
-      'takes the field to be protected.',
-    '`viewAllRecords` (View All) alone is not reported. It votes only `readable: true`, and it casts no ' +
-      'vote on a field the same set declares `readable: false`, so a set can grant View All on an object ' +
-      'and still hide a field of it from its holders. View All never widens a write, so an edit lock beside ' +
-      'it binds as well.',
-    'The set\'s bypass is read the way the runtime reads it: its own entry for the object when it has one, ' +
-      'otherwise its `\'*\'` entry, as a lookup and never a merge. Only the set that declares the entry is ' +
-      'judged here. A holder of two sets is unmasked by the other set\'s View All, Modify All or ' +
-      '`viewAllFields` too; that is `security-cross-set-field-reopen`, which skips a row this rule reports, ' +
-      'so one row earns one finding.',
-    'This is a warning, not an error: the pair is legal and no door refuses it. To fix it, decide which half ' +
-      'is meant. If the field must stay hidden or read-only, remove `modifyAllRecords` from the object entry ' +
-      'and reach every row another way, with `readScope: \'org\'` / `writeScope: \'org\'` on the entry or a ' +
-      '`rowLevelSecurity` policy whose condition every row satisfies; the mask then binds. `viewAllRecords` ' +
-      'may stay, since the set\'s own `readable: false` binds beside it. If the bypass is meant, delete the ' +
-      'field entry, which never took effect.',
-  ],
-};
-
 const SECURITY_CROSS_SET_FIELD_REOPEN_EXPLANATION: RuleExplanation = {
   rule: 'security-cross-set-field-reopen',
   covers: 'why a field one set hides is still read through another set',
   paragraphs: [
     'Field permissions from every set a caller holds are merged as a union, with no deny. A set that holds ' +
-      '`viewAllRecords` (View All), `modifyAllRecords` (Modify All) or `viewAllFields` on an object votes ' +
-      '`readable: true` on every field of it, and Modify All votes `editable: true` as well. So when one set ' +
-      'hides a field (`readable: false`) or locks it (`editable: false`, or `editable` omitted, which parses ' +
-      'to false), a caller who also holds a second set with one of those bits on the object reads the field ' +
-      '(and, under Modify All, edits it). The first set still reads as protecting the field, and nothing ' +
-      'refuses the pair, which is why an author takes the field to be hidden.',
-    'The bits are read the way the runtime reads them: the second set\'s own entry for the object when it ' +
-      'has one, otherwise its `\'*\'` entry, as a lookup and never a merge. Inside one set the specific row ' +
-      'beats the general bit: a second set whose own row declares the field `readable: false` beside View ' +
-      'All or `viewAllFields` casts no read vote on it, so it is not reported. View All and `viewAllFields` ' +
-      'never vote an edit, so an edit lock beside them binds and is not reported either. A row its own set\'s ' +
-      'Modify All already unbinds is `security-superuser-field-mask-inert`, not this rule, so one row earns ' +
-      'one finding.',
+      '`viewAllFields` on an object votes `readable: true` on every field of it, including fields added ' +
+      'later. So when one set hides a field (`readable: false`), a caller who also holds a second set with ' +
+      '`viewAllFields` on the object reads the field. The first set still reads as protecting the field, and ' +
+      'nothing refuses the pair, which is why an author takes the field to be hidden.',
+    '`viewAllRecords` (View All) and `modifyAllRecords` (Modify All) are not reported: they widen which ' +
+      'records a caller reaches and cast no vote on any field, so they re-open nothing. `viewAllFields` never ' +
+      'votes an edit, so an edit lock beside it binds and is not reported either.',
+    'The bit is read the way the runtime reads it: the second set\'s own entry for the object when it has ' +
+      'one, otherwise its `\'*\'` entry, as a lookup and never a merge. Inside one set the specific row beats ' +
+      'the general bit: a second set whose own row declares the field `readable: false` beside its ' +
+      '`viewAllFields` casts no read vote on it, so it is not reported.',
     'What is not reported: a field that declares `requiredPermissions` (ADR-0066 D3), because that AND-gate ' +
       'is applied after the merge and no set\'s bit opens it to a caller without the capabilities; a key on ' +
       'an object this stack does not define, or naming a field the object does not declare; and any field ' +
       'judged by its name. The rule reads only the declared two-set shape.',
     'This is a warning, not an error: the pair is legal and no door refuses it. To fix it, decide what the ' +
-      'second set means. If it should not read the field, drop the bit from its entry (reach the rows with ' +
-      '`readScope` / `writeScope` or a row-level policy instead of View All or Modify All), or give it its own ' +
-      '`readable: false` row on the field, which binds beside View All and `viewAllFields` but not beside ' +
-      'Modify All. If it really should read every field, say so with `viewAllFields: true` on its entry: that ' +
-      'read then survives the major release in which View All and Modify All stop voting on fields. A field ' +
-      'that must stay hidden from everyone without a capability, such as a salary or an ID number, is ' +
-      'protected on the field itself: declare `requiredPermissions` on it (ADR-0066 D3), and add a ' +
-      '`maskingRule` where a partial value is needed, so the rule no longer depends on which sets a caller ' +
-      'holds.',
+      'second set means. If it should not read the field, drop `viewAllFields` from its entry, or give it its ' +
+      'own `readable: false` row on the field, which binds beside the bit. A field that must stay hidden from ' +
+      'everyone without a capability, such as a salary or an ID number, is protected on the field itself: ' +
+      'declare `requiredPermissions` on it (ADR-0066 D3), and add a `maskingRule` where a partial value is ' +
+      'needed, so the rule no longer depends on which sets a caller holds.',
   ],
 };
 
@@ -1103,8 +1069,8 @@ const SECURITY_ROLLUP_SOURCE_UNREADABLE_EXPLANATION: RuleExplanation = {
       'minimum, maximum or count of child values it cannot read one by one.',
     '"Can read" is judged as the runtime decides it, through three gates. The object grant: the set\'s own ' +
       'entry for the object, otherwise its `\'*\'` entry, which covers a private object only with View All ' +
-      'or Modify All. The field entry: `readable: false` hides the field, unless the set holds Modify All ' +
-      'on the object; a set with no entry for a field reads it. The capability gate: an object\'s ' +
+      'or Modify All. The field entry: `readable: false` hides the field, whatever object-wide bit the set ' +
+      'holds; a set with no entry for a field reads it. The capability gate: an object\'s ' +
       '`requiredPermissions` (the list, or the `read` bucket of the per-operation map) and a field\'s ' +
       '`requiredPermissions` refuse the read unless the set\'s `systemPermissions` hold every listed ' +
       'capability. View All and Modify All do not lift the capability gate, so a set holding them on the ' +
@@ -1119,11 +1085,9 @@ const SECURITY_ROLLUP_SOURCE_UNREADABLE_EXPLANATION: RuleExplanation = {
       'staff who may not see line costs. If the value should not be visible to the set, hide the summary ' +
       'column for it with `fields: { \'<object>.<summary>\': { readable: false } }`. That entry hides the ' +
       'column from every holder of the set, and a co-held set with no entry for the column does not restore ' +
-      'it, because only sets that declare an entry vote in the field merge (View All or Modify All on the ' +
-      'parent in a co-held set does restore it); to keep the column for some ' +
-      'holders, declare `readable: true` on it in the sets they hold. A set that holds Modify All on the ' +
-      'parent must drop that bit first, because Modify All makes the entry inert. If the set may see ' +
-      'the child data, grant the read on the child instead.',
+      'it, because only sets that declare an entry vote in the field merge (`viewAllFields` on the parent in ' +
+      'a co-held set does restore it); to keep the column for some holders, declare `readable: true` on it ' +
+      'in the sets they hold. If the set may see the child data, grant the read on the child instead.',
     'If the pair is meant, say so on the set: `fields: { \'<object>.<summary>\': { readable: true, ' +
       'rollupSourceUnreadableReason: \'<why holders of this set read the total>\' } }`. That one finding, ' +
       'for this set and this column, is then reported as a note that quotes the reason, so `--strict` passes ' +
@@ -5025,7 +4989,8 @@ const CAPABILITY_REFERENCE_UNKNOWN_EXPLANATION: RuleExplanation = {
       'form, or each operation of the per-operation map), each field\'s, each object action\'s and ' +
       'each top-level action\'s, each flow\'s, an app\'s and each of its nav entries (through `navigation`, ' +
       '`areas`, `tabs`, `children` and `items`), a view\'s (its own, its `config`\'s, its default ' +
-      '`list`\'s and each `listViews` entry\'s, on views and on objects) and a dashboard\'s.',
+      '`list`\'s and each `listViews` entry\'s, on views and on objects), a dashboard\'s, and a book\'s ' +
+      '`audience.systemPermission`, the same gate on a manual\'s pages.',
     'A warning, not an error: the lint reads every package of the artifact being built, but it ' +
       'cannot see the capabilities other installed packages declare, and the reference fails closed ' +
       'anyway, so a dangling one is almost certainly a typo to surface, not a build to break. If ' +
@@ -6029,8 +5994,37 @@ const AI_CONTEXT_FIELD_UNKNOWN_EXPLANATION: RuleExplanation = {
   rule: 'ai-context-field-unknown',
   covers: 'why each field a context pack lists must exist on its object',
   paragraphs: [
-    'A pack lists the root\'s `fields`, each related list\'s `fields`, and a `body.field`. A name the object ' +
-      'does not define is left out of every answer: the assistant reads less about the record than the pack says.',
+    'A pack lists the root\'s `fields`, each related list\'s `fields`, and a `body.field`; a related list\'s ' +
+      '`where` and `orderBy` name fields too. A name the object does not define is left out of every answer: ' +
+      'the assistant reads less about the record than the pack says. In a `where` or `orderBy` the whole list ' +
+      'is left out, since a filter or an order is never read with one of its fields removed.',
+    'Defined means declared in the object\'s `fields` or injected by the platform: the system columns it ' +
+      'adds without the author declaring them (`owner_id`, `created_at`, `created_by` and the rest) are ' +
+      'fields of the published definition `get_record_context` reads, so a pack naming one is not reported. ' +
+      'A column the platform does not inject on that object is still unknown: for example `owner_id` ' +
+      'under `ownership: \'org\'`, or any of them under `systemFields: false`. On an ' +
+      '`external` object an injected column resolves but has no storage; that is ' +
+      '`ai-context-field-unprovisioned`.',
+    AI_CONTEXT_PACK_SILENCE,
+  ],
+};
+
+const AI_CONTEXT_FIELD_UNPROVISIONED_EXPLANATION: RuleExplanation = {
+  rule: 'ai-context-field-unprovisioned',
+  covers: 'why a context pack reads nothing of an external anchor',
+  paragraphs: [
+    UNPROVISIONED_ANCHOR_CAUSE,
+    'A context pack naming such an anchor reads a column that holds nothing, at the cost the message ' +
+      'names for its position: in the root\'s or a related list\'s `fields` the answer carries it empty on ' +
+      'every record; as `body.field` the answer carries no body; in a related list\'s `where`, or as the ' +
+      'reference field that links the list to its root, the condition can never match a real value (on ' +
+      'SQLite it degrades to constant-false) and the list reads no rows; in its `orderBy` the order finds ' +
+      'no column, so the list is read in an arbitrary order and its row cap keeps an arbitrary slice.',
+    'Only a name that resolved BECAUSE it is injected is judged: an author-declared column of the same ' +
+      'name is one the author vouches for. A name the object does not define at all is ' +
+      '`ai-context-field-unknown`. A warning, because the rule cannot see the remote table, only that the ' +
+      'platform provisions no storage.',
+    UNPROVISIONED_ANCHOR_REMEDY,
     AI_CONTEXT_PACK_SILENCE,
   ],
 };
@@ -6950,7 +6944,6 @@ export const RULE_EXPLANATIONS: Readonly<Record<string, RuleExplanation>> = Obje
   [SECURITY_MASTER_DETAIL_UNGRANTED_EXPLANATION.rule]: SECURITY_MASTER_DETAIL_UNGRANTED_EXPLANATION,
   [SECURITY_WILDCARD_VAMA_EXPLANATION.rule]: SECURITY_WILDCARD_VAMA_EXPLANATION,
   [SECURITY_MODIFY_ALL_DELETE_WITHHELD_EXPLANATION.rule]: SECURITY_MODIFY_ALL_DELETE_WITHHELD_EXPLANATION,
-  [SECURITY_SUPERUSER_FIELD_MASK_INERT_EXPLANATION.rule]: SECURITY_SUPERUSER_FIELD_MASK_INERT_EXPLANATION,
   [SECURITY_UPDATE_POLICY_NO_CHECK_EXPLANATION.rule]: SECURITY_UPDATE_POLICY_NO_CHECK_EXPLANATION,
   [SECURITY_ROLLUP_SOURCE_UNREADABLE_EXPLANATION.rule]: SECURITY_ROLLUP_SOURCE_UNREADABLE_EXPLANATION,
   [SECURITY_ROLLUP_SOURCE_ROW_SCOPED_EXPLANATION.rule]: SECURITY_ROLLUP_SOURCE_ROW_SCOPED_EXPLANATION,
@@ -7133,6 +7126,7 @@ export const RULE_EXPLANATIONS: Readonly<Record<string, RuleExplanation>> = Obje
   [PERMISSION_RETIRED_LIFECYCLE_RESIDUE_EXPLANATION.rule]: PERMISSION_RETIRED_LIFECYCLE_RESIDUE_EXPLANATION,
   [AI_CONTEXT_OBJECT_UNKNOWN_EXPLANATION.rule]: AI_CONTEXT_OBJECT_UNKNOWN_EXPLANATION,
   [AI_CONTEXT_FIELD_UNKNOWN_EXPLANATION.rule]: AI_CONTEXT_FIELD_UNKNOWN_EXPLANATION,
+  [AI_CONTEXT_FIELD_UNPROVISIONED_EXPLANATION.rule]: AI_CONTEXT_FIELD_UNPROVISIONED_EXPLANATION,
   [AI_CONTEXT_RELATED_LINK_UNKNOWN_EXPLANATION.rule]: AI_CONTEXT_RELATED_LINK_UNKNOWN_EXPLANATION,
   [AI_CONTEXT_BODY_NOT_LONG_TEXT_EXPLANATION.rule]: AI_CONTEXT_BODY_NOT_LONG_TEXT_EXPLANATION,
   [AI_CONTEXT_SORT_FIELD_UNSORTABLE_EXPLANATION.rule]: AI_CONTEXT_SORT_FIELD_UNSORTABLE_EXPLANATION,

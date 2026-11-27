@@ -243,6 +243,7 @@ describe("on a package, the palette lists the left menu and the package's items 
     // The menu's six groups, in the menu's order, then the packages and the
     // theme commands. No cross-package Objects / Flows. objectstack#37201 —
     // AI is drawn: its 常用 agent type is listed on a package that holds none.
+    // objectstack#37564 — so is `position`, 常用 by name, directly after `permission`.
     expect(headings()).toEqual([
       group('data'),
       group('ui'),
@@ -262,8 +263,8 @@ describe("on a package, the palette lists the left menu and the package's items 
       'studio-entry type:datasource',
       'studio-entry diagnostics',
       'studio-entry type:permission',
+      'studio-entry type:position',
       'studio-entry owd',
-      'studio-entry environment',
       'studio-entry type:agent',
     ]);
     // Another package's object, and the datasource (Setup's), are not items.
@@ -407,20 +408,21 @@ describe("on a package, the palette lists the left menu and the package's items 
   it("CONTROL — opened, it reads each listed type's list", async () => {
     mount(PKG);
     await itemsListed();
-    expect([...reads.state.calls].sort()).toEqual(['agent', 'dashboard', 'flow', 'hook', 'object', 'permission']);
+    // objectstack#37564 — `position` is listed on every package, so its list is read; this package holds none.
+    expect([...reads.state.calls].sort()).toEqual(['agent', 'dashboard', 'flow', 'hook', 'object', 'permission', 'position']);
   });
 });
 
 describe('on the cross-package leg, the menu joins every package\'s objects and flows (objectstack#36900)', () => {
   it("lists the environment menu's entries, reads no item list, and keeps the landing's groups", async () => {
-    const { cacheReads } = mount('~all', { at: '/studio/~all/metadata?palette=1', packageScope: false });
+    // objectstack#37565 — the leg's root redirects to Setup; an item page still opens on the leg.
+    const { cacheReads } = mount('~all', { at: '/studio/~all/metadata/permission/admin?scope=environment&palette=1', packageScope: false });
     await waitFor(() => expect(values('studio-object ').length).toBeGreaterThan(0));
 
     expect(values('studio-entry ')).toEqual([
       'studio-entry orgFlows',
       'studio-entry type:permission',
       'studio-entry type:position',
-      'studio-entry environment',
     ]);
     expect(values('studio-item ')).toEqual([]);
     expect(reads.state.calls).toEqual([]);

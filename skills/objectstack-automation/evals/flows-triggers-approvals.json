@@ -42,8 +42,8 @@
     },
     {
       "id": 3,
-      "prompt": "Build an autolaunched flow `crm_budget_approval` on `project`: when `budget` increases past 100000, route to a manager who can approve, reject, or send it back to the submitter for revision; a resubmission returns to the manager. Cap it at two send-backs.",
-      "expected_output": "The ADR-0044 shape: an `approval` node (`type: 'approval'`, `approvers: [{ type: 'position', value: 'crm_manager' }]`, `lockRecord: true`, `maxRevisions: 2`) with `approve` / `reject` out-edges plus a `revise` out-edge to an `approval_revise` node, and a resubmit edge back into the approval node typed `type: 'back'` — what legalises the cycle for `registerFlow`. The flow lives in `flows` (no `approvals` collection).",
+      "prompt": "Build an autolaunched flow `crm_budget_approval` on `project`: when `budget` increases past 100000, route to a manager who can approve, reject, or send it back to the submitter for revision; a resubmission returns to the manager. Cap it at two send-backs. The project page draws its `budget_line` rows as a body table through the lookup `budget_line.project`; those lines must not change while the request is pending.",
+      "expected_output": "The ADR-0044 shape: an `approval` node (`type: 'approval'`, `approvers: [{ type: 'position', value: 'crm_manager' }]`, `lockRecord: true`, `maxRevisions: 2`) with `approve` / `reject` out-edges plus a `revise` out-edge to an `approval_revise` node, and a resubmit edge back into the approval node typed `type: 'back'` — what legalises the cycle for `registerFlow`. The flow lives in `flows` (no `approvals` collection). `budget_line.project` becomes a `master_detail`: `lockRecord` locks the record and its `master_detail` child rows only, and a `lookup` child drawn as a body table stays editable while pending (the warning `approval-detail-editable-while-pending`, which refuses nothing).",
       "files": [],
       "assertions": {
         "must_contain": [
@@ -51,7 +51,8 @@
           "approval_revise",
           "type: 'back'",
           "maxRevisions",
-          "revise"
+          "revise",
+          "master_detail"
         ],
         "must_not_contain": [
           "approvals: [",

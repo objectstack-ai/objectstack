@@ -3700,7 +3700,20 @@ export async function classifyResumeResult(
     const row = code !== undefined ? RESUME_REFUSAL_ROWS.get(code) : undefined;
     // [#21724] The engine's code travels with its status: a row carries the
     // code it matched, so the builder promotes it and never derives one.
-    if (code !== undefined && row) return { message: result.error ?? row.fallback, status: row.status, details: { code } };
+    if (code !== undefined && row) {
+        // [#37526] A screen refusal's field-addressed findings ride in
+        // `details.fields`, the slot `VALIDATION_FAILED` serves the same
+        // entries in, so a runner places each at its field instead of
+        // showing the sentence (which names the screen's declared fields).
+        const fields = code === 'INVALID_SCREEN_INPUT' && Array.isArray(result.fields) && result.fields.length > 0
+            ? result.fields
+            : undefined;
+        return {
+            message: result.error ?? row.fallback,
+            status: row.status,
+            details: fields ? { code, fields } : { code },
+        };
+    }
     const verdict = await resumeFailureDetails(deps, automationService, runId, result);
     // [#24914, ruling B′] The run's artefacts through the shared builder
     // (`FlowFailureDetailsSchema`: `errorMessage` / `summary` / `innerRefusal`),
