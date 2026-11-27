@@ -8309,7 +8309,6 @@ export class AutomationEngine implements IAutomationService {
         // (no counter to advance), and nothing between the old call site and
         // this one reads or mints one.
         const runId = this.nextRunId();
-        const variables = this.seedRunVariables(flow, flowName, context, runId);
         const startedAt = new Date().toISOString();
         const steps: StepLogEntry[] = [];
 
@@ -8321,6 +8320,10 @@ export class AutomationEngine implements IAutomationService {
         // Also stamps `flowRunId` so this run's data writes are attributable to it
         // (#3456).
         const runContext = await this.resolveRunContext(flow, context, runId);
+        // Seeded AFTER the context resolves: the run takes its own copy of the
+        // trigger record, so the lookups the start node declares (`expand`,
+        // grafted while the context resolves) must already be on it.
+        const variables = this.seedRunVariables(flow, flowName, context, runId);
         stampFlowRunSlot(runContext, flowName, runPackage);
         // [ADR-0162 item 7] The run's root run: itself, or its parent's.
         stampRootRun(runContext, { runId, flowName, startedAt });

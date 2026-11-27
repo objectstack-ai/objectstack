@@ -1396,7 +1396,6 @@ export async function executeWithoutRetry(
     // to its author — and a pausing node on a retry attempt had no `$runId`
     // to map its external state back to this run with (ADR-0019).
     const runId = this.nextRunId();
-    const variables = this.seedRunVariables(flow, flowName, context, runId);
     const startedAt = new Date().toISOString();
     const steps: StepLogEntry[] = [];
 
@@ -1405,6 +1404,10 @@ export async function executeWithoutRetry(
     // `flowRunId` is stamped here too (#3456). [#31696] And the slot, as
     // `execute()` stamps it.
     const runContext = await this.resolveRunContext(flow, context, runId);
+    // Seeded AFTER the context resolves: the run takes its own copy of the
+    // trigger record, so the lookups the start node declares (`expand`, grafted
+    // while the context resolves) must already be on it.
+    const variables = this.seedRunVariables(flow, flowName, context, runId);
     stampFlowRunSlot(runContext, flowName, runPackage);
     // [ADR-0162 item 7] Each attempt is a run of its own, and its own root
     // when it has no parent, as `execute()` stamps it.
