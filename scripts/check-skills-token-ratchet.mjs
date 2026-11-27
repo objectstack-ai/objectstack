@@ -439,7 +439,10 @@ export const CEILINGS = new Map([
   // CEILING_BASIS.strippedInternalIds. `(was N)` is the ceiling this replaced.
   // Every SKILL.md row was later lowered by exactly 5 when its release-stamp
   // line left the count (A2′, see STAMP_LINE_REPIN) — its headroom did not move.
-  ['skills/objectstack-ai/SKILL.md', 6801], //          -18 (was 6824), then -5 A2′ (was 6806)
+  // 6801 -> 6797 (#37797): LOWERED to the measurement on that PR's head merged
+  // with `main`. Two retired-key rows name their replacements; one sample
+  // instruction line left the skill example and over-paid by 4 tokens.
+  ['skills/objectstack-ai/SKILL.md', 6797], //          -18 (was 6824), then -5 A2′ (was 6806), then -4 (was 6801)
   // -12 (was 6331): the `http.server` decision-table row dropped a trailing
   // clause that taught `contributes.routes` as a key that "parses but serves
   // nothing". The key is retired — an authored entry is now REFUSED, carrying
