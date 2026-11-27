@@ -1025,6 +1025,11 @@ export const CROSS_PACKAGE_TEST_INPUTS = {
       //     them. A real read: the enumeration changes if the mask does.
       'scripts/js-comment-mask.mjs',
       'scripts/js-comment-mask.d.mts',
+      //   src/validate-action-body-capabilities.test.ts (#35143) READS the
+      //     sandbox runner's source and pins the rule's write-method set to its
+      //     `WRITE` list, so a method the runner starts gating on `api.write`
+      //     turns this suite red instead of leaving the rule a method short.
+      'packages/runtime/src/sandbox/quickjs-runner.ts',
     ],
     heldBy: {
       // `const commandsDir = join(repoRoot, 'packages/cli/src/commands')`
