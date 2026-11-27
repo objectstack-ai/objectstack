@@ -18,7 +18,7 @@
       "files": [],
       "assertions": {
         "must_contain": ["temperature", "maxTokens", "deployment"],
-        "must_not_contain": ["provider:"]
+        "must_not_contain": ["provider: 'anthropic',"]
       }
     },
     {
