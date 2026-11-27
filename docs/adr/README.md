@@ -13,12 +13,12 @@
 
 ## Summary
 
-162 records under `docs/adr/` (157 numbers), 11 under `ui/docs/adr/` (listed separately below).
+163 records under `docs/adr/` (158 numbers), 11 under `ui/docs/adr/` (listed separately below).
 
 | Status | Records |
 |---|---|
 | Accepted | 139 |
-| Proposed | 9 |
+| Proposed | 10 |
 | Superseded | 4 |
 | Draft | 3 |
 | Deferred | 2 |
@@ -26,7 +26,7 @@
 | Amended | 1 |
 | Partially implemented | 1 |
 | Revised | 1 |
-| **Total** | **162** |
+| **Total** | **163** |
 
 ## Shared numbers
 
@@ -229,6 +229,7 @@ A bare `ADR-0006` names the decision; its current text is [0006-project-environm
 | [ADR-0159](./0159-forms-are-their-own-metadata-type-public-forms-are-form-items-view-is-lists-only.md) | Forms are their own metadata type — a `form` item is a named form with a consumer, public forms are `form` it… | Proposed — 2026-11-24, written for objectstack#36868 on the maintainer's r… | 2026-11-24 | — | — |
 | [ADR-0160](./0160-record-scoped-ai-inquiry.md) | Record-scoped AI inquiry — a context pack is its own metadata type, read as the caller and served by one tool… | Accepted — merged 2026-11-24 (PR objectstack#37115); amended 2026-11-25 (s… | 2026-11-24 | — | — |
 | [ADR-0161](./0161-knowledge-platform-boundary-platform-owns-assembly-sync-split-record-return-knowledge-source-is-a-governed-type.md) | The knowledge platform boundary — the platform owns document assembly, sync and reconcile, structural split a… | Proposed — 2026-11-24, written for objectstack#37001 on the maintainer's r… | 2026-11-24 | — | — |
+| [ADR-0162](./0162-an-object-declares-its-closed-states-the-record-and-its-lines-are-closed-to-change.md) | An object declares its closed states — in them the record and its master-detail lines are closed to change fo… | Proposed — 2026-11-26, written for objectstack#36253 on the maintainer's r… | 2026-11-26 | — | — |
 
 ## ObjectUI registry — `ui/docs/adr/` (`ui-` prefix)
 
