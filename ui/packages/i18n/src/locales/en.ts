@@ -4178,6 +4178,7 @@ const en = {
     slugHint: 'Used in URLs. Only lowercase letters, numbers, and hyphens.',
     settings: 'Organization settings',
     multiOrgDisabled: 'Creating new organizations is disabled on this instance.',
+    viewPlans: 'View plans and upgrade',
     createFailed: 'Failed to create organization',
   },
   help: {
@@ -5049,6 +5050,7 @@ const en = {
       slugTaken: 'That URL slug is already taken',
       notAllowedToCreate: 'You are not allowed to create a new organization',
       organizationLimitReached: 'You have reached the limit on organizations you can create. Organizations you were invited to do not count toward it.',
+      unpaidOrganizationLimitReached: 'You already own as many free organizations as one account may. To create another, upgrade one of them to a paid plan or contact support. Organizations you were invited to do not count.',
       notTheRecipient: 'You are not the recipient of the invitation',
       invitationNotFound: 'This invitation has already been used, has expired, or was revoked. If you accepted it, the organization is in your organization list.',
       unknown: 'Something went wrong. Please try again.',

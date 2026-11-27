@@ -3540,6 +3540,7 @@ const es = {
     slugHint: "Se utiliza en URLs. Solo minúsculas, números y guiones.",
     settings: "Configuración de la organización",
     multiOrgDisabled: "La creación de nuevas organizaciones está deshabilitada en esta instancia.",
+    viewPlans: 'Ver planes y mejorar',
     createFailed: 'No se pudo crear la organización',
   },
   help: {
@@ -4243,6 +4244,7 @@ const es = {
       slugTaken: 'Ese slug ya está en uso.',
       notAllowedToCreate: 'No tiene permiso para crear una organización nueva.',
       organizationLimitReached: 'Ha alcanzado el número máximo de organizaciones que puede crear. Las organizaciones a las que se le ha invitado no cuentan para este límite.',
+      unpaidOrganizationLimitReached: 'Ya tiene tantas organizaciones gratuitas como permite una cuenta. Para crear otra, cambie una de ellas a un plan de pago o contacte con soporte. Las organizaciones a las que se le ha invitado no cuentan.',
       notTheRecipient: 'No es el destinatario de esta invitación.',
       invitationNotFound: 'Esta invitación ya se utilizó, caducó o fue revocada. Si ya la aceptó, encontrará la organización en su lista de organizaciones.',
       unknown: 'Algo salió mal. Inténtelo de nuevo.',

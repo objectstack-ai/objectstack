@@ -3462,6 +3462,7 @@ const ko = {
     slugHint: "URL에 사용됩니다. 소문자, 숫자, 하이픈만 사용 가능합니다.",
     settings: "조직 설정",
     multiOrgDisabled: "이 인스턴스에서는 새 조직을 만들 수 없습니다.",
+    viewPlans: '플랜 보기 및 업그레이드',
     createFailed: '조직을 만들지 못했습니다',
   },
   help: {
@@ -4154,6 +4155,7 @@ const ko = {
       slugTaken: '해당 슬러그는 이미 사용 중입니다.',
       notAllowedToCreate: '새 조직을 만들 권한이 없습니다.',
       organizationLimitReached: '만들 수 있는 조직 수의 한도에 도달했습니다. 초대받아 참여한 조직은 한도에 포함되지 않습니다.',
+      unpaidOrganizationLimitReached: '한 계정이 소유할 수 있는 무료 조직의 한도에 도달했습니다. 조직을 더 만들려면 그중 하나를 유료 플랜으로 업그레이드하거나 지원팀에 문의하세요. 초대받아 참여한 조직은 포함되지 않습니다.',
       notTheRecipient: '이 초대의 수신자가 아닙니다.',
       invitationNotFound: '이 초대는 이미 사용되었거나 만료되었거나 취소되었습니다. 이미 수락했다면 조직 목록에서 해당 조직을 찾을 수 있습니다.',
       unknown: '문제가 발생했습니다. 다시 시도해 주세요.',

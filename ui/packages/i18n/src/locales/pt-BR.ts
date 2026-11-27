@@ -3535,6 +3535,7 @@ const pt = {
     slugHint: "Usado em URLs. Apenas letras minúsculas, números e hifens.",
     settings: "Configurações da organização",
     multiOrgDisabled: "A criação de novas organizações está desativada nesta instância.",
+    viewPlans: 'Ver planos e fazer upgrade',
     createFailed: 'Falha ao criar a organização',
   },
   help: {
@@ -4238,6 +4239,7 @@ const pt = {
       slugTaken: 'Esse slug já está em uso.',
       notAllowedToCreate: 'Você não tem permissão para criar uma nova organização.',
       organizationLimitReached: 'Você atingiu o número máximo de organizações que pode criar. Organizações para as quais você foi convidado não contam para esse limite.',
+      unpaidOrganizationLimitReached: 'Você já possui o máximo de organizações gratuitas que uma conta permite. Para criar outra, faça upgrade de uma delas para um plano pago ou entre em contato com o suporte. Organizações para as quais você foi convidado não contam.',
       notTheRecipient: 'Você não é o destinatário deste convite.',
       invitationNotFound: 'Este convite já foi usado, expirou ou foi revogado. Se você já o aceitou, encontrará a organização na sua lista de organizações.',
       unknown: 'Algo deu errado. Tente novamente.',

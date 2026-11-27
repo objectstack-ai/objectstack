@@ -3464,6 +3464,7 @@ const ja = {
     slugHint: "URL に使用されます。小文字、数字、ハイフンのみ。",
     settings: "組織設定",
     multiOrgDisabled: "このインスタンスでは新しい組織の作成が無効です。",
+    viewPlans: 'プランを見てアップグレード',
     createFailed: '組織の作成に失敗しました',
   },
   help: {
@@ -4157,6 +4158,7 @@ const ja = {
       slugTaken: 'そのスラッグはすでに使用されています。',
       notAllowedToCreate: '新しい組織を作成する権限がありません。',
       organizationLimitReached: '作成できる組織の数が上限に達しました。招待されて参加した組織は上限に含まれません。',
+      unpaidOrganizationLimitReached: 'アカウントごとに所有できる無料の組織の上限に達しています。さらに作成するには、そのうちの一つを有料プランにアップグレードするか、サポートにお問い合わせください。招待されて参加した組織は数えられません。',
       notTheRecipient: 'この招待の宛先はあなたではありません。',
       invitationNotFound: 'この招待はすでに使用済みか、有効期限切れか、取り消されています。承認済みの場合は、組織一覧にその組織があります。',
       unknown: '問題が発生しました。もう一度お試しください。',

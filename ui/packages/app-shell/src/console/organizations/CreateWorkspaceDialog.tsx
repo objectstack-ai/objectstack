@@ -21,6 +21,14 @@
  * words are the host's, never the console's (ADR-0060: the console draws a
  * generic block and names no product).
  *
+ * A create refused past the hosted control plane's cap on free organizations
+ * (`UNPAID_ORGANIZATION_LIMIT_REACHED`) shows the control plane's own sentence,
+ * which names the next step. When that step is upgrading one of the account's
+ * Free organizations and the host serves its upgrade entry
+ * (`getUpgradeUrl()`), the dialog also draws a link to it. The console never
+ * composes that address: no served entry, no link, and the sentence alone
+ * carries the step.
+ *
  * @module
  */
 
@@ -43,7 +51,8 @@ import type { OrganizationEditionChoice } from '@objectstack/spec/api';
 import { useObjectTranslation } from '@object-ui/i18n';
 import { Loader2 } from 'lucide-react';
 import { provisionProductionEnvironment } from './provisionEnvironment.js';
-import { resolveOrgErrorMessage } from './orgErrorMessage.js';
+import { readOrgCreateNextStep, resolveOrgErrorMessage } from './orgErrorMessage.js';
+import { getUpgradeUrl } from '../../runtime-config.js';
 import { emailDomain, isPublicMailboxDomain, registrableLabel } from '../../utils/emailDomain.js';
 
 /**
@@ -211,6 +220,9 @@ export function CreateWorkspaceDialog({
   const slug = nameToSlug(name);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // The host's upgrade entry, set only for a refusal whose next step is an
+  // upgrade and only when the host serves one.
+  const [upgradeUrl, setUpgradeUrl] = useState<string | undefined>(undefined);
   // Defense-in-depth: the toolbar button that opens this dialog is already
   // hidden when `multiOrgEnabled === false`, but if a future caller opens the
   // dialog by another path we still want to fail fast with a friendly message
@@ -247,6 +259,7 @@ export function CreateWorkspaceDialog({
       setName(defaultNameRef.current);
       setEdition(undefined);
       setError(null);
+      setUpgradeUrl(undefined);
     }
   }, [open]);
 
@@ -265,6 +278,7 @@ export function CreateWorkspaceDialog({
 
       setIsSubmitting(true);
       setError(null);
+      setUpgradeUrl(undefined);
 
       try {
         const org = await createWithGeneratedSlug(
@@ -304,6 +318,7 @@ export function CreateWorkspaceDialog({
             defaultValue: 'Failed to create organization',
           }),
         );
+        setUpgradeUrl(readOrgCreateNextStep(err) === 'upgrade_to_team' ? getUpgradeUrl() : undefined);
       } finally {
         setIsSubmitting(false);
       }
@@ -375,6 +390,17 @@ export function CreateWorkspaceDialog({
               <p className="text-sm text-destructive" data-testid="workspace-create-error">
                 {error}
               </p>
+            )}
+            {error && upgradeUrl && (
+              <a
+                href={upgradeUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                data-testid="workspace-create-upgrade"
+                className="text-sm font-medium underline underline-offset-2 hover:no-underline"
+              >
+                {t('workspace.viewPlans', { defaultValue: 'View plans and upgrade' })}
+              </a>
             )}
           </div>
 

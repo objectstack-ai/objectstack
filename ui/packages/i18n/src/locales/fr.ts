@@ -3536,6 +3536,7 @@ const fr = {
     slugHint: "Utilisé dans les URL. Uniquement lettres minuscules, chiffres et tirets.",
     settings: "Paramètres de l'organisation",
     multiOrgDisabled: "La création de nouvelles organisations est désactivée sur cette instance.",
+    viewPlans: 'Voir les offres et passer à une offre supérieure',
     createFailed: "Échec de la création de l'organisation",
   },
   help: {
@@ -4239,6 +4240,7 @@ const fr = {
       slugTaken: 'Ce slug est déjà utilisé.',
       notAllowedToCreate: "Vous n'êtes pas autorisé à créer une nouvelle organisation.",
       organizationLimitReached: "Vous avez atteint le nombre maximal d'organisations que vous pouvez créer. Les organisations auxquelles vous avez été invité ne sont pas comptées.",
+      unpaidOrganizationLimitReached: "Vous possédez déjà autant d'organisations gratuites qu'un compte le permet. Pour en créer une autre, passez l'une d'elles à une offre payante ou contactez le support. Les organisations auxquelles vous avez été invité ne sont pas comptées.",
       notTheRecipient: "Vous n'êtes pas le destinataire de cette invitation.",
       invitationNotFound: "Cette invitation a déjà été utilisée, a expiré ou a été révoquée. Si vous l'avez acceptée, vous trouverez l'organisation dans votre liste d'organisations.",
       unknown: 'Une erreur est survenue. Veuillez réessayer.',

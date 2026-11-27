@@ -50,6 +50,13 @@ vi.mock('../provisionEnvironment', () => ({
   provisionProductionEnvironment: vi.fn(),
 }));
 
+/** The host's served upgrade entry (`getUpgradeUrl()`); `undefined` is a host that serves none. */
+let servedUpgradeUrl: string | undefined;
+vi.mock('../../../runtime-config', async (importOriginal) => ({
+  ...(await importOriginal<Record<string, unknown>>()),
+  getUpgradeUrl: () => servedUpgradeUrl,
+}));
+
 const createOrganization = vi.fn();
 const getAuthConfig = vi.fn();
 /** Extra `useAuth()` fields a case sets: `user`, `organizations`, `isOrganizationsLoading`. */
@@ -77,6 +84,7 @@ beforeEach(() => {
   browserZone = BROWSER_ZONE;
   packLang = null;
   authState = {};
+  servedUpgradeUrl = undefined;
   zoneReader = vi
     .spyOn(Intl.DateTimeFormat.prototype, 'resolvedOptions')
     .mockImplementation(function (this: Intl.DateTimeFormat) {
@@ -411,6 +419,74 @@ describe('the organization-limit refusal is shown in the session language (objec
       expect(provisionMock).not.toHaveBeenCalled();
     });
   }
+});
+
+describe('the unpaid-organization limit refusal shows its sentence and next step (objectstack#34221)', () => {
+  // The hosted control plane's 403, as `toAuthError` carries it: `code`,
+  // the request-language sentence as `message` and `userMessage`, and
+  // `details.next_step` (cloud#4308).
+  const UPGRADE_URL = 'https://cloud.example.test/billing';
+  const ZH_SENTENCE =
+    '你已拥有 2 个免费组织，每个账号最多 2 个。要再创建组织，请先把其中一个 Free 组织升级到 Team：Team 组织不占这个名额。被邀请加入的组织不计入。';
+  const unpaidRefusal = (nextStep: string, withUserMessage = true) =>
+    Object.assign(new Error(ZH_SENTENCE), {
+      code: 'UNPAID_ORGANIZATION_LIMIT_REACHED',
+      status: 403,
+      ...(withUserMessage ? { userMessage: ZH_SENTENCE } : {}),
+      details: { unpaid_organization_limit: 2, unpaid_organizations: 2, next_step: nextStep },
+    });
+
+  async function submitRefused(err: Error) {
+    createOrganization.mockRejectedValue(err);
+    render(<CreateWorkspaceDialog open onOpenChange={() => {}} />);
+    await settleAuthConfig();
+    fillAndSubmit();
+    return screen.findByTestId('workspace-create-error');
+  }
+
+  it("upgrade_to_team: shows the producer's sentence and a link to the host's upgrade entry, without retrying", async () => {
+    packLang = 'zh-Hans';
+    servedUpgradeUrl = UPGRADE_URL;
+    const shown = await submitRefused(unpaidRefusal('upgrade_to_team'));
+    expect(shown).toHaveTextContent(ZH_SENTENCE);
+    const link = screen.getByTestId('workspace-create-upgrade');
+    expect(link).toHaveAttribute('href', UPGRADE_URL);
+    expect(link).toHaveTextContent((builtInLocales['zh-Hans'] as { workspace: Record<string, string> }).workspace.viewPlans);
+    expect(createOrganization).toHaveBeenCalledTimes(1);
+    expect(provisionMock).not.toHaveBeenCalled();
+  });
+
+  it('upgrade_to_team on a host that serves no upgrade entry: the sentence alone, no link', async () => {
+    const shown = await submitRefused(unpaidRefusal('upgrade_to_team'));
+    expect(shown).toHaveTextContent(ZH_SENTENCE);
+    expect(screen.queryByTestId('workspace-create-upgrade')).toBeNull();
+  });
+
+  it('contact_support: the sentence (which names the address), no upgrade link', async () => {
+    servedUpgradeUrl = UPGRADE_URL;
+    await submitRefused(unpaidRefusal('contact_support'));
+    expect(screen.queryByTestId('workspace-create-upgrade')).toBeNull();
+  });
+
+  it('a refusal without userMessage shows the console pack sentence', async () => {
+    packLang = 'zh-Hans';
+    const shown = await submitRefused(unpaidRefusal('upgrade_to_team', false));
+    const expected = (builtInLocales['zh-Hans'] as { organization: { errors: Record<string, string> } }).organization
+      .errors.unpaidOrganizationLimitReached;
+    expect(typeof expected).toBe('string');
+    expect(shown).toHaveTextContent(expected);
+  });
+
+  it("CONTROL: better-auth's organization-limit refusal draws no upgrade link", async () => {
+    servedUpgradeUrl = UPGRADE_URL;
+    await submitRefused(
+      Object.assign(new Error('You have reached the maximum number of organizations'), {
+        code: 'YOU_HAVE_REACHED_THE_MAXIMUM_NUMBER_OF_ORGANIZATIONS',
+        status: 403,
+      }),
+    );
+    expect(screen.queryByTestId('workspace-create-upgrade')).toBeNull();
+  });
 });
 
 describe("draws the host's organization-create choices (objectstack#31988)", () => {

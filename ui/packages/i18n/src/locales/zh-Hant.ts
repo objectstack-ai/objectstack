@@ -3595,6 +3595,7 @@ const zhHant = {
     slugHint: '用於 URL 中，僅支援小寫字母、數字和連字元。',
     settings: '組織設定',
     multiOrgDisabled: '此實例已停用建立新組織。',
+    viewPlans: '查看方案並升級',
     createFailed: '建立組織失敗',
   },
   help: {
@@ -4409,6 +4410,7 @@ const zhHant = {
       slugTaken: '該標識已被佔用。',
       notAllowedToCreate: '您無權建立新組織。',
       organizationLimitReached: '您建立的組織數量已達上限。被邀請加入的組織不計入此上限。',
+      unpaidOrganizationLimitReached: '你擁有的免費組織已達到每個帳號的上限。要再建立組織，請把其中一個升級為付費方案，或聯絡支援。被邀請加入的組織不計入。',
       notTheRecipient: '您不是該邀請的收件人。',
       invitationNotFound: '該邀請已被使用、已過期或已撤銷。如果您已接受過該邀請，可在組織列表中找到該組織。',
       unknown: '出了點問題，請重試。',

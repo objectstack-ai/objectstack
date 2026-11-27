@@ -3462,6 +3462,7 @@ const de = {
     slugHint: "In URLs verwendet. Nur Kleinbuchstaben, Zahlen und Bindestriche.",
     settings: "Organisationseinstellungen",
     multiOrgDisabled: "Das Erstellen neuer Organisationen ist auf dieser Instanz deaktiviert.",
+    viewPlans: 'Tarife ansehen und upgraden',
     createFailed: 'Organisation konnte nicht erstellt werden',
   },
   help: {
@@ -4155,6 +4156,7 @@ const de = {
       slugTaken: 'Dieser URL-Slug ist bereits vergeben.',
       notAllowedToCreate: 'Sie dürfen keine neue Organisation erstellen.',
       organizationLimitReached: 'Sie haben die maximale Anzahl an Organisationen erreicht, die Sie erstellen können. Organisationen, zu denen Sie eingeladen wurden, zählen nicht dazu.',
+      unpaidOrganizationLimitReached: 'Sie besitzen bereits so viele kostenlose Organisationen, wie ein Konto haben darf. Um eine weitere zu erstellen, stufen Sie eine davon auf einen kostenpflichtigen Tarif hoch oder wenden Sie sich an den Support. Organisationen, zu denen Sie eingeladen wurden, zählen nicht.',
       notTheRecipient: 'Sie sind nicht der Empfänger dieser Einladung.',
       invitationNotFound: 'Diese Einladung wurde bereits verwendet, ist abgelaufen oder wurde widerrufen. Wenn Sie sie angenommen haben, finden Sie die Organisation in Ihrer Organisationsliste.',
       unknown: 'Etwas ist schiefgelaufen. Bitte versuchen Sie es erneut.',
