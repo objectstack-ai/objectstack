@@ -903,16 +903,25 @@ export class ProtocolHistoryAndPublishFacet {
                 // packages hold, that draft and that row are their
                 // customization, hidden with them, and the promotion wrote the
                 // active row the next enable serves. Refused with the enable
-                // as the remedy, nothing written. A promotion of a package's
-                // own draft into its own row (`key` and `into` that package)
-                // touches no package-less row and is not asked; nor is a
-                // publish with no draft, which keeps its `NO_DRAFT`.
-                if (addressRefusal === undefined && address.kind === 'draft' && (address.key === null || address.into === null)) {
+                // as the remedy, nothing written. A publish with no draft is
+                // not asked, and keeps its `NO_DRAFT`.
+                //
+                // [#37851 ruling A] …and a promotion of a package's own draft
+                // into its own row (`key` and `into` that package) is asked
+                // too, as the bare save of the item is: of a name only
+                // disabled packages hold it wrote the disabled package's
+                // active row, which the next enable served. It touches no
+                // package-less row, so it is asked the judgment's first state
+                // only ({@link disabledHoldersOnlyRefusal}, the `?package=`
+                // remedy, which the publish naming that package reaches),
+                // whatever package-less row is stored beside it.
+                if (addressRefusal === undefined && address.kind === 'draft') {
+                    const ownDraft = address.key !== null && address.into !== null;
                     const active = await host.packagelessAddress(singularType, request.name, request.member, 'active');
-                    if (active.unbound || address.drafts.unbound) {
+                    if (ownDraft || active.unbound || address.drafts.unbound) {
                         addressRefusal = packagelessHolderRefusal(host, 'publish', request.type, singularType, request.name, request.member, {
                             candidates: [...new Set([...active.candidates, ...address.drafts.candidates])],
-                            unbound: true,
+                            unbound: !ownDraft,
                         }, 'disabled-holders');
                     }
                 }

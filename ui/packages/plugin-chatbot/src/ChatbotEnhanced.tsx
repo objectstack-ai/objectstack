@@ -93,6 +93,11 @@ import {
   formatSizeLimit,
   SendErrorNotice,
 } from './chat/composerNotices';
+import { QuestionCard } from './QuestionCard';
+import { ComposerGate } from './chat/composerGate';
+import { QuestionMessage } from './chat/questionMessage';
+import { findPendingQuestion, findQuestions, type ChatQuestion } from './chat/pendingQuestion';
+import { useQuestionSkips } from './chat/questionSkip';
 
 export type {
   ChatbotEnhancedMessage,
@@ -145,6 +150,7 @@ const ChatbotEnhanced = React.forwardRef<HTMLDivElement, ChatbotEnhancedProps>(
       onUpgrade,
       disabled = false,
       readOnly = false,
+      conversationId,
       isLoading = false,
       error,
       unsentText,
@@ -165,6 +171,7 @@ const ChatbotEnhanced = React.forwardRef<HTMLDivElement, ChatbotEnhancedProps>(
       acceptedFileTypes = 'image/*,.pdf,.doc,.docx,.txt,.csv,.tsv,.xlsx,.xlsm',
       maxFileSize = 10 * 1024 * 1024,
       suggestions,
+      renderEmptyState,
       labels,
       models,
       selectedModelId,
@@ -474,6 +481,50 @@ const ChatbotEnhanced = React.forwardRef<HTMLDivElement, ChatbotEnhancedProps>(
       [queuedSends],
     );
 
+    // The question card (question-card topic, Q2b). A question the turn ended
+    // on takes the composer's place until it is answered or skipped; the
+    // conversation draws every question from its envelope. See
+    // `chat/pendingQuestion.ts` for when a question is pending.
+    const { skipped: skippedQuestions, skip: skipQuestion } = useQuestionSkips(conversationId);
+    const questionsByMessage = React.useMemo(
+      () => new Map(findQuestions(messages).map((question) => [question.messageId, question])),
+      [messages],
+    );
+    const pendingQuestion = React.useMemo(
+      () =>
+        findPendingQuestion(messages, promptStatus, {
+          queued: queuedSends.length > 0,
+          skipped: skippedQuestions,
+          readOnly,
+          toolDecisions,
+        }),
+      [messages, promptStatus, queuedSends.length, skippedQuestions, readOnly, toolDecisions],
+    );
+    // The question last answered from the card. Its card stays mounted (hidden)
+    // while the answer is on its way: a send that fails rolls the answer back,
+    // the question is pending again, and the card returns with its choices.
+    const [answeredQuestion, setAnsweredQuestion] = React.useState<ChatQuestion | null>(null);
+    const cardQuestion = pendingQuestion ?? answeredQuestion;
+    const answerQuestion = React.useCallback(
+      (question: ChatQuestion, text: string) => {
+        setAnsweredQuestion(question);
+        // A card answer is not typed text: a rejected send has nothing to put
+        // back in the composer (the card returns instead).
+        lastSubmittedRef.current = '';
+        restoredErrorRef.current = null;
+        onSendMessage?.(text);
+        followThreadToBottom();
+      },
+      [onSendMessage, followThreadToBottom],
+    );
+    const skipPendingQuestion = React.useCallback(
+      (question: ChatQuestion) => {
+        setAnsweredQuestion(null);
+        skipQuestion(question.toolCallId);
+      },
+      [skipQuestion],
+    );
+
     const handleSuggestionClick = React.useCallback(
       (text: string) => {
         // Not typed by the user — nothing to restore if this send is rejected
@@ -486,6 +537,24 @@ const ChatbotEnhanced = React.forwardRef<HTMLDivElement, ChatbotEnhancedProps>(
     );
 
     const promptInputWrapRef = React.useRef<HTMLDivElement>(null);
+
+    // objectstack#37862 — a host's empty conversation offers suggestions that
+    // fill the composer rather than send: the text replaces what the box holds
+    // and the caret lands at its end, so the user finishes the question.
+    const fillComposer = React.useCallback((text: string) => {
+      const textarea = promptInputWrapRef.current?.querySelector('textarea');
+      if (!textarea) return;
+      // Through the prototype's setter, so React's value tracker sees a change
+      // and the textarea's `onChange` (the host's `onInputChange`) runs.
+      Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')?.set?.call(textarea, text);
+      textarea.dispatchEvent(new Event('input', { bubbles: true }));
+      textarea.focus();
+      textarea.setSelectionRange(text.length, text.length);
+    }, []);
+    const emptyStateActions = React.useMemo(
+      () => ({ send: handleSuggestionClick, fill: fillComposer }),
+      [handleSuggestionClick, fillComposer],
+    );
 
     // Restore the composer text when a send was REJECTED before reaching the
     // model (rate-limit / network — `notSent`). The composer's own form.reset
@@ -616,7 +685,9 @@ const ChatbotEnhanced = React.forwardRef<HTMLDivElement, ChatbotEnhancedProps>(
                 : 'px-4 py-3',
             )}
           >
-            {messages.length === 0 ? (
+            {messages.length === 0 && renderEmptyState ? (
+              <div data-testid="chat-empty-state-host">{renderEmptyState(emptyStateActions)}</div>
+            ) : messages.length === 0 ? (
               <ConversationEmptyState className="gap-3 px-0 py-8">
                 <div className="flex size-9 items-center justify-center rounded-md bg-muted/70 text-muted-foreground">
                   {assistantAvatarUrl ? (
@@ -704,6 +775,11 @@ const ChatbotEnhanced = React.forwardRef<HTMLDivElement, ChatbotEnhancedProps>(
                 // streaming cursor rides the last text run, where it sat when
                 // the charts always trailed the text.
                 const answerBlocks = isUser ? undefined : layoutAnswer(message.content, message.charts);
+                // The question this turn ended on, drawn from its envelope in
+                // place of its plain-text reply.
+                const threadQuestion = isUser ? undefined : questionsByMessage.get(message.id);
+                const questionPending =
+                  threadQuestion !== undefined && pendingQuestion?.toolCallId === threadQuestion.toolCallId;
                 let lastTextBlock = -1;
                 answerBlocks?.forEach((block, i) => {
                   if (block.kind === 'text') lastTextBlock = i;
@@ -787,7 +863,9 @@ const ChatbotEnhanced = React.forwardRef<HTMLDivElement, ChatbotEnhancedProps>(
                           {L.agentActivity}
                         </span>
                       ) : null}
-                      {answerBlocks ? (
+                      {threadQuestion ? (
+                        <QuestionMessage envelope={threadQuestion.envelope} pending={questionPending} />
+                      ) : answerBlocks ? (
                         // objectui#13492 — the answer's text and charts in
                         // stream order (see `layoutAnswer`). A turn with no
                         // showable prose still draws its charts here, so a
@@ -873,7 +951,8 @@ const ChatbotEnhanced = React.forwardRef<HTMLDivElement, ChatbotEnhancedProps>(
                             <Copy className="size-3.5" />
                           )}
                         </MessageAction>
-                        {onReload ? (
+                        {/* A pending question is answered, not regenerated. */}
+                        {onReload && !questionPending ? (
                           <MessageAction
                             label={L.regenerate}
                             tooltip={L.regenerate}
@@ -987,6 +1066,20 @@ const ChatbotEnhanced = React.forwardRef<HTMLDivElement, ChatbotEnhancedProps>(
               ))}
             </div>
           ) : null}
+          <ComposerGate
+            open={pendingQuestion !== null}
+            holder={
+              cardQuestion ? (
+                <QuestionCard
+                  key={cardQuestion.toolCallId}
+                  questions={cardQuestion.envelope.questions}
+                  announce={pendingQuestion !== null}
+                  onAnswer={(text) => answerQuestion(cardQuestion, text)}
+                  onSkip={() => skipPendingQuestion(cardQuestion)}
+                />
+              ) : null
+            }
+          >
           <PromptInput
             accept={acceptedFileTypes}
             fileInputLabel={L.uploadFiles}
@@ -1084,6 +1177,7 @@ const ChatbotEnhanced = React.forwardRef<HTMLDivElement, ChatbotEnhancedProps>(
               />
             </PromptInputFooter>
           </PromptInput>
+          </ComposerGate>
         </div>
         )}
 

@@ -2439,7 +2439,29 @@ const pt = {
           availableObjects: "Liste os objetos de dados disponíveis.",
           recentActivity: "Resuma minha atividade recente.",
         },
+        // objectstack#37862 — the drawer's empty conversation: the platform's
+        // suggestions by the kind of page in view (`emptyConversationModel.ts`).
+        page: {
+          record: {
+            summarize: 'Resumir este registro',
+            related: 'O que está relacionado a este registro?',
+          },
+          list: {
+            summarize: 'Resumir os registros desta lista',
+            recent: 'Quais registros foram adicionados esta semana?',
+          },
+          dashboard: {
+            explain: 'O que este painel mostra?',
+            standOut: 'O que se destaca neste painel?',
+          },
+          report: {
+            summarize: 'Resumir este relatório',
+            takeaways: 'Quais são os principais pontos deste relatório?',
+          },
+        },
       },
+      // objectstack#37862 — the accessible name of the empty conversation's suggestions.
+      suggestionsLabel: 'Perguntas sugeridas',
       discussing: "Vendo: {{target}}",
       focus: {
         pin: "Continuar perguntando sobre este registro",
