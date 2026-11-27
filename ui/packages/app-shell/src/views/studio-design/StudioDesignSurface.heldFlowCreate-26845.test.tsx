@@ -80,7 +80,6 @@ vi.mock('@object-ui/react', async (importOriginal) => {
   return { ...mod, useAdapter: () => dataSource };
 });
 
-vi.mock('./StudioAiCopilot', () => ({ StudioChatDock: () => null }));
 // Stands in for the Pending changes sheet: its security block asks the host to
 // open the object a draft names, through the surface channel.
 vi.mock('../../preview/DraftChangesPanel', async () => {

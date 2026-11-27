@@ -7,14 +7,17 @@
  * layout remounts (Home ↔ an app). Maximizing no longer leaves the page: it is
  * the panel's own full-window mode, pinned in `ChatDock.test.tsx`.
  *
- * The binding decision itself (build only, authorable only) lives in the dock
- * and is pinned in `ChatDock.appBinding-10926.test.tsx`.
+ * What the dock does with the package (it rides as the turn's
+ * `context.activeApp`) is pinned in `ChatDock.appBinding-10926.test.tsx`.
  *
  * `ConsoleLayout` renders for real under the real `NavigationProvider` and
  * router; the dock components are prop recorders, and the chrome siblings this
  * card does not touch are stubbed.
  */
 
+// AiChatPage reads a dropped spreadsheet through `import('@object-ui/plugin-grid')`; load it
+// here so collection pays that transform, not a clocked case (check-test-source-alias).
+import '@object-ui/plugin-grid';
 import '@testing-library/jest-dom/vitest';
 // The layout reaches `import('@objectstack/lint')` (the draft bar's publish
 // preflight); pay its first load at collection, never inside a clocked case.

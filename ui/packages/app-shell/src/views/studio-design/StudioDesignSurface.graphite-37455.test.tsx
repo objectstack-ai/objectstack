@@ -64,14 +64,6 @@ vi.mock('@object-ui/react', async (importOriginal) => {
 vi.mock('../../components/SuggestedBindingsPanel', () => ({ SuggestedBindingsPanel: () => null }));
 vi.mock('../metadata-admin/AccessExplainPanel', () => ({ AccessExplainPanel: () => null }));
 vi.mock('../../preview/DraftChangesPanel', () => ({ DraftChangesPanel: () => null }));
-vi.mock('./StudioAiCopilot', () => ({
-  StudioChatDock: ({ onStatusChange }: { onStatusChange?: (s: { available: boolean; planPendingCount: number }) => void }) => {
-    React.useEffect(() => {
-      onStatusChange?.({ available: true, planPendingCount: 0 });
-    }, [onStatusChange]);
-    return <div data-testid="copilot-body">conversation</div>;
-  },
-}));
 
 // The source loads `@objectstack/lint` lazily; paid here, at collection, not
 // inside a case's clock (check:test-source-alias).
@@ -157,7 +149,7 @@ describe('a non-default app theme does not tint Studio (objectstack#37455)', () 
     expect(root.getPropertyValue('--primary').trim()).not.toBe(STUDIO_ACCENT_HSL.light);
   });
 
-  it('the surface\'s root carries Studio\'s accent: its top-left rows, the page and its buttons sit under it', async () => {
+  it('the surface\'s root carries Studio\'s accent: its top-left rows and the page sit under it', async () => {
     render(<BrandedApp studio />);
     const host = await screen.findByTestId('studio-pillars-host');
     const scope = host.closest(ACCENT_SCOPE);
@@ -166,7 +158,6 @@ describe('a non-default app theme does not tint Studio (objectstack#37455)', () 
     expect(carriesAccent(scope as Element)).toBe(true);
     // objectstack#37456 — no top bar: the left column's top rows stand where it was.
     expect(scope).toContainElement(screen.getByTestId('studio-top-left'));
-    expect(scope).toContainElement(await screen.findByTestId('topbar-ai-assistant'));
   });
 
   it('a portalled surface (the command palette) is outside the root and still under the accent, on body', async () => {

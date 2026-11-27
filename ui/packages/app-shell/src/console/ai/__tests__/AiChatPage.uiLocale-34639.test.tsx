@@ -20,6 +20,9 @@
  * `ChatPane`, so it is covered by the same seam.
  */
 
+// AiChatPage reads a dropped spreadsheet through `import('@object-ui/plugin-grid')`; load it
+// here so collection pays that transform, not a clocked case (check-test-source-alias).
+import '@object-ui/plugin-grid';
 import '@testing-library/jest-dom/vitest';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { cleanup, render } from '@testing-library/react';
@@ -145,6 +148,6 @@ describe('AI chat request carries the console UI language as context.uiLocale (o
   it('the rest of the context is unchanged beside it', () => {
     const { context } = renderPane('en');
     expect(context.agentName).toBe('build');
-    expect(Object.keys(context).sort()).toEqual(['agentName', 'autoPublishAiBuilds', 'uiLocale']);
+    expect(Object.keys(context).sort()).toEqual(['agentName', 'uiLocale']);
   });
 });

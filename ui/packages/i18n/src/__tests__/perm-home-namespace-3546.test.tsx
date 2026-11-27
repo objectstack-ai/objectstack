@@ -210,27 +210,6 @@ describe('objectui#3546 slice six — the home namespace', () => {
     }
   });
 
-  it('reused strings are the neighbours own translations, not second renderings', () => {
-    // Where this slice's `en` string already existed verbatim elsewhere, the
-    // existing row is reused rather than re-translated, so one English string
-    // never renders as two different sentences in the same language. A drift on
-    // either side fails here.
-    const REUSED: Array<[newKey: string, neighbour: string]> = [
-      ['home.pendingDrafts.seedWarn', 'console.ai.seedWarn'],
-    ];
-    for (const [newKey, neighbour] of REUSED) {
-      // the premise: the two really are the same English string
-      expect(at(builtInLocales.en, newKey), `en ${newKey} vs ${neighbour}`).toBe(
-        at(builtInLocales.en, neighbour),
-      );
-      for (const lang of LANGS) {
-        expect(at(builtInLocales[lang], newKey), `${lang} ${newKey} diverged from ${neighbour}`).toBe(
-          at(builtInLocales[lang], neighbour),
-        );
-      }
-    }
-  });
-
   it('the two counting home strings follow their own family on the (s) marker', () => {
     // `home.pendingDrafts.title` (the drafts row's count since objectui#12602,
     // `home.pendingDrafts.message` before it) is the same family, the same row and the
