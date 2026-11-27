@@ -147,8 +147,11 @@ export function buildCapabilityAudience(
 
 /**
  * The positions whose permission sets grant EVERY picked capability — who the
- * gate lets in through a position. Empty `picked` is no gate: `null`, which a
- * preview reads as "everyone who can see the list".
+ * gate lets in through one position alone. It is not the whole audience: a
+ * person's capabilities are the union over every position they hold (and any
+ * set granted to them directly), so a holder of two positions that each grant
+ * part of the pick passes the gate too. Empty `picked` is no gate: `null`,
+ * which a preview reads as "everyone who can see the list".
  */
 export function positionsReached(
   picked: readonly string[],
@@ -165,7 +168,7 @@ export interface CapabilityAudienceSource {
 
 /**
  * Read the three registries and join them. A failed capability or permission
- * set read fails the load (the pickers then say so and keep a text box); a
+ * set read fails the load (the pickers then say so, and offer nothing to add); a
  * failed position read keeps the catalog and leaves `positions` `null`.
  */
 export async function loadCapabilityAudience(source: CapabilityAudienceSource): Promise<CapabilityAudience> {

@@ -9,8 +9,8 @@
  * capabilities the environment knows ({@link CapabilityAudience}), each shown
  * with the permission sets granting it — so a reader cannot type a name that
  * matches nothing. There is no free-text fallback: when the catalog cannot be
- * read, nothing can be added and the view is shared with everyone (a name
- * already picked can still be removed). Under the list it previews, read-only,
+ * read, nothing can be added (a name already picked, such as the open view's
+ * gate, stays and can be removed). Under the list it previews, read-only,
  * which positions the picked set reaches (the sets each position grants in
  * force, as the server serves them), and says the gate applies to the creator
  * too. It grants nothing: granting stays in Setup.
@@ -52,7 +52,7 @@ export function ViewAudiencePicker({ audience, value, onChange, disabled }: View
     const reached = positionsReached(value, loaded.positions) ?? [];
     preview = reached.length === 0
       ? t('view.switcher.audienceNoPosition', {
-        defaultValue: 'No position holds every picked capability: only people granted them directly will see this view',
+        defaultValue: 'No single position holds every picked capability: only people who hold all of them, directly or through several positions, will see this view',
       })
       : t('view.switcher.audiencePositions', {
         defaultValue: '{{positions}} will see this view',
@@ -95,7 +95,7 @@ export function ViewAudiencePicker({ audience, value, onChange, disabled }: View
       {audience.status === 'error' ? (
         <p className="text-xs text-destructive" data-testid="view-audience-load-failed">
           {t('view.switcher.audienceLoadFailed', {
-            defaultValue: 'The capabilities could not be loaded, so the view can only be shared with everyone: {{message}}',
+            defaultValue: 'The capabilities could not be loaded, so none can be added: {{message}}',
             message: audience.message,
           })}
         </p>

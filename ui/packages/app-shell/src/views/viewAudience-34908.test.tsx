@@ -210,12 +210,20 @@ describe('the create card: who sees a shared view', () => {
     expect(onCreate.mock.calls[0][0]).toMatchObject({ scope: 'shared', requiredPermissions: ['view_deal_sales', 'view_deal_finance'] });
   });
 
-  it('a pick no position holds says who is left', async () => {
+  it('a pick no single position holds claims no exclusive audience: two positions together can pass the gate', async () => {
+    // No one position grants both, but the gate reads the UNION of a person's
+    // positions: a holder of sales_rep (export_reports) and accountant
+    // (view_deal_finance) passes with no direct grant at all.
+    expect(positionsReached(['export_reports', 'view_deal_finance'], AUDIENCE.positions!)).toEqual([]);
+    const held = new Set(
+      AUDIENCE.positions!.filter((p) => p.name === 'sales_rep' || p.name === 'accountant').flatMap((p) => p.capabilities),
+    );
+    expect(['export_reports', 'view_deal_finance'].every((c) => held.has(c))).toBe(true);
     mountCard({ loadAudience: async () => AUDIENCE, initialRequiredPermissions: ['export_reports', 'view_deal_finance'] });
     toShared();
     await settle();
     expect(screen.getByTestId('view-audience-preview').textContent).toBe(
-      'No position holds every picked capability: only people granted them directly will see this view',
+      'No single position holds every picked capability: only people who hold all of them, directly or through several positions, will see this view',
     );
   });
 
@@ -426,7 +434,7 @@ describe('the view form\'s audience row in Studio', () => {
   it('nothing reachable: the preview no longer promises the object\'s editors', () => {
     mountRow(AUDIENCE, ['export_reports', 'view_deal_finance']);
     expect(screen.getByTestId('ref-multi-capability-audience').textContent).toBe(
-      'No position holds every picked capability: only people granted them directly will see it.',
+      'No single position holds every picked capability: only people who hold all of them, directly or through several positions, will see it.',
     );
   });
 });

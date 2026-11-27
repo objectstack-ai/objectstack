@@ -1862,7 +1862,7 @@ const STUDIO_EN: Record<string, string> = {
   'engine.form.allCapabilitiesAdded': 'All capabilities added',
   'engine.form.audienceEveryone': 'No capability picked: everyone who can see the list sees it.',
   'engine.form.audiencePositions': 'Positions that will see it: {positions}.',
-  'engine.form.audienceNoPosition': 'No position holds every picked capability: only people granted them directly will see it.',
+  'engine.form.audienceNoPosition': 'No single position holds every picked capability: only people who hold all of them, directly or through several positions, will see it.',
   'engine.form.capabilityGrantedBy': 'Granted by {sets}',
   'engine.form.capabilitiesUnread': 'The capability list is not available here, so none can be added.',
   'engine.form.capabilitiesNone': 'No capability is defined yet. Capabilities are granted on permission sets, in Setup.',

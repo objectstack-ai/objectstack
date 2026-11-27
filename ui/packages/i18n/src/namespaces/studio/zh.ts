@@ -1649,7 +1649,7 @@ const STUDIO_ZH: Record<string, string> = {
   'engine.form.allCapabilitiesAdded': '已添加全部能力',
   'engine.form.audienceEveryone': '未选能力：能看到该列表的人都能看到。',
   'engine.form.audiencePositions': '会看到的岗位：{positions}。',
-  'engine.form.audienceNoPosition': '没有岗位同时持有所选的全部能力：只有被直接授予这些能力的人能看到。',
+  'engine.form.audienceNoPosition': '没有哪个岗位单独持有所选的全部能力：只有直接或通过多个岗位合计持有全部这些能力的人能看到。',
   'engine.form.capabilityGrantedBy': '由 {sets} 授予',
   'engine.form.capabilitiesUnread': '此处读取不到能力列表，无法添加。',
   'engine.form.capabilitiesNone': '尚未定义任何能力。能力在设置中通过权限集授予。',
