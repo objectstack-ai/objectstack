@@ -17,7 +17,7 @@ import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from 'vites
 import { ErrorCode } from '@objectstack/spec/api';
 
 import { formatRefusal, loadScenarioFile, loadScenarios, readCapabilityAreas, type LoadedScenario } from '../../src/loader.js';
-import type { ScenarioTier } from '../../src/schema.js';
+import { PersonaSchema, type ScenarioTier } from '../../src/schema.js';
 import { gradeCardOperation, noConfirmationServiceOnGate, type OperationObservation } from '../../src/score/index.js';
 import { gradeRun, type RunTruth } from '../../src/score/scenario-run-grade.js';
 import type { PersonaAccount } from '../../src/runner/app.js';
@@ -687,6 +687,45 @@ describe('prompts, seed order, template manifest and change size', () => {
     expect(contract).toContain(SEED_POSTURE);
     expect(contract).not.toContain('through the data API');
     expect(SEED_POSTURE).toMatch(/no record-triggered flow fires/);
+  });
+
+  it('a persona line names the roll-ups the card withholds with the rows they summarise, and only on the cards that name them', () => {
+    const at = (file: string) => buildPrompt(namespacedScenario(load(resolve(HERE, '../../../../../docs/qa/scenarios', file))).card);
+    expect(at('project_with_tasks.json')).toContain(
+      '- `demoproject_client_viewer` for `client_viewer` (Client stakeholder who may not change tasks): must not read the object `demoproject_task`; ' +
+        'the roll-up fields `demoproject_project.task_count` and `demoproject_project.total_estimate` summarise what it must not read, so they are withheld too: its set must not read them either.',
+    );
+    expect(at('invoice_with_line_items.json')).toContain(
+      '(Warehouse staff who may read invoices but not change them): must not read the object `demoinvoice_account` or the field `demoinvoice_invoice_line.amount` or the field `demoinvoice_invoice_line.unit_price`; ' +
+        'the roll-up field `demoinvoice_invoice.total` summarises what it must not read, so it is withheld too: its set must not read it either.',
+    );
+    // The contractor's own total is already in its hidden, so its line is as it was.
+    expect(at('project_with_tasks.json')).toContain('`demoproject_contractor` for `contractor` (External contractor who logs, updates and removes their own tasks): must not read the field `demoproject_task.estimate_hours` or the field `demoproject_project.total_estimate`; sees only');
+    // A card that names no withheld roll-up keeps its persona lines byte for byte.
+    const crmPrompt = buildPrompt(namespacedScenario(crm).card);
+    expect(crmPrompt).toContain('`democrm_sdr` for `sdr` (Sales development representative who adds, updates and removes contacts): must not read the field `democrm_contact.email`; sees only');
+    expect(crmPrompt).not.toContain('roll-up field');
+  });
+
+  it('the schema refuses a withheld roll-up the persona\'s hidden already names or its allowedRollups allows', () => {
+    const base = { id: 'client', role: 'Client', hidden: { objects: ['task'] } };
+    expect(PersonaSchema.safeParse({ ...base, withheldRollups: [{ object: 'project', field: 'task_count' }] }).success).toBe(true);
+    const inHidden = PersonaSchema.safeParse({ ...base, withheldRollups: [{ object: 'task', field: 'estimate_hours' }] });
+    expect(inHidden.error!.issues.map((i) => i.path)).toEqual([['withheldRollups', 0]]);
+    const alsoAllowed = PersonaSchema.safeParse({ ...base, allowedRollups: [{ object: 'project', field: 'task_count' }], withheldRollups: [{ object: 'project', field: 'task_count' }] });
+    expect(alsoAllowed.error!.issues.map((i) => i.path)).toEqual([['withheldRollups', 0]]);
+  });
+
+  it('the loader refuses a withheld roll-up on a field no seed row carries', () => {
+    const file = resolve(HERE, '../../../../../docs/qa/scenarios/project_with_tasks.json');
+    const raw = JSON.parse(readFileSync(file, 'utf8'));
+    raw.run.personas.find((p: { id: string }) => p.id === 'client_viewer').withheldRollups = [{ object: 'project', field: 'task_total' }];
+    const dir = mkdtempSync(join(tmpdir(), 'withheld-'));
+    writeFileSync(join(dir, 'project_with_tasks.json'), JSON.stringify(raw));
+    const { card, refusals } = loadScenarioFile(join(dir, 'project_with_tasks.json'), { areas: readCapabilityAreas(AREAS_DIR), library: 'open' });
+    rmSync(dir, { recursive: true, force: true });
+    expect(card).toBeUndefined();
+    expect(refusals.map((r) => [r.path, r.message])).toEqual([['run.personas[1].withheldRollups[0].field', 'no seed row of `project` carries `task_total`']]);
   });
 
   it('both authoring loops name the verify invocation the runner scores with, next to validate and build', () => {

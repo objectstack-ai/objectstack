@@ -140,7 +140,12 @@
         "hidden": {"fields": [{"object": "task", "field": "estimate_hours"}, {"object": "project", "field": "total_estimate"}]},
         "scope": [{"object": "task", "field": "assignee", "value": "u_kim"}]
       },
-      {"id": "client_viewer", "role": "Client stakeholder who may not change tasks", "hidden": {"objects": ["task"]}}
+      {
+        "id": "client_viewer",
+        "role": "Client stakeholder who may not change tasks",
+        "hidden": {"objects": ["task"]},
+        "withheldRollups": [{"object": "project", "field": "task_count"}, {"object": "project", "field": "total_estimate"}]
+      }
     ],
     "operations": [
       {

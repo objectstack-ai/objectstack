@@ -725,6 +725,11 @@ function checkCard(
       if (!objects.has(f.object)) refuse([...at, 'object'], `\`${f.object}\` is not in expect.objects`);
       else checkField(f.object, f.field, [...at, 'field']);
     });
+    (p.withheldRollups ?? []).forEach((f, j) => {
+      const at: IssuePath = ['run', 'personas', i, 'withheldRollups', j];
+      if (!objects.has(f.object)) refuse([...at, 'object'], `\`${f.object}\` is not in expect.objects`);
+      else checkField(f.object, f.field, [...at, 'field']);
+    });
     (p.scope ?? []).forEach((sc, j) => {
       const at: IssuePath = ['run', 'personas', i, 'scope', j];
       if (!objects.has(sc.object) || seed[sc.object] === undefined) {
