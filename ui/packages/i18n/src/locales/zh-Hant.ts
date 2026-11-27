@@ -4808,9 +4808,9 @@ const zhHant = {
     questionCard: {
       aiAsks: 'AI 問：',
       progress: '第 {{current}}/{{total}} 題',
-      typeYourOwn: '自行輸入…',
+      typeYourOwn: '自己輸入…',
       recommended: '推薦',
-      skip: '略過',
+      skip: '跳過',
       back: '上一題',
       next: '下一題',
       send: '傳送',
