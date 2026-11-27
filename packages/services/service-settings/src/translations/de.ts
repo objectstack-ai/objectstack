@@ -726,9 +726,6 @@ export const de: PlatformTranslationData = {
           help: 'Längste Passage in Zeichen, wenn der Wissensdienst ein Dokument aufteilt. Eine an der Wissensquelle selbst gesetzte Größe hat Vorrang; das Eingabelimit des Embedding-Modells kann den Wert senken.',
         },
       },
-      actions: {
-        test: { label: 'Verbindung testen' },
-      },
     },
     lifecycle: {
       title: 'Datenlebenszyklus',

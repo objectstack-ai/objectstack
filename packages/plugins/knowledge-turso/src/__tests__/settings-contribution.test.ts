@@ -46,11 +46,25 @@ import {
 import {
   KnowledgeTursoPlugin,
   dataDirectoryOf,
+  knowledgeTestActionHandler,
   knowledgeTursoSettingsSpecifiers,
   knowledgeTursoSettingsTranslations,
 } from '../index.js';
 
-const TURSO_IDS = ['turso', 'turso_url', 'turso_auth_token'];
+/** The group, its two fields and the action that checks them, in page order. */
+const TURSO_IDS = ['turso', 'turso_url', 'turso_auth_token', 'test'];
+
+/**
+ * `POST /api/settings/knowledge/<actionId>` beside the same post to an action
+ * no page declares: the answer "as for an undeclared action" is judged by that
+ * control's envelope, never by its message text.
+ */
+async function postBesideUndeclared(http: MockHttp, actionId: string, body: unknown) {
+  const route = 'POST /api/settings/:namespace/:actionId';
+  const answer = await call(http, route, { namespace: 'knowledge', actionId }, body);
+  const control = await call(http, route, { namespace: 'knowledge', actionId: 'never_declared' }, body);
+  return { answer, control };
+}
 
 const dirs: string[] = [];
 afterAll(() => {
@@ -172,6 +186,17 @@ describe('the Knowledge page without knowledge-turso (the store is pgvector)', a
     }
   });
 
+  it('has no Test connection: the action door answers as for an undeclared action', async () => {
+    const specs = settings.getManifest('knowledge').specifiers as Array<{ type: string }>;
+    expect(specs.filter((s) => s.type === 'action_button')).toEqual([]);
+    const { answer, control } = await postBesideUndeclared(http, 'test', { values: { turso_url: 'file:./sent.db' } });
+    expect(answer.status).toBe(400);
+    expect(answer.body?.error?.code).toBe('SETTINGS_ACTION_FAILED');
+    expect([control.status, control.body?.error?.code]).toEqual([answer.status, answer.body?.error?.code]);
+    // Not the Turso check's answer: it would name the URL it was sent.
+    expect(JSON.stringify(answer.body)).not.toContain('file:./sent.db');
+  });
+
   it('loads no Turso copy into the i18n service', () => {
     expect(loadedTursoCopy(i18n.loaded)).toEqual([]);
     // Non-vacuity: the settings bundle itself was loaded into the same recorder.
@@ -184,13 +209,23 @@ describe('the Knowledge page with knowledge-turso reading its URL from settings'
   dirs.push(probe);
   const { settings, http, i18n } = await boot('turso-from-settings');
 
-  it('carries the Turso group and its two fields, in front of the page, as declared', () => {
+  it('carries the Turso group, its two fields and their Test connection, in front of the page, as declared', () => {
     const ids = idsOf(settings);
-    expect(ids.slice(0, 3)).toEqual(TURSO_IDS);
+    expect(ids.slice(0, TURSO_IDS.length)).toEqual(TURSO_IDS);
     expect(ids).toContain('chunk_target');
-    expect(settings.getManifest('knowledge').specifiers.slice(0, 3)).toEqual(knowledgeTursoSettingsSpecifiers);
-    // The page's own action is still answered after the re-registration.
-    expect(ids).toContain('test');
+    expect(settings.getManifest('knowledge').specifiers.slice(0, TURSO_IDS.length)).toEqual(knowledgeTursoSettingsSpecifiers);
+    expect(knowledgeTursoSettingsSpecifiers.find((s) => s.id === 'test')).toMatchObject({
+      type: 'action_button',
+      handler: { kind: 'http', method: 'POST', url: '/api/settings/knowledge/test' },
+    });
+  });
+
+  it('answers Test connection with the Turso check, where an undeclared action is refused', async () => {
+    const { answer, control } = await postBesideUndeclared(http, 'test', { values: { turso_url: 'file:./sent.db' } });
+    expect(control.status).toBe(400);
+    expect(answer.status).toBe(200);
+    expect(answer.body?.data?.ok).toBe(true);
+    expect(String(answer.body?.data?.message)).toContain('file:./sent.db');
   });
 
   it('saves a PUT of turso_url, and keeps the auth token a secret', async () => {
@@ -236,12 +271,15 @@ describe('the Knowledge page with knowledge-turso reading its URL from settings'
 });
 
 describe('knowledge-turso given a url of its own', async () => {
-  const { settings } = await boot('turso-own-url');
+  const { settings, http } = await boot('turso-own-url');
 
-  it('reads no setting, so the page carries no Turso field', () => {
+  it('reads no setting, so the page carries no Turso field and no Test connection', async () => {
     const ids = idsOf(settings);
     expect(ids).toContain('chunk_target');
     for (const id of TURSO_IDS) expect(ids, id).not.toContain(id);
+    const { answer, control } = await postBesideUndeclared(http, 'test', {});
+    expect(answer.status).toBe(400);
+    expect([control.status, control.body?.error?.code]).toEqual([answer.status, answer.body?.error?.code]);
   });
 });
 
@@ -266,6 +304,7 @@ describe('the Turso group\'s copy moved with its fields', () => {
         expect(copy.keys[f.key!].label, `${locale} ${f.key}`).toBeTruthy();
         expect(copy.keys[f.key!].help, `${locale} ${f.key}`).toBeTruthy();
       }
+      expect(copy.actions.test.label, `${locale} test`).toBeTruthy();
     }
   });
 
@@ -276,6 +315,157 @@ describe('the Turso group\'s copy moved with its fields', () => {
       expect(page.groups, locale).not.toHaveProperty('turso');
       expect(page.keys, locale).not.toHaveProperty('turso_url');
       expect(page.keys, locale).not.toHaveProperty('turso_auth_token');
+      expect(page.actions ?? {}, locale).not.toHaveProperty('test');
     }
+  });
+
+  // The group is on the page only where the store reads it, which is never on
+  // PostgreSQL, and no deployment reuses an organization's own database for a
+  // blank URL (a blank URL opens knowledge.db in the data directory). So the
+  // description names PostgreSQL once (when the group is used), says what
+  // blank means, and carries neither the PostgreSQL clause nor the cloud one.
+  it('describes the group as it is read: PostgreSQL named once, blank is knowledge.db, no cloud fallback', () => {
+    const fallback = String(knowledgeTursoSettingsSpecifiers.find((s) => s.type === 'group')!.description);
+    const descriptions: Array<[string, string]> = [
+      ['fallback', fallback],
+      ...locales.map((l) => [l, (knowledgeTursoSettingsTranslations[l]!.settings.knowledge.groups.turso.description)] as [string, string]),
+    ];
+    expect(descriptions).toHaveLength(12);
+    for (const [where, text] of descriptions) {
+      expect(text.split('PostgreSQL').length - 1, where).toBe(1);
+      expect(text, where).toContain('knowledge.db');
+    }
+    expect(fallback).not.toMatch(/organi[sz]ation|cloud|not read/i);
+    expect(fallback).toContain('Leave blank to use knowledge.db in the data directory.');
+  });
+});
+
+describe('knowledgeTestActionHandler — the Turso form check', () => {
+  it('accepts no URL (the plugin defaults to its own file)', async () => {
+    const r = await knowledgeTestActionHandler({ values: {} });
+    expect(r.ok).toBe(true);
+    expect(r.severity).toBe('info');
+    // The plugin opens a file of its own, never the platform's database.
+    expect(r.message).toMatch(/knowledge\.db/);
+    expect(r.message).not.toMatch(/reuse the tenant/);
+  });
+
+  it('accepts a local file URL', async () => {
+    expect((await knowledgeTestActionHandler({ values: { turso_url: 'file:./knowledge.db' } })).ok).toBe(true);
+  });
+
+  it('rejects a managed Turso URL without an auth token, and accepts it with one', async () => {
+    const without = await knowledgeTestActionHandler({ values: { turso_url: 'libsql://x.turso.io' } });
+    expect(without.ok).toBe(false);
+    expect(without.severity).toBe('error');
+    const withToken = await knowledgeTestActionHandler({ values: { turso_url: 'libsql://x.turso.io', turso_auth_token: 't' } });
+    expect(withToken.ok).toBe(true);
+  });
+
+  it('names the package that reads the URL and how it is registered, not an outside origin', async () => {
+    const message = String((await knowledgeTestActionHandler({ values: { turso_url: 'file:./knowledge.db' } })).message);
+    expect(message).toContain('@objectstack/knowledge-turso');
+    expect(message).toMatch(/registered beside the knowledge service/);
+    expect(message).not.toMatch(/ObjectOS Cloud monorepo|does not ship|to exercise live calls/);
+  });
+
+  it('every green answer says no connection was attempted', async () => {
+    const forms: Array<[string, Record<string, unknown>]> = [
+      ['no URL', {}],
+      ['local file', { turso_url: 'file:./knowledge.db' }],
+      ['managed', { turso_url: 'libsql://x.turso.io', turso_auth_token: 't' }],
+    ];
+    for (const [label, values] of forms) {
+      const r = await knowledgeTestActionHandler({ values });
+      expect(r.ok, label).toBe(true);
+      expect(String(r.message), label).toMatch(/no connection was attempted/);
+    }
+  });
+
+  it('reads no adapter: a stale one in the values or the payload changes nothing', async () => {
+    const fields = { turso_url: 'libsql://x.turso.io', turso_auth_token: 't' };
+    const baseline = await knowledgeTestActionHandler({ values: fields });
+    expect(baseline.ok).toBe(true);
+    for (const adapter of ['memory', 'turso', 'ragflow', 'pgvector']) {
+      expect(await knowledgeTestActionHandler({ values: { ...fields, adapter } }), adapter).toEqual(baseline);
+      expect(await knowledgeTestActionHandler({ values: fields, payload: { values: { adapter } } }), adapter).toEqual(baseline);
+    }
+    // Non-vacuity: the fields it does read change the answer.
+    expect((await knowledgeTestActionHandler({ values: { turso_url: 'libsql://x.turso.io' } })).ok).toBe(false);
+  });
+
+  it('prefers payload.values over persisted values', async () => {
+    const r = await knowledgeTestActionHandler({
+      values: { turso_url: 'libsql://x.turso.io' },
+      payload: { values: { turso_url: 'file:foo.db' } },
+    });
+    expect(r.ok).toBe(true);
+    expect(r.message).toMatch(/file:foo\.db/);
+  });
+});
+
+/**
+ * A store that reads its URL from settings, on a composition where the page
+ * cannot carry the two keys: the read finds nothing saved and the store opens
+ * its default file. That is said once, at init().
+ */
+describe('KnowledgeTursoPlugin — a store-from-settings whose page cannot carry the Turso keys', () => {
+  const NOT_ON_PAGE = /does not carry turso_url and turso_auth_token/;
+
+  function ctxWith(settings: unknown) {
+    const warns: string[] = [];
+    const ctx = {
+      getService: (name: string) => {
+        if (name === 'settings' && settings !== undefined) return settings;
+        throw new Error(`no service ${name}`);
+      },
+      hook: () => undefined,
+      logger: { info: () => undefined, warn: (m: string) => warns.push(m), debug: () => undefined, error: () => undefined },
+    } as unknown as PluginContext;
+    return { ctx, warns };
+  }
+
+  function pageOf(specifiers: unknown[]) {
+    let page = { namespace: 'knowledge', specifiers };
+    const actions: string[] = [];
+    return {
+      actions,
+      getManifest: () => page,
+      registerManifest: (m: typeof page) => { page = m; },
+      registerAction: (_ns: string, id: string) => { actions.push(id); },
+    };
+  }
+
+  const plugin = () => new KnowledgeTursoPlugin({ urlFromSettings: true, projectRoot: '/srv/app', env: {} });
+
+  it('warns once with no settings service, naming the default file', async () => {
+    const { ctx, warns } = ctxWith(undefined);
+    await plugin().init(ctx);
+    const hits = warns.filter((m) => NOT_ON_PAGE.test(m));
+    expect(hits).toHaveLength(1);
+    expect(hits[0]).toContain('knowledge.db');
+  });
+
+  it('warns once for a host page that declares a Turso group id without the keys', async () => {
+    const page = pageOf([{ type: 'action_button', id: 'test', label: 'Host test' }]);
+    const { ctx, warns } = ctxWith(page);
+    await plugin().init(ctx);
+    expect(warns.filter((m) => NOT_ON_PAGE.test(m))).toHaveLength(1);
+    // The host's page and its own handler are left as written.
+    expect(page.actions).toEqual([]);
+  });
+
+  it('says nothing where it contributes the group, and registers the check with it', async () => {
+    const page = pageOf([{ type: 'number', key: 'chunk_target', label: 'Chunk' }]);
+    const { ctx, warns } = ctxWith(page);
+    await plugin().init(ctx);
+    expect(warns.filter((m) => NOT_ON_PAGE.test(m))).toEqual([]);
+    expect(page.actions).toEqual(['test']);
+  });
+
+  it('says nothing for a store given a url of its own: it reads no setting', async () => {
+    const { ctx, warns } = ctxWith(undefined);
+    await new KnowledgeTursoPlugin({ url: ':memory:', urlFromSettings: true, projectRoot: '/srv/app', env: {} }).init(ctx);
+    expect(warns.filter((m) => NOT_ON_PAGE.test(m))).toEqual([]);
   });
 });

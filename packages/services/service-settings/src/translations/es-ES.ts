@@ -591,9 +591,6 @@ export const esES: PlatformTranslationData = {
         chunk_target: { label: 'Tamaño objetivo de fragmento (caracteres)',
           help: 'Longitud máxima de un pasaje, en caracteres, cuando el servicio de conocimiento divide un documento. Un tamaño fijado en la propia fuente tiene prioridad; el límite de entrada del modelo de embeddings puede reducirlo.' },
       },
-      actions: {
-        test: { label: 'Probar conexión' },
-      },
     },
 
     lifecycle: {

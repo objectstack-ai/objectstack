@@ -428,7 +428,17 @@ export class KnowledgeTursoPlugin implements Plugin {
     // The two settings this store reads join the Knowledge page here, and only
     // here: a deployment that does not mount this store, or mounts it with a
     // `url` or `client` of its own, reads neither, so its page offers neither.
-    contributeKnowledgeTursoSettings(ctx);
+    // Where they cannot join it, the read below finds nothing saved and the
+    // store opens its default file, which would otherwise go unsaid.
+    if (!contributeKnowledgeTursoSettings(ctx)) {
+      ctx.logger.warn?.(
+        'KnowledgeTursoPlugin: the store reads its URL from the Knowledge settings, but that page does not ' +
+          'carry turso_url and turso_auth_token (no settings service, no knowledge page, or a knowledge page ' +
+          'that declares one of the Turso group\'s ids without both keys), so nothing can be saved there and ' +
+          `the store opens its default file (${defaultStoreUrl(this.opts.projectRoot, this.opts.stateDir)}). Mount the knowledge service ` +
+          'and the settings service, or pass the plugin a `url`.',
+      );
+    }
     ctx.hook('kernel:bootstrapped', async () => {
       await this.openFromSettings(ctx);
     });

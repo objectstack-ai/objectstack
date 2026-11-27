@@ -19,9 +19,13 @@ export {
 } from './plugin.js';
 export {
   KNOWLEDGE_SETTINGS_NAMESPACE,
+  KNOWLEDGE_TURSO_TEST_ACTION,
   contributeKnowledgeTursoSettings,
+  knowledgeTestActionHandler,
   knowledgeTursoSettingsSpecifiers,
   knowledgeTursoSettingsTranslations,
   withKnowledgeTursoSection,
+  type KnowledgeTursoActionInput,
+  type KnowledgeTursoActionResult,
 } from './settings-contribution.js';
 export { GENERATION_TABLE, SAFE_SOURCE_ID, generationTable, legacyTable } from './sql.js';
