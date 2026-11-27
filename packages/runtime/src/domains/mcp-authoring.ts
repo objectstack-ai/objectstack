@@ -145,6 +145,16 @@
  * own build door passes its own `authoring` at its own `handleHttpRequest`
  * call, and the option is one object, so the two registries are never merged
  * and their names never meet.
+ *
+ * ## The in-process entry
+ *
+ * [#37944] A host's own AI assistant that runs in the server process (an
+ * in-app ask turn) calls the same five tools through
+ * `createInProcessAuthoringRegistry` (`./in-process-authoring.ts`, exported by
+ * the package). It is built by this module's {@link buildOpenAuthoringRegistry}
+ * over a request the dispatcher placed, so the read gates, the writer and the
+ * verdicts are these; there is no token, so its admission is the human half
+ * alone, and its saves state `surface: 'copilot'`.
  */
 
 import { createRequire } from 'node:module';
