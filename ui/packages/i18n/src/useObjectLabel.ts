@@ -137,7 +137,7 @@ export function useObjectLabel() {
       (key) => !BUILTIN_KEYS.has(key) && bundle[key] && typeof bundle[key] === 'object'
         && (bundle[key].objects || bundle[key].fields || bundle[key].apps
           || bundle[key].dashboards || bundle[key].pages || bundle[key].reports
-          || bundle[key].globalActions),
+          || bundle[key].globalActions || bundle[key].packages),
     );
   };
 
@@ -174,6 +174,36 @@ export function useObjectLabel() {
       // Graceful degradation when i18n provider is not available
     }
     return fallback;
+  };
+
+  /**
+   * Read `{ns}.packages.{packageId}.{attr}` by direct property access, across
+   * the active language chain (`i18n.languages`, the order `t` falls back in)
+   * and every discovered app namespace.
+   *
+   * ⛔ Not through `t`: a package is keyed by its `manifest.id`, which is
+   * reverse-domain (`com.acme.crm`), so a dot-separated key path would split
+   * the id into segments and never match. Returns `undefined` on a miss.
+   */
+  const packageAttr = (packageId: string, attr: 'name' | 'description'): string | undefined => {
+    if (!hasUsableI18nInstance(i18n) || typeof packageId !== 'string' || !packageId) return undefined;
+    try {
+      const chain = Array.isArray(i18n.languages) && i18n.languages.length > 0
+        ? i18n.languages
+        : [i18n.language || 'en'];
+      const namespaces = getAppNamespaces();
+      for (const lang of chain) {
+        const bundle = i18n.getResourceBundle(lang, 'translation') as Record<string, any> | undefined;
+        if (!bundle) continue;
+        for (const ns of namespaces) {
+          const value = bundle[ns]?.packages?.[packageId]?.[attr];
+          if (typeof value === 'string' && value.length > 0) return value;
+        }
+      }
+    } catch {
+      // Graceful degradation when i18n provider is not available
+    }
+    return undefined;
   };
 
   /** Build suffix candidates: prefer the given name, fall back to the base (unprefixed) name. */
@@ -497,6 +527,26 @@ export function useObjectLabel() {
      */
     navGroupLabel: (appName: string, groupId: string, fallback: string) =>
       resolve(`apps.${appName}.navigation.${groupId}.label`, fallback),
+
+    /**
+     * A package's display name for the active language:
+     * `{ns}.packages.{manifestId}.name` from the served translation document,
+     * else the manifest's own `name`, else its id (objectstack#35513).
+     *
+     * A DISPLAY name only — the manifest keeps its authored `name` on every
+     * wire and in every editor, so draw this where a reader sees a package and
+     * never feed it back into a form that saves the manifest.
+     */
+    packageName: (pkg: { id: string; name?: string }) =>
+      packageAttr(pkg.id, 'name') || pkg.name || pkg.id,
+
+    /**
+     * A package's description for the active language:
+     * `{ns}.packages.{manifestId}.description`, else the manifest's own
+     * `description`; `undefined` when neither carries one.
+     */
+    packageDescription: (pkg: { id: string; description?: string }) =>
+      packageAttr(pkg.id, 'description') || pkg.description || undefined,
 
     /**
      * Resolve translated dashboard label, falling back to dashboardDef.label.

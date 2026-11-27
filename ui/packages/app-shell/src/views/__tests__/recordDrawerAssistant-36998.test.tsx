@@ -50,6 +50,7 @@ function control(calls: string[]): ChatDockControl {
     fullWindow: false,
     toggle: () => calls.push('toggle'),
     open: (...args) => calls.push(`open:${JSON.stringify(args)}`),
+    openEntry: (...args) => calls.push(`entry:${JSON.stringify(args)}`),
   };
 }
 
@@ -69,12 +70,14 @@ describe('objectstack#36998 — the record drawer\'s bar opens the assistant', (
     const calls: string[] = [];
     const drawer = mount(control(calls), (path) => calls.push(`page:${path.map((l) => l.recordId).join('>')}`));
     await screen.findByTestId('record-body');
-    const entry = within(drawer).getByRole('button', { name: 'AI Assistant' });
+    // objectstack#37860 (C3's hand-over) — the entry's words, 「Ask AI」.
+    const entry = within(drawer).getByRole('button', { name: 'Ask AI' });
     expect(entry).toHaveAttribute('data-testid', 'record-pane-open-assistant');
     // The bar's own control, beside ⤢ in the bar.
     expect(entry.closest('[data-record-top-bar]')).not.toBeNull();
     fireEvent.click(entry);
-    expect(calls).toEqual(['page:L-1', 'open:[]']);
+    // ui ADR-0057 Amendment A5 — it opens as the entry does.
+    expect(calls).toEqual(['page:L-1', 'entry:[]']);
   });
 
   it('without the assistant (no dock handle), no entry is drawn', async () => {

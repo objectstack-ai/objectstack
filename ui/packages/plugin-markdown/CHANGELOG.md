@@ -1,5 +1,19 @@
 # @object-ui/plugin-markdown
 
+## 19.0.0-next.1
+
+### Patch Changes
+
+- Updated dependencies [c3da753]
+- Updated dependencies [6e8f663]
+- Updated dependencies [2980483]
+- Updated dependencies [1028438]
+- Updated dependencies [8fbae19]
+- Updated dependencies [1f97fce]
+  - @object-ui/core@19.0.0-next.1
+  - @object-ui/components@19.0.0-next.1
+  - @object-ui/types@19.0.0-next.1
+
 ## 19.0.0-next.0
 
 ### Patch Changes

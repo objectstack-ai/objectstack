@@ -45,6 +45,7 @@ import {
   Languages,
   ListChecks,
   MessageCircle,
+  Package,
   PanelsTopLeft,
   Settings2,
   ShieldCheck,
@@ -109,6 +110,8 @@ const CATEGORY_DEFS = {
   permissions: { label: 'engine.translationPreview.category.permissions', icon: ShieldCheck, flat: false },
   books: { label: 'engine.translationPreview.category.books', icon: BookOpen, flat: false },
   mappings: { label: 'engine.translationPreview.category.mappings', icon: FileInput, flat: false },
+  // A package's own name and description, keyed by its manifest id (objectstack#35513).
+  packages: { label: 'engine.translationPreview.category.packages', icon: Package, flat: false },
   metadataForms: { label: 'engine.translationPreview.category.metadataForms', icon: FileText, flat: false },
   settingsCommon: { label: 'engine.translationPreview.category.settingsCommon', icon: Settings2, flat: false },
 } satisfies Record<TranslationGroup, Omit<CategoryDef, 'key'>>;
