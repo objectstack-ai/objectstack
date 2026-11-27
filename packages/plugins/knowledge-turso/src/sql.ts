@@ -70,15 +70,18 @@ const PASSAGE_COLUMNS = [
   'title',
 ];
 
+/** The columns of the generation table ({@link generationDdl}), exactly, in no order. */
+const GENERATION_COLUMNS = ['created_at', 'dim', 'fingerprint', 'generation', 'model', 'recipe_hash', 'source_id', 'state'];
+
 /** What a table found under a name is, read from `pragma_table_info` rows. */
-export type TableShape = 'none' | 'legacy' | 'passage' | 'other';
+export type TableShape = 'none' | 'legacy' | 'passage' | 'generation' | 'other';
 
 /**
  * Reads a table's shape from its columns (`name`, `type`): `legacy` only for
  * the exact column set of the cloud-repo releases with an `F32_BLOB` vector,
- * `passage` only for the exact set this module makes, `other` for anything
- * else (a table the store did not make, never dropped or served), `none` for
- * no table.
+ * `passage` only for the exact set this module makes, `generation` only for
+ * the exact set of the generation table, `other` for anything else (a table
+ * the store did not make, never dropped or served), `none` for no table.
  */
 export function tableShape(columns: ReadonlyArray<{ name: unknown; type: unknown }>): TableShape {
   if (columns.length === 0) return 'none';
@@ -88,6 +91,7 @@ export function tableShape(columns: ReadonlyArray<{ name: unknown; type: unknown
   const same = (want: string[]) => names.length === want.length && names.every((n, i) => n === want[i]);
   if (isVector && same(LEGACY_COLUMNS)) return 'legacy';
   if (isVector && same(PASSAGE_COLUMNS)) return 'passage';
+  if (same(GENERATION_COLUMNS)) return 'generation';
   return 'other';
 }
 

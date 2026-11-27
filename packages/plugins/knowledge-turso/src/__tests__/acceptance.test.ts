@@ -557,3 +557,138 @@ describe('knowledge-turso with a request bound (a remote database)', () => {
     store.closeAll();
   });
 });
+
+/**
+ * A database shared with object tables (an object's table is named for the
+ * object): a table the store did not make under the name of one of its
+ * generation tables, or of its generation table, is never dropped or used.
+ * Each case puts an object table where a generation row points — the store's
+ * own table removed by hand, an object of that name created — and the call
+ * that would drop it is refused, coded, naming the table, with nothing removed.
+ */
+for (const kind of ['memory', 'file'] as StoreKind[]) {
+  describe(`knowledge-turso beside object tables on ${kind === 'memory' ? ':memory:' : 'a file: URL'}`, () => {
+    const store = storeOf(kind);
+    afterAll(() => store.closeAll());
+    const FP_B = { fingerprint: 'fp-test:b', recipeHash: 'rh-test:1' };
+    const FP_C = { fingerprint: 'fp-test:c', recipeHash: 'rh-test:1' };
+
+    /** Replaces the store's table `table` with an object table holding one row. */
+    async function occupy(client: Client, table: string): Promise<void> {
+      await client.execute(`DROP TABLE "${table}"`);
+      await client.execute(`CREATE TABLE "${table}" (id TEXT PRIMARY KEY, name TEXT)`);
+      await client.execute(`INSERT INTO "${table}" VALUES ('r1', 'kept')`);
+    }
+
+    async function objectRows(client: Client, table: string): Promise<unknown[]> {
+      return (await client.execute(`SELECT name FROM "${table}"`)).rows.map((r) => r.name);
+    }
+
+    async function generationRows(client: Client, sourceId: string): Promise<string[]> {
+      const found = await client.execute({
+        sql: 'SELECT generation, state FROM knowledge_generation WHERE source_id = ? ORDER BY generation',
+        args: [sourceId],
+      });
+      return found.rows.map((r) => `${String(r.generation)}:${String(r.state)}`);
+    }
+
+    it('beginBuild never drops an object table under the name of the unfinished build it replaces', async () => {
+      const client = store.client();
+      const adapter = new TursoKnowledgeAdapter({ id: 'under_test', client, embedder: new FakeEmbedder() });
+      const s = source('ob_begin');
+      await adapter.upsert([doc(s, '1', 'walnut desk')], ctx(s));
+      await adapter.beginBuild(ctx(s, FP_B));
+      await occupy(client, 'knowledge_ob_begin_g2');
+      const err = await refusal(adapter.beginBuild(ctx(s, FP_C)));
+      expect(err).toMatchObject({ code: 'SERVICE_UNAVAILABLE', status: 503 });
+      expect(String(err.message)).toContain("'knowledge_ob_begin_g2'");
+      expect(await objectRows(client, 'knowledge_ob_begin_g2')).toEqual(['kept']);
+      expect(await generationRows(client, s.name)).toEqual(['1:active', '2:building']);
+      expect((await adapter.search('walnut', { source: s, topK: 5 })).map((h) => h.snippet)).toEqual(['walnut desk']);
+    });
+
+    it('completeBuild never drops an object table under the name of the active generation it replaces', async () => {
+      const client = store.client();
+      const adapter = new TursoKnowledgeAdapter({ id: 'under_test', client, embedder: new FakeEmbedder() });
+      const s = source('ob_complete');
+      await adapter.upsert([doc(s, '1', 'maple floor')], ctx(s));
+      await adapter.beginBuild(ctx(s, FP_B));
+      await adapter.upsert([doc(s, '1', 'maple floor')], ctx(s, FP_B));
+      await occupy(client, 'knowledge_ob_complete_g1');
+      const err = await refusal(adapter.completeBuild(ctx(s, FP_B)));
+      expect(err).toMatchObject({ code: 'SERVICE_UNAVAILABLE', status: 503 });
+      expect(String(err.message)).toContain("'knowledge_ob_complete_g1'");
+      expect(await objectRows(client, 'knowledge_ob_complete_g1')).toEqual(['kept']);
+      expect(await generationRows(client, s.name)).toEqual(['1:active', '2:building']);
+      expect(await adapter.indexStatus(ctx(s))).toMatchObject({ fingerprint: FP_A.fingerprint, building: true });
+    });
+
+    it('dropSource never drops an object table under a generation name, and removes nothing of the source', async () => {
+      const client = store.client();
+      const adapter = new TursoKnowledgeAdapter({ id: 'under_test', client, embedder: new FakeEmbedder() });
+      const s = source('ob_drop');
+      await adapter.upsert([doc(s, '1', 'cherry bench')], ctx(s));
+      await adapter.beginBuild(ctx(s, FP_B));
+      // The building generation's name is taken; the active one's table is the store's and comes first.
+      await occupy(client, 'knowledge_ob_drop_g2');
+      const err = await refusal(adapter.dropSource(ctx(s)));
+      expect(err).toMatchObject({ code: 'SERVICE_UNAVAILABLE', status: 503 });
+      expect(String(err.message)).toContain("'knowledge_ob_drop_g2'");
+      expect(await objectRows(client, 'knowledge_ob_drop_g2')).toEqual(['kept']);
+      expect(await generationRows(client, s.name)).toEqual(['1:active', '2:building']);
+      expect(await tables(client, 'knowledge_ob_drop%')).toEqual(['knowledge_ob_drop_g1', 'knowledge_ob_drop_g2']);
+      expect((await adapter.search('cherry', { source: s, topK: 5 })).map((h) => h.snippet)).toEqual(['cherry bench']);
+    });
+
+    it("the store's own tables are still dropped by a rebuild and by dropSource", async () => {
+      const client = store.client();
+      const adapter = new TursoKnowledgeAdapter({ id: 'under_test', client, embedder: new FakeEmbedder() });
+      const s = source('ob_own');
+      await adapter.upsert([doc(s, '1', 'pine shelf')], ctx(s));
+      await adapter.beginBuild(ctx(s, FP_B));
+      await adapter.upsert([doc(s, '2', 'pine crate')], ctx(s, FP_B));
+      // FP_B's unfinished build is dropped, and generation 2 made afresh for FP_C.
+      await adapter.beginBuild(ctx(s, FP_C));
+      expect(await adapter.listDocuments(ctx(s, FP_C), { limit: 5 })).toEqual({ documents: [] });
+      await adapter.upsert([doc(s, '1', 'pine shelf')], ctx(s, FP_C));
+      await adapter.completeBuild(ctx(s, FP_C));
+      expect(await tables(client, 'knowledge_ob_own%')).toEqual(['knowledge_ob_own_g2']);
+      expect(await generationRows(client, s.name)).toEqual(['2:active']);
+      await adapter.dropSource(ctx(s));
+      expect(await tables(client, 'knowledge_ob_own%')).toEqual([]);
+      expect(await generationRows(client, s.name)).toEqual([]);
+    });
+
+    it('an object table named knowledge_generation makes the store unavailable, naming it, and is left untouched', async () => {
+      const client = store.client();
+      // An object whose fields include the two the generation table's indexes read.
+      await client.execute('CREATE TABLE knowledge_generation (id TEXT PRIMARY KEY, source_id TEXT, state TEXT)');
+      await client.execute("INSERT INTO knowledge_generation VALUES ('r1', 'src', 'active')");
+      const adapter = new TursoKnowledgeAdapter({ id: 'under_test', client, embedder: new FakeEmbedder() });
+      const health = await adapter.healthCheck();
+      expect(health).toMatchObject({ ok: false, message: expect.stringContaining("'knowledge_generation'") });
+      const s = source('ob_gen');
+      const err = await refusal(adapter.upsert([doc(s, '1', 'oak door')], ctx(s)));
+      expect(err).toMatchObject({ code: 'SERVICE_UNAVAILABLE', status: 503 });
+      expect(String(err.message)).toContain("'knowledge_generation'");
+      // The generation table's two indexes were not added to it (its own primary-key index has no SQL).
+      const indexes = await client.execute(
+        "SELECT name FROM sqlite_master WHERE type = 'index' AND tbl_name = 'knowledge_generation' AND sql IS NOT NULL",
+      );
+      expect(indexes.rows).toEqual([]);
+      const kept = await client.execute('SELECT id, source_id, state FROM knowledge_generation');
+      expect(kept.rows.map((r) => [r.id, r.source_id, r.state])).toEqual([['r1', 'src', 'active']]);
+      expect(await tables(client, 'knowledge_ob_gen%')).toEqual([]);
+    });
+
+    it("the store's own knowledge_generation is found as its generation table by a second adapter on the database", async () => {
+      const client = store.client();
+      const first = new TursoKnowledgeAdapter({ id: 'under_test', client, embedder: new FakeEmbedder() });
+      const s = source('ob_again');
+      await first.upsert([doc(s, '1', 'teak chair')], ctx(s));
+      const second = new TursoKnowledgeAdapter({ id: 'under_test', client, embedder: new FakeEmbedder() });
+      expect(await second.healthCheck()).toEqual({ ok: true, message: 'libSQL vectors ready' });
+      expect((await second.search('teak', { source: s, topK: 5 })).map((h) => h.snippet)).toEqual(['teak chair']);
+    });
+  });
+}
