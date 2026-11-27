@@ -186,7 +186,6 @@ export default defineAction({
   label: 'Ask AI',
   objectName: 'contract',
   type: 'ask_ai',
-  locations: ['record_header'],
 });
 ```
 
