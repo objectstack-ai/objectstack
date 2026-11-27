@@ -54,7 +54,14 @@
  *     config backs. Under `'off'` the refusal says so (`googleLocalOff`): the
  *     email-off copy's remedy, keep email and password on, does nothing there.
  *
- * Under `'off'` the `email_password_enabled` key itself is never refused:
+ *   - on a cloud-managed runtime whose deployment declared email and password
+ *     off, `email_password_enabled` turned on ({@link emailPasswordHeldOffByHost}):
+ *     the host refuses every password door there, so the toggle would only
+ *     advertise a form that signs nobody in. Judged before the rest, and under
+ *     `'off'` too; there any other save of the key passes, since the host holds
+ *     it off whatever is stored.
+ *
+ * Apart from that last case, under `'off'` the `email_password_enabled` key itself is never refused:
  * the page draws email and password neither way, so the save removes no way
  * in the page offers.
  *
@@ -168,6 +175,11 @@ export interface SignInMethodFloorDeps {
    * `email_password_enabled` hands the running value back to. Absent ⇒ on.
    */
   declaredEmailPasswordEnabled?(): boolean;
+  /**
+   * Whether this process is a cloud-managed environment (`isCloudManaged()`
+   * from `@objectstack/core`), read per call. Absent ⇒ not managed.
+   */
+  cloudManaged?(): boolean;
 }
 
 const hasCredentialPair = (entry: unknown): boolean => {
@@ -268,6 +280,11 @@ interface SignInFloorCopy {
   enterpriseSsoLocalOff: string;
   /** The provider list could not be read to judge that delete. */
   enterpriseSsoUnverified: string;
+  /**
+   * Turning email and password on, on a cloud-managed runtime whose deployment
+   * declared it off ({@link signInMethodFloorPredicate}).
+   */
+  managedEmailPassword: string;
 }
 
 /**
@@ -303,6 +320,10 @@ export const SIGN_IN_FLOOR_COPY: Record<SettingsCopyLocale, SignInFloorCopy> = {
       'The identity provider was not deleted: the list of identity providers could not be read to confirm that ' +
       'another way to sign in remains, and the sign-in page offers no email and password sign-in, so this one may be ' +
       'the last. Try again once the database is reachable.',
+    managedEmailPassword:
+      'This environment is cloud-managed, and its deployment turns email and password sign-in off: people sign in ' +
+      'through the identity provider of the organisation that hosts it, and every password sign-in is refused ' +
+      'there. So email and password sign-in cannot be turned on here. Nothing was saved.',
   },
   'zh-CN': {
     emailPassword:
@@ -324,6 +345,8 @@ export const SIGN_IN_FLOOR_COPY: Record<SettingsCopyLocale, SignInFloorCopy> = {
       '然后再删除它。',
     enterpriseSsoUnverified:
       '身份提供方未删除：无法读取身份提供方列表来确认仍有其他登录方式，而登录页不提供邮箱/密码登录，它可能是最后一种。请在数据库可以访问时重试。',
+    managedEmailPassword:
+      '本环境由云端托管，其部署已关闭邮箱/密码登录：用户通过托管本环境的组织的身份提供方登录，所有密码登录在此都会被拒绝。因此无法在这里开启邮箱/密码登录。本次保存未生效。',
   },
   'ja-JP': {
     emailPassword:
@@ -353,6 +376,9 @@ export const SIGN_IN_FLOOR_COPY: Record<SettingsCopyLocale, SignInFloorCopy> = {
       'ID プロバイダーは削除されませんでした。ID ' +
       'プロバイダーの一覧を読み取れず、他のログイン方法が残ることを確認できませんでした。ログインページはメール/パスワードログ' +
       'インを表示しないため、これが最後のログイン方法かもしれません。データベースに接続できるようになってから再試行してください。',
+    managedEmailPassword:
+      'この環境はクラウドで管理されており、デプロイでメールアドレスとパスワードによるサインインがオフになっています。利用者はこの環境をホストする組織の ID ' +
+      'プロバイダーでサインインし、パスワードによるサインインはすべて拒否されます。そのため、ここでメールアドレスとパスワードによるサインインをオンにすることはできません。何も保存されていません。',
   },
   'es-ES': {
     emailPassword:
@@ -387,6 +413,11 @@ export const SIGN_IN_FLOOR_COPY: Record<SettingsCopyLocale, SignInFloorCopy> = {
       'confirmar que queda otra forma de iniciar sesión y, como la página de inicio de sesión no ofrece el inicio de ' +
       'sesión con correo y contraseña, este podría ser el último. Vuelva a intentarlo cuando la base de datos esté ' +
       'disponible.',
+    managedEmailPassword:
+      'Este entorno está gestionado en la nube y su implementación desactiva el inicio de sesión con correo y ' +
+      'contraseña: las personas inician sesión con el proveedor de identidad de la organización que lo aloja, y ' +
+      'allí se rechaza todo inicio de sesión con contraseña. Por eso no se puede activar aquí el inicio de sesión ' +
+      'con correo y contraseña. No se guardó nada.',
   },
   'zh-Hant': {
     emailPassword:
@@ -408,6 +439,8 @@ export const SIGN_IN_FLOOR_COPY: Record<SettingsCopyLocale, SignInFloorCopy> = {
       '然後再刪除它。',
     enterpriseSsoUnverified:
       '身分提供者未刪除：無法讀取身分提供者清單來確認仍有其他登入方式，而登入頁不提供電子郵件/密碼登入，它可能是最後一種。請在資料庫可以存取時重試。',
+    managedEmailPassword:
+      '本環境由雲端託管，其部署已關閉電子郵件／密碼登入：使用者透過託管本環境之組織的身分提供者登入，所有密碼登入在此都會被拒絕。因此無法在這裡開啟電子郵件／密碼登入。本次儲存未生效。',
   },
   ar: {
     emailPassword:
@@ -436,6 +469,10 @@ export const SIGN_IN_FLOOR_COPY: Record<SettingsCopyLocale, SignInFloorCopy> = {
       'لم يُحذف موفّر الهوية: تعذّرت قراءة قائمة موفّري الهوية للتأكد من بقاء طريقة أخرى لتسجيل الدخول، ولأن صفحة ' +
       'تسجيل الدخول لا تعرض تسجيل الدخول بالبريد الإلكتروني وكلمة المرور قد يكون هذا آخرها. أعد المحاولة عندما تصبح ' +
       'قاعدة البيانات متاحة.',
+    managedEmailPassword:
+      'هذه البيئة مُدارة سحابيًا، ونشرها يوقف تسجيل الدخول بالبريد الإلكتروني وكلمة المرور: يسجّل المستخدمون ' +
+      'الدخول عبر موفّر الهوية الخاص بالمؤسسة التي تستضيفها، وكل تسجيل دخول بكلمة مرور مرفوض فيها. لذلك لا يمكن ' +
+      'تفعيل تسجيل الدخول بالبريد الإلكتروني وكلمة المرور هنا. لم يُحفظ أي شيء.',
   },
   fr: {
     emailPassword:
@@ -469,6 +506,11 @@ export const SIGN_IN_FLOOR_COPY: Record<SettingsCopyLocale, SignInFloorCopy> = {
       'pour vérifier qu’un autre moyen de connexion subsiste et, comme la page de connexion n’offre pas la connexion ' +
       'par e-mail et mot de passe, celui-ci est peut-être le dernier. Réessayez quand la base de données sera ' +
       'accessible.',
+    managedEmailPassword:
+      'Cet environnement est géré dans le cloud et son déploiement désactive la connexion par e-mail et mot de ' +
+      'passe : les utilisateurs se connectent via le fournisseur d’identité de l’organisation qui l’héberge, et ' +
+      'toute connexion par mot de passe y est refusée. La connexion par e-mail et mot de passe ne peut donc pas ' +
+      'être activée ici. Rien n’a été enregistré.',
   },
   'pt-BR': {
     emailPassword:
@@ -500,6 +542,10 @@ export const SIGN_IN_FLOOR_COPY: Record<SettingsCopyLocale, SignInFloorCopy> = {
       'O provedor de identidade não foi excluído: não foi possível ler a lista de provedores de identidade para ' +
       'confirmar que resta outra forma de entrar e, como a página de login não oferece login com e-mail e senha, ' +
       'este pode ser o último. Tente novamente quando o banco de dados estiver acessível.',
+    managedEmailPassword:
+      'Este ambiente é gerenciado na nuvem e sua implantação desativa o login com e-mail e senha: as pessoas ' +
+      'entram pelo provedor de identidade da organização que o hospeda, e todo login com senha é recusado ali. Por ' +
+      'isso, o login com e-mail e senha não pode ser ativado aqui. Nada foi salvo.',
   },
   ru: {
     emailPassword:
@@ -531,6 +577,11 @@ export const SIGN_IN_FLOOR_COPY: Record<SettingsCopyLocale, SignInFloorCopy> = {
       'Поставщик удостоверений не удалён: не удалось прочитать список поставщиков удостоверений, чтобы убедиться, ' +
       'что останется другой способ входа, а страница входа не предлагает вход по электронной почте и паролю, поэтому ' +
       'этот может быть последним. Повторите попытку, когда база данных станет доступна.',
+    managedEmailPassword:
+      'Эта среда управляется облаком, и её развёртывание отключает вход по электронной почте и паролю: ' +
+      'пользователи входят через поставщика удостоверений организации, которая её размещает, а любой вход по ' +
+      'паролю там отклоняется. Поэтому включить здесь вход по электронной почте и паролю нельзя. Ничего не ' +
+      'сохранено.',
   },
   de: {
     emailPassword:
@@ -564,6 +615,11 @@ export const SIGN_IN_FLOOR_COPY: Record<SettingsCopyLocale, SignInFloorCopy> = {
       'zu bestätigen, dass eine andere Anmeldemöglichkeit bleibt, und da die Anmeldeseite keine Anmeldung mit E-Mail ' +
       'und Passwort anbietet, ist dieser vielleicht der letzte. Versuchen Sie es erneut, sobald die Datenbank ' +
       'erreichbar ist.',
+    managedEmailPassword:
+      'Diese Umgebung wird in der Cloud verwaltet, und ihre Bereitstellung schaltet die Anmeldung mit E-Mail und ' +
+      'Passwort aus: Benutzer melden sich über den Identitätsanbieter der Organisation an, die sie hostet, und ' +
+      'jede Anmeldung mit Passwort wird dort abgelehnt. Die Anmeldung mit E-Mail und Passwort kann hier daher ' +
+      'nicht eingeschaltet werden. Es wurde nichts gespeichert.',
   },
   ko: {
     emailPassword:
@@ -593,6 +649,9 @@ export const SIGN_IN_FLOOR_COPY: Record<SettingsCopyLocale, SignInFloorCopy> = {
       'ID 공급자를 삭제하지 않았습니다. 다른 로그인 방법이 남아 있는지 확인하기 위해 ID 공급자 목록을 읽을 ' +
       '수 없었고, 로그인 페이지가 이메일/비밀번호 로그인을 제공하지 않으므로 이것이 마지막 방법일 수 있습니다. ' +
       '데이터베이스에 연결할 수 있게 되면 다시 시도하세요.',
+    managedEmailPassword:
+      '이 환경은 클라우드에서 관리되며, 배포에서 이메일/비밀번호 로그인이 꺼져 있습니다. 사용자는 이 환경을 호스팅하는 조직의 ID 공급자를 통해 로그인하며, 비밀번호 로그인은 모두 거부됩니다. ' +
+      '따라서 여기서 이메일/비밀번호 로그인을 켤 수 없습니다. 아무것도 저장되지 않았습니다.',
   },
 };
 
@@ -620,7 +679,25 @@ export interface SignInFloorWriteInput {
 /** A refusal, in the settings service's `SettingsWriteRefusal` shape. */
 export interface SignInFloorRefusal {
   message: string;
-  constraint: { lastSignInMethod: 'email_password' | 'google' };
+  constraint:
+    | { lastSignInMethod: 'email_password' | 'google' }
+    | { cloudManaged: true; declaredEmailPassword: false };
+}
+
+/**
+ * Whether email and password stays off whatever is stored: a cloud-managed
+ * runtime ({@link SignInMethodFloorDeps.cloudManaged}) whose deployment
+ * declared it off ({@link SignInMethodFloorDeps.declaredEmailPasswordEnabled}).
+ * The host refuses every password door there (its relay answers each with a
+ * conflict), so a stored or saved `email_password_enabled` that reads on would
+ * only make `/auth/config` advertise a form that signs nobody in. The save
+ * door refuses turning it on ({@link signInMethodFloorPredicate}), and the
+ * settings pass does not apply a stored value that reads on (`bindAuthSettings`).
+ * Self-hosted deployments, and a managed one that declared it on, keep the
+ * toggle as before.
+ */
+export function emailPasswordHeldOffByHost(deps: Pick<SignInMethodFloorDeps, 'cloudManaged' | 'declaredEmailPasswordEnabled'>): boolean {
+  return deps.cloudManaged?.() === true && deps.declaredEmailPasswordEnabled?.() === false;
 }
 
 /** Reads one resolved `auth` setting as it stands (`SettingsService.get`). */
@@ -699,11 +776,30 @@ async function googleAfter(
  * turns it off (never under `'off'`, where that key changes nothing the page
  * draws), and at a `google_*` key when the save removes a Google provider that
  * was in force.
+ *
+ * Ahead of that, at `email_password_enabled` on a runtime where the host holds
+ * email and password off ({@link emailPasswordHeldOffByHost}): a save of a value
+ * that reads on. The settings service asks a predicate only about a change from
+ * the value it resolves, and with nothing stored that is the manifest default
+ * (on), so re-saving that default reaches no predicate; the settings pass is
+ * what keeps such a row from taking effect.
  */
 export function signInMethodFloorPredicate(deps: SignInMethodFloorDeps, read: AuthSettingReader) {
   return async (input: SignInFloorWriteInput): Promise<SignInFloorRefusal | undefined> => {
     const { key, next, locale } = input;
     const batch = input.batch ?? { [key]: next };
+    // A cloud-managed runtime whose deployment declared email and password
+    // off: a save of a value that reads on is refused, whatever else is in
+    // force. Any other save of the key (off, or a clear, which hands the value
+    // back to the declaration) passes: the host holds it off either way, so it
+    // removes no way in, and it is how a row stored on is put right.
+    if (key === 'email_password_enabled' && emailPasswordHeldOffByHost(deps)) {
+      if (!readToggle(next, false)) return undefined;
+      return {
+        message: signInFloorCopy(locale).managedEmailPassword,
+        constraint: { cloudManaged: true, declaredEmailPassword: false },
+      };
+    }
     const config = deps.publicConfig();
     // The page draws no local way in under the local sign-in path `'off'`, so
     // email and password counts for nothing there, whatever this save sets it to.

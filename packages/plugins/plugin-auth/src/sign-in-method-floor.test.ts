@@ -57,10 +57,21 @@
  *  12. the exits still count under `'off'`, on the save, the delete and the
  *      boot report: another provider row, a social or OIDC provider with
  *      credentials, a host handoff.
+ *
+ * On a cloud-managed runtime (`OS_CLOUD_MANAGED=1`) whose deployment declared
+ * email and password off, the host refuses every password door, so:
+ *  13. a stored `email_password_enabled` that reads on is not applied, and
+ *      `getPublicConfig()` keeps answering `emailPassword.enabled: false`
+ *      (measured before the fix: `true`), said once at `error`; a save that
+ *      turns it on is refused at the save door (400 `SETTINGS_VALIDATION`, in
+ *      the caller's language), and turning it off or clearing it passes;
+ *      the `OS_AUTH_EMAIL_PASSWORD_ENABLED` declaration still applies;
+ *      CONTROLS: self-hosted with the same declaration, and managed with
+ *      email and password declared on, keep the toggle as before.
  */
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { ObjectKernel, type Plugin, type PluginContext } from '@objectstack/core';
+import { ObjectKernel, resetCloudManagedForTesting, type Plugin, type PluginContext } from '@objectstack/core';
 import type { IHttpRequest, IHttpResponse, IHttpServer, RouteHandler } from '@objectstack/spec/contracts';
 import {
   ObjectQLPlugin,
@@ -1000,5 +1011,204 @@ describe('the floor judges a provider delete and a boot by what it can read (#30
 
     const throwing = { error: () => { throw new Error('sink down'); }, warn: vi.fn() };
     await expect(reportIfNoSignInMethodAtBoot(deps(), throwing as any)).resolves.toContain(NO_SIGN_IN_METHOD_AT_BOOT);
+  });
+});
+
+describe('a cloud-managed runtime keeps email and password off when its deployment declares it off', () => {
+  const MANAGED_ENV_KEYS = ['OS_CLOUD_MANAGED', 'OS_AUTH_EMAIL_PASSWORD_ENABLED', 'OS_AUTH_SSO_ONLY'] as const;
+  const savedEnv: Partial<Record<(typeof MANAGED_ENV_KEYS)[number], string | undefined>> = {};
+  const ADMIN = { enforced: true, permissions: ['manage_platform_settings'], userId: 'usr_admin' };
+
+  /** The managed switch as the cloud's containers set it; off = unset, as on a self-hosted image. */
+  const setManaged = (on: boolean) => {
+    if (on) process.env.OS_CLOUD_MANAGED = '1';
+    else delete process.env.OS_CLOUD_MANAGED;
+    // `isCloudManaged()` memoizes its first read.
+    resetCloudManagedForTesting();
+  };
+
+  beforeEach(() => {
+    for (const key of MANAGED_ENV_KEYS) {
+      savedEnv[key] = process.env[key];
+      delete process.env[key];
+    }
+    setManaged(true);
+  });
+
+  afterEach(() => {
+    for (const key of MANAGED_ENV_KEYS) {
+      if (savedEnv[key] === undefined) delete process.env[key];
+      else process.env[key] = savedEnv[key];
+    }
+    resetCloudManagedForTesting();
+    vi.restoreAllMocks();
+  });
+
+  const makeSettings = (env: Record<string, string | undefined> = {}) => {
+    const settings = new SettingsService({ env });
+    settings.registerManifest(builtinSettingsManifests.find((m) => m.namespace === 'auth')!);
+    return settings;
+  };
+
+  /** Boot as a host does (init → start → kernel:ready), with email and password declared as given. */
+  const boot = async (opts: { settings?: SettingsService; emailPassword?: boolean } = {}) => {
+    const settings = opts.settings ?? makeSettings();
+    const hooks = new Map<string, Array<() => Promise<void>>>();
+    const logger = { info: vi.fn(), error: vi.fn(), warn: vi.fn(), debug: vi.fn() };
+    const ctx = {
+      registerService: vi.fn(),
+      getService: vi.fn((name: string) => {
+        if (name === 'manifest') return { register: vi.fn() };
+        if (name === 'settings') return settings;
+        return undefined;
+      }),
+      getServices: vi.fn(() => new Map()),
+      hook: vi.fn((name: string, handler: () => Promise<void>) => {
+        hooks.set(name, [...(hooks.get(name) ?? []), handler]);
+      }),
+      trigger: vi.fn(),
+      logger,
+      getKernel: vi.fn(),
+    } as unknown as PluginContext;
+    const plugin = new AuthPlugin({
+      secret: SECRET,
+      baseUrl: 'http://localhost:3000',
+      emailAndPassword: { enabled: opts.emailPassword ?? false },
+    });
+    await plugin.init(ctx);
+    const manager = (ctx.registerService as any).mock.calls.find(([name]: [string]) => name === 'auth')?.[1] as AuthManager;
+    await plugin.start(ctx);
+    for (const handler of hooks.get('kernel:ready') ?? []) await handler();
+    const heldOffSaid = () =>
+      logger.error.mock.calls.map((c) => String(c[0])).filter((m) => m.includes('auth.email_password_enabled is stored on'));
+    return { settings, manager, heldOffSaid };
+  };
+
+  const passwordOn = (manager: AuthManager) => manager.getPublicConfig().emailPassword.enabled;
+  /** Let the settings pass a write's change event started run to its end. */
+  const settle = () => new Promise((resolve) => setTimeout(resolve, 20));
+
+  /** `PUT /api/settings/auth` through the real settings route. */
+  const put = async (settings: SettingsService, body: Record<string, unknown>, headers: Record<string, string> = {}) => {
+    const routes = new Map<string, RouteHandler>();
+    const add = (method: string) => (path: string, handler: RouteHandler) => {
+      routes.set(`${method} ${path}`, handler);
+      return http;
+    };
+    const http = {
+      get: add('GET'), post: add('POST'), put: add('PUT'), delete: add('DELETE'), patch: add('PATCH'),
+      use: () => http, listen: async () => {}, close: async () => {}, getInstance: () => null,
+    } as unknown as IHttpServer;
+    registerSettingsRoutes(http, settings, { contextFromRequest: () => ({ ...ADMIN }) });
+    const state: { status: number; body?: any } = { status: 200 };
+    const res = {
+      json: vi.fn((data: unknown) => { state.body = data; }),
+      send: vi.fn(),
+      status: vi.fn((code: number) => { state.status = code; return res; }),
+      header: vi.fn(() => res),
+    } as unknown as IHttpResponse;
+    const req = {
+      params: { namespace: 'auth' }, query: {}, body, headers, method: 'PUT', path: '/api/settings/auth',
+    } as unknown as IHttpRequest;
+    await routes.get('PUT /api/settings/:namespace')!(req, res);
+    return state;
+  };
+
+  it('a stored value that reads on is not applied: the public config keeps answering off, said once', async () => {
+    const { settings, manager, heldOffSaid } = await boot();
+    expect(passwordOn(manager)).toBe(false);
+
+    // With nothing stored the value resolves to the manifest default (on), so
+    // this save is no change to the settings service, reaches no predicate,
+    // and is stored. Measured before the fix: the public config answered true.
+    await settings.setMany('auth', { email_password_enabled: true });
+    expect(await settings.get('auth', 'email_password_enabled')).toMatchObject({ value: true, source: 'global' });
+    await settle();
+    expect(passwordOn(manager)).toBe(false);
+    expect(heldOffSaid()).toHaveLength(1);
+
+    // Another pass (any auth save re-runs it) keeps it off and says nothing again.
+    await settings.setMany('auth', { password_min_length: 12 });
+    await vi.waitFor(() => expect((manager as any).config.emailAndPassword?.minPasswordLength).toBe(12));
+    expect(passwordOn(manager)).toBe(false);
+    expect(heldOffSaid()).toHaveLength(1);
+  });
+
+  it('a row stored on before this check, read at boot, is not applied either', async () => {
+    const settings = makeSettings();
+    await settings.set('auth', 'email_password_enabled', true, {});
+    const { manager, heldOffSaid } = await boot({ settings });
+    await settle();
+    expect(passwordOn(manager)).toBe(false);
+    expect(heldOffSaid()).toHaveLength(1);
+  });
+
+  it('turning it on is refused at the save door, at the key, in the caller language; nothing is written', async () => {
+    const { settings, manager } = await boot();
+    // Off (or a clear) is never refused here: the host holds it off either way.
+    await settings.setMany('auth', { email_password_enabled: false });
+    expect(await settings.get('auth', 'email_password_enabled')).toMatchObject({ value: false, source: 'global' });
+
+    const refusal = await refusalOf(settings.setMany('auth', { email_password_enabled: true, password_min_length: 12 }));
+    expect(refusal.code).toBe('SETTINGS_VALIDATION');
+    expect(refusal.fields).toEqual([
+      expect.objectContaining({
+        field: 'email_password_enabled',
+        code: 'invalid_value',
+        constraint: { cloudManaged: true, declaredEmailPassword: false },
+      }),
+    ]);
+    expect(await settings.get('auth', 'email_password_enabled')).toMatchObject({ value: false });
+    expect(await settings.get('auth', 'password_min_length')).toMatchObject({ source: 'default' });
+
+    const http = await put(settings, { email_password_enabled: 'true' }, { 'accept-language': 'zh-CN,zh;q=0.9' });
+    expect(http.status).toBe(400);
+    expect(http.body.error.code).toBe('SETTINGS_VALIDATION');
+    const [field] = http.body.error.details.fields;
+    expect(field).toMatchObject({ field: 'email_password_enabled', code: 'invalid_value' });
+    expect(field.message).toBe(SIGN_IN_FLOOR_COPY['zh-CN'].managedEmailPassword);
+    await settle();
+    expect(passwordOn(manager)).toBe(false);
+  });
+
+  it('a row stored on is put right by clearing it, which the sign-in floor does not refuse', async () => {
+    const { settings, manager, heldOffSaid } = await boot();
+    await settings.setMany('auth', { email_password_enabled: true });
+    await settle();
+    expect(heldOffSaid()).toHaveLength(1);
+
+    await settings.setMany('auth', { email_password_enabled: null });
+    expect(await settings.get('auth', 'email_password_enabled')).toMatchObject({ source: 'default' });
+    await settle();
+    expect(passwordOn(manager)).toBe(false);
+  });
+
+  it('the OS_AUTH_EMAIL_PASSWORD_ENABLED declaration still applies', async () => {
+    const { manager } = await boot({ settings: makeSettings({ OS_AUTH_EMAIL_PASSWORD_ENABLED: 'true' }) });
+    await vi.waitFor(() => expect(passwordOn(manager)).toBe(true));
+  });
+
+  it('CONTROL: self-hosted, the same declaration takes the stored toggle as before', async () => {
+    setManaged(false);
+    const { settings, manager, heldOffSaid } = await boot();
+    expect(passwordOn(manager)).toBe(false);
+    await settings.setMany('auth', { email_password_enabled: true });
+    await vi.waitFor(() => expect(passwordOn(manager)).toBe(true));
+    // The sign-in floor still judges turning it off there (nothing else signs anyone in).
+    await refusalOf(settings.setMany('auth', { email_password_enabled: false }));
+    expect(heldOffSaid()).toHaveLength(0);
+  });
+
+  it('CONTROL: managed with email and password declared on, the floor judges the toggle as before', async () => {
+    const { settings, manager, heldOffSaid } = await boot({ emailPassword: true });
+    expect(passwordOn(manager)).toBe(true);
+    const refusal = await refusalOf(settings.setMany('auth', { email_password_enabled: false }));
+    expect(refusal.fields).toEqual([
+      expect.objectContaining({ field: 'email_password_enabled', constraint: { lastSignInMethod: 'email_password' } }),
+    ]);
+    await expect(settings.setMany('auth', { email_password_enabled: true })).resolves.toBeDefined();
+    await settle();
+    expect(passwordOn(manager)).toBe(true);
+    expect(heldOffSaid()).toHaveLength(0);
   });
 });
