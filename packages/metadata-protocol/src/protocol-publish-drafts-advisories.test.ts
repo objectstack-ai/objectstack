@@ -175,6 +175,12 @@ function makeStubEngine(refusedSync: ReadonlySet<string> = new Set()) {
         registry: {
             registerItem: () => {},
             registerObject: () => {},
+            // [#35143] The deployment serves the object the flows' delete node
+            // is bound to: the flow door refuses a CRUD node bound to an object
+            // it does not serve.
+            listItems: (type: string) => (type === 'object'
+                ? [{ name: 'audit_logs', label: 'Audit logs', fields: { name: { type: 'text', label: 'Name' } } }]
+                : []),
             // The base the drafts are bound to is INSTALLED — a flow may be
             // saved only into a package the registry holds (#20863) — and its
             // manifest declares no namespace → publishPackageDrafts skips the

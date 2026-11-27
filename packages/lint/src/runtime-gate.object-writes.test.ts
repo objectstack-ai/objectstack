@@ -204,6 +204,10 @@ describe('the object write door dispatches at the adjudicated scope (#4716)', ()
       // in the runtime's wrapper is refused here as at the `action` door. Its
       // door cases are in `validate-action-body-compiles.test.ts`.
       'validateActionBodyCompiles',
+      // [#35143] The same reading, one question over: an inline action body that
+      // writes through `ctx.api` with no `api.write` grant. Door cases in
+      // `validate-action-body-capabilities.test.ts`.
+      'validateActionBodyCapabilities',
       'validateRuleSchemaFormats',
     ]);
   });
@@ -582,6 +586,7 @@ describe('the object write door dispatches at the adjudicated scope (#4716)', ()
       'validateMembershipKeyDeclarations', // [#25234]
       'validateRuleCompilability',
       'validateActionBodyCompiles', // see the roster pin above
+      'validateActionBodyCapabilities', // [#35143] — see the roster pin above
       'validateRuleSchemaFormats',
     ]);
   });
