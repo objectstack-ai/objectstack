@@ -477,9 +477,12 @@ const SITES = [
  * Exported checks that belong to NO `specFieldsExcept` site. `GlobalFilterSchema`
  * is mirrored by a `.shape` spread in `complex.zod.ts` whose own `superRefine`
  * re-parses the spec-owned keys through the spec schema, so its check already
- * runs there — measured below rather than assumed.
+ * runs there — measured below rather than assumed. `checkAiChatNavParams` is a
+ * navigation ITEM check (the spec mounts it on its whole navigation union), so it
+ * is chained on the hand-written `NavigationItemSchema` flat arm in `app.zod.ts`,
+ * not on a derivation site.
  */
-const CARRIED_ELSEWHERE = ['checkGlobalFilterDateDefaultValue'] as const;
+const CARRIED_ELSEWHERE = ['checkGlobalFilterDateDefaultValue', 'checkAiChatNavParams'] as const;
 
 /**
  * Every `check*` FUNCTION `@objectstack/spec/ui` exports, name → binding, read
