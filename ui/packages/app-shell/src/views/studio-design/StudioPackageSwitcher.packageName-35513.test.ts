@@ -12,6 +12,9 @@
  */
 
 import { describe, it, expect } from 'vitest';
+// Paid during collection: the switcher's import graph reaches a dynamic
+// `import('@objectstack/lint')` (check:test-source-alias, the source reach).
+import '@objectstack/lint';
 import { studioSwitcherRows, type ServedApp } from './StudioPackageSwitcher.js';
 import type { PkgEntry } from './packages-io.js';
 
