@@ -62,7 +62,6 @@ export function useInlineRowActionFold(rows: unknown, columnsKey: string): {
   folded: boolean;
   actionsFrozen: boolean;
 } {
-  const [host, setHost] = React.useState<HTMLElement | null>(null);
   const [folded, setFolded] = React.useState(false);
   // The decision the readings act on, written only where it is made.
   const foldedRef = React.useRef(false);
@@ -79,8 +78,13 @@ export function useInlineRowActionFold(rows: unknown, columnsKey: string): {
     setFolded(false);
   }, [rows, columnsKey]);
 
-  React.useLayoutEffect(() => {
-    if (!host || typeof window === 'undefined') return undefined;
+  // The host is watched from its ref, not held in state: mounting it must not
+  // draw the grid a second time before its first paint.
+  const detachRef = React.useRef<(() => void) | null>(null);
+  const hostRef = React.useCallback((host: HTMLElement | null) => {
+    detachRef.current?.();
+    detachRef.current = null;
+    if (!host || typeof window === 'undefined') return;
     let resizes: ResizeObserver | null = null;
     let mounts: MutationObserver | null = null;
     let watched: HTMLElement | null = null;
@@ -167,12 +171,12 @@ export function useInlineRowActionFold(rows: unknown, columnsKey: string): {
       });
       mounts.observe(host, { childList: true, subtree: true });
     }
-    return () => {
+    detachRef.current = () => {
       if (frame) window.cancelAnimationFrame(frame);
       mounts?.disconnect();
       resizes?.disconnect();
     };
-  }, [host]);
+  }, []);
 
-  return { hostRef: setHost, folded, actionsFrozen };
+  return { hostRef, folded, actionsFrozen };
 }

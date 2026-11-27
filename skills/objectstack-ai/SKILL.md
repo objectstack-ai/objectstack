@@ -90,7 +90,6 @@ export default defineSkill({
     When managing cases:
     - Always check for duplicate cases before creating a new one.
     - Set priority by customer tier: Enterprise → High, Pro → Medium, Free → Low.
-    - Escalated cases must summarise the actions already taken.
   `,
   // Two platform tools (rung 2) and this stack's own Action (rung 3).
   tools: ['query_records', 'get_record', 'action_crm_escalate_case'],
@@ -436,8 +435,8 @@ is a parse error carrying its migration
 
 | Retired key | REMOVED in protocol 17 — why, and what replaces it |
 |:--|:--|
-| `agent.tools` | The inline slot resolved names against the *full* registry with no surface check. Not a rename: the migration deletes the key and names each tool that was listed; re-declare each in a skill (ADR-0064) |
-| `agent.knowledge` | Declaring sources/indexes on an agent never scoped retrieval — `search_knowledge` takes `sourceIds` from the model's tool-call arguments. Restrict at the knowledge-service / source level; describe intended grounding in `instructions` |
+| `agent.tools` | The inline slot resolved names against the *full* registry with no surface check. Not a rename: the migration deletes the key and names each tool that was listed; re-declare each in a `defineSkill` under the stack's `skills` (ADR-0064) |
+| `agent.knowledge` | Declaring sources/indexes on an agent never scoped retrieval — `search_knowledge` takes `sourceIds` from the model's tool-call arguments. Restrict on the knowledge source (`aiExposed`, `source.where`); describe intended grounding in `instructions` |
 
 ---
 

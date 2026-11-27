@@ -38,7 +38,7 @@ import {
 import { useUpload } from '@object-ui/fields';
 import { toast } from 'sonner';
 import { ConsolePageHeader } from '@object-ui/app-shell';
-import { resolveBuiltInLanguage, useDisplayLocale, useObjectTranslation, type TranslateFn } from '@object-ui/i18n';
+import { resolveBuiltInLanguage, useAppContentLanguages, useDisplayLocale, useObjectTranslation, type TranslateFn } from '@object-ui/i18n';
 import { useAdapter, extractFieldErrors, extractWriteErrorMessage } from '@object-ui/react';
 import { usePermissions } from '@object-ui/permissions';
 import { resolveFieldAffordance } from '@object-ui/core';
@@ -589,7 +589,7 @@ interface LanguageCardProps {
  * (every platform locale table language, as table tags, objectstack#35425),
  * which is what `LocaleSwitcher` renders too. ⛔ No second list is introduced here.
  * A chosen language the deployment's own content is not translated into
- * (outside the provider's `appContentLanguages`, when that is known) carries
+ * (outside `useAppContentLanguages()`, when that is known) carries
  * the same one-line hint the globe menu shows on that row.
  * A stored tag that is not in that set is prepended so the control shows the
  * truth rather than rendering blank.
@@ -606,7 +606,8 @@ interface LanguageCardProps {
  * card's own "hidden ... rather than rendering a control that answers 403".
  */
 function LanguageCard({ userId }: LanguageCardProps) {
-  const { t, offerableLanguages, appContentLanguages } = useObjectTranslation();
+  const { t, offerableLanguages } = useObjectTranslation();
+  const appContentLanguages = useAppContentLanguages();
   const adapter = useAdapter();
   const perms = usePermissions();
 
