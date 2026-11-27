@@ -172,7 +172,7 @@ export interface PlatformCapabilityProvider {
    * so an item with no provider would be inert (ADR-0078). Today
    * `knowledge`, by `knowledgeSources` (ADR-0161 K8, item 12).
    */
-  readonly mountedBy?: { readonly collection: string; readonly type: string };
+  readonly mountedBy?: { readonly collection: string };
 }
 
 /**
@@ -252,7 +252,7 @@ export const PLATFORM_CAPABILITY_PROVIDERS: Readonly<Record<string, PlatformCapa
     knowledge: {
       package: '@objectstack/service-knowledge',
       edition: 'open',
-      mountedBy: { collection: 'knowledgeSources', type: 'knowledge_source' },
+      mountedBy: { collection: 'knowledgeSources' },
     },
     // ── Enterprise / cloud-runtime capabilities ────────────────────────────
     'hierarchy-security': {

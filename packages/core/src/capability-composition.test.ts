@@ -341,7 +341,7 @@ describe("stackItemCapabilities — a stack's items mount their reader", () => {
 
   it('is read off the spec provider row — one row today, the knowledge one', () => {
     const rows = Object.entries(PLATFORM_CAPABILITY_PROVIDERS).filter(([, row]) => row.mountedBy !== undefined);
-    expect(rows).toEqual([['knowledge', expect.objectContaining({ mountedBy: { collection: 'knowledgeSources', type: 'knowledge_source' } })]]);
+    expect(rows).toEqual([['knowledge', expect.objectContaining({ mountedBy: { collection: 'knowledgeSources' } })]]);
   });
 
   it('an item token is declared (required), mounted after the declared ones, and reported as the items\' own', () => {
