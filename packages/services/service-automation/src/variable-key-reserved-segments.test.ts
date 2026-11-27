@@ -21,7 +21,7 @@ import { describe, expect, it, vi } from 'vitest';
 
 import { defineActionDescriptor } from '@objectstack/spec/automation';
 
-import { AutomationEngine } from './engine.js';
+import { AutomationEngine, applyResumeSignal } from './engine.js';
 import { installBuiltinNodes } from './builtin/index.js';
 import { RESERVED_VARIABLE_KEY_REFUSAL, RESERVED_VARIABLE_KEY_SEGMENTS } from './scope-key-segments.js';
 
@@ -221,5 +221,20 @@ describe('the resume door refuses a signal key with a reserved segment', () => {
             variables: { prototype_count: 1, 'step.result': 2 },
         });
         expect(done.success, JSON.stringify(done)).toBe(true);
+    });
+});
+
+describe('the resume chokepoint refuses the same keys, whoever calls it', () => {
+    it.each(RESUME_CASES)('%s: rejected as a whole, nothing folded', (_title, field, json) => {
+        const variables = new Map<string, unknown>([['kept', 1]]);
+        const rejected = applyResumeSignal(variables, signalOf(field, json, { variables: { fine: 2 } }) as any, 'n1');
+        expect(rejected.length).toBeGreaterThan(0);
+        expect([...variables.keys()]).toEqual(['kept']);
+    });
+
+    it('control: ordinary keys are folded', () => {
+        const variables = new Map<string, unknown>();
+        expect(applyResumeSignal(variables, { output: { decision: 'ok' }, variables: { 'step.result': 1 } }, 'n1')).toEqual([]);
+        expect([...variables.keys()].sort()).toEqual(['n1.decision', 'step.result']);
     });
 });
