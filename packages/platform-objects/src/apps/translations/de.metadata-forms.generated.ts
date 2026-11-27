@@ -1659,6 +1659,10 @@ export const deMetadataForms: NonNullable<TranslationData['metadataForms']> = {
         label: "Gesperrt von",
         helpText: "Benutzer, der die Ansichtskonfiguration gesperrt hat"
       },
+      requiredPermissions: {
+        label: "Required Permissions",
+        helpText: "Who sees this view: the capabilities a person must hold, every one listed. Permission sets grant capabilities, and a position passes on the ones its permission sets grant. Leave it empty and everyone who can see the list sees this view. To show it to several groups, pick one capability and grant it to each group's permission set. The server enforces it: anyone else does not find the view in the list and is refused if they open it directly."
+      },
       object: {
         label: "Objekt"
       }
@@ -1871,6 +1875,10 @@ export const deMetadataForms: NonNullable<TranslationData['metadataForms']> = {
         label: "Filter",
         description: "Standard- und globale Filter, die auf alle Widgets angewendet werden."
       },
+      access: {
+        label: "Access",
+        description: "Who can see this dashboard."
+      },
       advanced: {
         label: "Erweitert",
         description: "Barrierefreiheit und Leistungsoptimierung."
@@ -2051,6 +2059,10 @@ export const deMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       },
       "globalFilters.targetWidgets": {
         label: "Ziel-Widgets"
+      },
+      requiredPermissions: {
+        label: "Required Permissions",
+        helpText: "Who sees this dashboard: the capabilities a person must hold, every one listed. Permission sets grant capabilities, and a position passes on the ones its permission sets grant. Leave it empty and everyone sees this dashboard. To show it to several groups, pick one capability and grant it to each group's permission set. The server enforces it: anyone else does not find the dashboard in the list and is refused if they open it directly."
       }
     }
   },
