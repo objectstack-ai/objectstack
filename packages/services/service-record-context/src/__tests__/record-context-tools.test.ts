@@ -273,13 +273,58 @@ describe('get_record_context — object level: a gate that refuses everyone refu
     const text = JSON.stringify(out);
     expect(text).not.toContain('policy_revision');
     expect(text).not.toContain('Policy revision');
-    // Nothing of the child is read after its object-level judgement, its published definition included.
+    // Nothing of the child is read after its object-level judgement, which asks its published
+    // definition once, last, for whether the stack defines it at all (ADR-0160 D1).
     expect(door.asked.filter((a) => a.object === 'policy_revision').map((a) => a.member))
-      .toEqual(['readGuard', 'assertApiExposed', 'servedObjectDefinitionOf']);
+      .toEqual(['readGuard', 'assertApiExposed', 'servedObjectDefinitionOf', 'publishedObjectDefinitionOf']);
     // Control: served, both children answer and nothing is stated.
     const control = await run(twoChildren());
     expect(control.data.related!.map((l) => l.object)).toEqual(['policy_revision', 'claim']);
     expect(control.notes).toEqual([]);
+  });
+
+  it('[ADR-0160 D1/D3] a child the stack does not define is left out stating nothing, the same answer whoever asks', async () => {
+    // `policy_ghost` has no published definition: an author defect, reported by `os validate`.
+    const ghost = (overrides: Partial<FakeApp> = {}): FakeApp => {
+      const app = twoChildren(overrides);
+      (app.packs[0] as { related: Array<Record<string, unknown>> }).related[0] = { object: 'policy_ghost', field: 'policy', fields: ['version'] };
+      return app;
+    };
+    const door = fakeDoor(ghost());
+    const out = await executeGetRecordContext(CALL, door);
+    expect(out.data.related!.map((l) => l.object)).toEqual(['claim']);
+    expect(out.notes).toEqual([]);
+    expect(JSON.stringify(out)).not.toContain('policy_ghost');
+    expect(door.asked.filter((a) => a.object === 'policy_ghost').map((a) => a.member))
+      .toEqual(['readGuard', 'assertApiExposed', 'servedObjectDefinitionOf', 'publishedObjectDefinitionOf']);
+    // A second caller, one the root's other child is hidden from, gets the same answer for the ghost:
+    // whether it states anything is the stack's published definitions, never the caller's schema.
+    const other = await run(ghost({ hiddenFields: { claim: ['number'] } }));
+    expect(other.data.related!.map((l) => l.object)).toEqual(['claim']);
+    expect(other.notes).toEqual([{ kind: 'not_visible', text: sentencesFor([]).notVisible }]);
+    const alone = await run(ghost({ unservedObjects: ['claim'] }));
+    expect(alone.data.related ?? []).toEqual([]);
+    // Only the defined child the caller is not served is stated.
+    expect(alone.notes).toEqual([{ kind: 'not_visible', text: sentencesFor([]).notVisible }]);
+    const withoutClaim = ghost();
+    (withoutClaim.packs[0] as { related: unknown[] }).related.pop();
+    expect((await run(withoutClaim)).notes).toEqual([]);
+  });
+
+  it('[ADR-0160 D1/D3] a left-out child\'s published-definition read that throws: a coded refusal refuses unnamed, a failure fails, never stated or dropped', async () => {
+    const coded = fakeDoor(twoChildren({ unservedObjects: ['policy_revision'], unpublishedObjects: ['policy_revision'] }));
+    const refused = await refusalOf(executeGetRecordContext(CALL, coded));
+    expect(refused).toMatchObject({ code: 'PERMISSION_DENIED', status: 403 });
+    expect(refused.message).not.toContain('policy_revision');
+    expect(coded.reads).toEqual([]);
+    const failing = fakeDoor(twoChildren({ unservedObjects: ['policy_revision'] }));
+    const publishedOf = failing.publishedObjectDefinitionOf.bind(failing);
+    const thrown = new Error('store down: policy_revision');
+    failing.publishedObjectDefinitionOf = async (object) => {
+      if (object === 'policy_revision') throw thrown;
+      return publishedOf(object);
+    };
+    await expect(executeGetRecordContext(CALL, failing)).rejects.toMatchObject({ code: 'INTERNAL_ERROR', status: 500, cause: thrown });
   });
 
   it('[as amended] a lookup target reached only through a left-out child is not judged: it refuses nothing', async () => {
@@ -358,10 +403,13 @@ describe('get_record_context — object level: a gate that refuses everyone refu
       await refusalOf(executeGetRecordContext(CALL, door));
       expect(door.asked).not.toContainEqual({ member: 'publishedObjectDefinitionOf', object: 'policy_revision' });
     }
-    // [as amended] A child left out for this caller is not read either.
+    // [as amended] A child left out for this caller is asked its published definition once, after
+    // its gates and its served read, and nothing of it is read after that.
     const leftOut = fakeDoor(policyApp({ unservedObjects: ['policy_revision'] }));
     await executeGetRecordContext(CALL, leftOut);
-    expect(leftOut.asked).not.toContainEqual({ member: 'publishedObjectDefinitionOf', object: 'policy_revision' });
+    expect(leftOut.asked.filter((a) => a.object === 'policy_revision').map((a) => a.member))
+      .toEqual(['readGuard', 'assertApiExposed', 'servedObjectDefinitionOf', 'publishedObjectDefinitionOf']);
+    expect(leftOut.reads.map((r) => r.object)).not.toContain('policy_revision');
     const door = fakeDoor(policyApp());
     await executeGetRecordContext(CALL, door);
     const at = (member: string) => door.asked.findIndex((a) => a.member === member && a.object === 'policy_revision');
