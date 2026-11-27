@@ -234,23 +234,25 @@ names, a skill's `context` over MCP, `os validate` rules:
 ## Knowledge Sources (RAG)
 
 A RAG source is a **`knowledge_source`** metadata item (`KnowledgeSourceSchema`
-in `@objectstack/spec/ai`): which records of one object are indexed, and which
-of their fields. Ship it in a package (`knowledgeSources`,
+in `@objectstack/spec/ai`). Ship it in a package (`knowledgeSources`,
 `*.knowledge-source.ts` / `.yml`) or author it in Studio or over MCP;
 `KnowledgeServicePlugin({ sources })` and `registerSource` are a second door for
-the same schema, and one name is one source. An item mounts the knowledge
-service and its store with no `requires: ['knowledge']`, and the ☁️
-`search_knowledge` tool serves the sources to agents.
+the same schema. A source is identified by its package and `name`; the ☁️
+`search_knowledge` tool lists a package's source to agents as `NAMESPACE-NAME`
+(bare for one no package holds), and a code registration and an environment
+item of one name are one slot, the second refused. A shipped item mounts the
+knowledge service and its store; an app that ships none and authors sources at
+run time needs `requires: ['knowledge']`, or its items are never indexed.
 
 **A source is an egress and cost decision.** Its first build sends every listed
-field of every matching record to the embedding provider and keeps the text in
-an index. A run-time save needs `manage_knowledge_sources` beside
-`manage_metadata`, and is refused, naming the object or field, when you may not
-search that object or query a listed field.
+field of every matching record to the embedding provider and keeps the text (and
+the object's display field, as each title) in an index. A run-time save needs
+`manage_knowledge_sources` beside `manage_metadata`, and is refused, naming the
+object or field, when you may not search that object or query a field it reads.
 
 | Key | Purpose |
 |:----|:--------|
-| `name` | Snake_case source name: what `search_knowledge` lists and its `sourceIds` names |
+| `name` | Snake_case source name; with the package, its identity |
 | `label` / `description` | Display metadata |
 | `adapter` | Optional store id (`pgvector`, `turso`, `memory`). Omitted: the deployment's store (`pgvector` on PostgreSQL, `turso` otherwise), else the only one registered; several and none the deployment's is refused, naming them |
 | `source.kind` | `'object'`, the one kind |
@@ -310,8 +312,8 @@ Retired and refused: the `knowledge.chunk_overlap` setting (`400 UNKNOWN_KEY`;
 passages never overlap) and `KnowledgeChunk.metadata` (parse error; a passage
 takes its document's `metadata`).
 
-`topK` is a `search_knowledge` argument; rerank and hybrid weights are options
-of the store's plugin. Neither is source metadata.
+`topK` is a `search_knowledge` argument. Rerank and hybrid weighting are no
+source key, and no shipped store has a setting for either.
 
 ---
 

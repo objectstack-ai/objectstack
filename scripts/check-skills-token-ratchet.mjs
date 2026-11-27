@@ -452,10 +452,10 @@ export const CEILINGS = new Map([
   // entry is the only one); the row follows the measurement down.
   // 6609 -> 6639 (2026-11-27, the ADR-0161 K6 item 6 skills follow-up): § Knowledge
   // Sources teaches the `knowledge_source` item (`name`, an explicit `content`
-  // list with `'*'` refused, the optional `adapter`, the item that mounts the
-  // service), egress and cost with the save-time permission and admission, the
-  // retired keys with their fixes, and `split.strategy` as required. Raise path
-  // the standing ruling 「A:先削重复,余额按实测提高」 (ruling record 6513306068,
+  // list with `'*'` refused, the optional `adapter`), egress and cost with the
+  // save-time permission and admission, the retired keys with their fixes, and
+  // `split.strategy` as required. Raise path the standing ruling
+  // 「A:先削重复,余额按实测提高」 (ruling record 6513306068,
   // letter B). PAID DOWN FIRST: the wiring paragraph's package list, the old key
   // table's `source.kind` Hygiene column (folded into the `content` and `where`
   // rows), the example's four comments restating those rows and its
@@ -465,7 +465,25 @@ export const CEILINGS = new Map([
   // bytes, so the LANDED priced text is 26554 -> ceil(26554 / 4) = 6639; the row
   // moves +30, the measured remainder only. Pinned AT the measurement.
   //   ceil(($(wc -c < skills/objectstack-ai/SKILL.md) - 27) / 4) == ceil(26554 / 4)
-  ['skills/objectstack-ai/SKILL.md', 6639], //          -18 (was 6824), then -5 A2′ (was 6806)
+  // 6639 -> 6695 (2026-11-27, the same follow-up's review round): the section
+  // says which items mount the service (a SHIPPED `knowledgeSources` item does;
+  // an app that ships none and authors sources at run time needs
+  // `requires: ['knowledge']`), that a source is identified by its package and
+  // `name` (`search_knowledge` lists a package's source as `NAMESPACE-NAME`; a
+  // code registration and an environment item of one name are one slot), that
+  // the display field is kept as each title, and that no shipped store has a
+  // rerank or hybrid-weight setting. Raise path the standing ruling
+  // 「A:先削重复,余额按实测提高」 (ruling record 6513306068, letter B). PAID DOWN
+  // FIRST: the intro's "which records of one object are indexed, and which of
+  // their fields" (the `source.object` and `source.content` rows say it), its
+  // separate `search_knowledge` sentence (folded into the identity sentence),
+  // the "one name is one source" clause it replaces, and a shorter closing
+  // note. Arithmetic in priced bytes (stamp line excluded), against the row's
+  // 26554: the file is 26581 -> 26806 bytes, so the LANDED priced text is
+  // 26779 -> ceil(26779 / 4) = 6695; the row moves +56, the measured remainder
+  // only. Pinned AT the measurement.
+  //   ceil(($(wc -c < skills/objectstack-ai/SKILL.md) - 27) / 4) == ceil(26779 / 4)
+  ['skills/objectstack-ai/SKILL.md', 6695], //          -18 (was 6824), then -5 A2′ (was 6806)
   // -12 (was 6331): the `http.server` decision-table row dropped a trailing
   // clause that taught `contributes.routes` as a key that "parses but serves
   // nothing". The key is retired — an authored entry is now REFUSED, carrying
