@@ -998,9 +998,12 @@ queue (ADR-0161 K1). The standard runtime always mounts `queue`.
   the record runs would be lost, and a completed sync would block the record's
   later saves. Each message re-reads the row as it is when it is processed, so
   the last one leaves the last committed version.
-- **A delete** leaves the index when its message is processed. Until then the
-  search's freshness check and its permission re-check keep the hit out of
-  every answer: the record no longer exists.
+- **A delete** leaves the index when its message is processed. Until then a
+  member's search (each hit re-read as the member) and a `granularity:
+  'record'` search (each hit checked against its record) do not answer it: the
+  record no longer exists. A system-identity search at chunk granularity
+  re-reads nothing, so it can answer the deleted record's chunks until the
+  message is processed.
 - **A restart** loses nothing published: messages wait in `sys_job_queue` and
   are processed after it.
 

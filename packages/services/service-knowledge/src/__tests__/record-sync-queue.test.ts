@@ -57,6 +57,12 @@ type Row = Record<string, unknown>;
 
 const SYSTEM = { isSystem: true, positions: [], permissions: [], systemPermissions: [] } as never;
 const SEARCH = { executionContext: { positions: [], permissions: [], systemPermissions: [], isSystem: true } };
+/** A signed-in member: every hit is re-read as them before it is answered. */
+const MEMBER = {
+  executionContext: { userId: 'u_member', tenantId: 'org_default', positions: [], permissions: [], systemPermissions: [] },
+};
+/** The system identity under record granularity: every hit is checked against its record as it reads now. */
+const SYSTEM_BY_RECORD = { ...SEARCH, granularity: 'record' as const };
 
 /** A short retry budget, so a test sees a retry and a dead letter in milliseconds. */
 const FAST_RETRY = { maxAttempts: 3, backoffMs: 20, maxBackoffMs: 40 };
@@ -268,8 +274,8 @@ async function boot(opts: BootOptions = {}) {
       if (open.length > 0) throw new Error(`${open.length} record-sync message(s) still open`);
     }, { timeout: 5000, interval: 10 });
   };
-  const found = async (text: string): Promise<string[]> =>
-    (await service.search(text, SEARCH)).map((hit) => String(hit.sourceRecordId));
+  const found = async (text: string, opts: Parameters<KnowledgeService['search']>[1] = SEARCH): Promise<string[]> =>
+    (await service.search(text, opts as never)).map((hit) => String(hit.sourceRecordId));
   const insert = (data: Row): Promise<Row> => ql.insert('kb_article', data, { context: SYSTEM } as never) as Promise<Row>;
   const update = (id: unknown, data: Row): Promise<unknown> =>
     ql.update('kb_article', data, { where: { id }, context: SYSTEM } as never);
@@ -416,13 +422,17 @@ describe.each(TRIGGERS)('record sync through the queue — %s', (_label, realtim
     const row = await t.insert({ title: 'Leave policy', body: 'Twenty days of paid leave', status: 'published' });
     await t.drained();
     expect(t.docs.size).toBe(1);
+    expect(await t.found('paid leave', MEMBER)).toEqual([String(row.id)]);
+    expect(await t.found('paid leave', SYSTEM_BY_RECORD)).toEqual([String(row.id)]);
 
     await t.queue.stop();
     await t.remove(row.id);
-    // The worker is stopped: the document is still in the index, and the
-    // search's freshness check keeps it out of the answer.
+    // The worker is stopped: the document is still in the index, and neither
+    // a member's search (each hit re-read as the member) nor a record-level
+    // search (each hit checked against its record) answers it.
     expect(t.docs.size).toBe(1);
-    expect(await t.found('paid leave')).toEqual([]);
+    expect(await t.found('paid leave', MEMBER)).toEqual([]);
+    expect(await t.found('paid leave', SYSTEM_BY_RECORD)).toEqual([]);
 
     t.queue.start();
     await t.drained(2);
@@ -520,7 +530,7 @@ describe('record sync through the queue — the write, the restart and the fresh
     // The row changes behind the engine's back: no event, no hook.
     const driver = t.ql.getDriverForObject('kb_article') as unknown as { update(o: string, id: unknown, d: Row): Promise<unknown> };
     await driver.update('kb_article', row.id, { body: 'Twenty days of unpaid leave' });
-    expect(await t.found('paid leave')).toEqual([]);
+    expect(await t.found('paid leave', SYSTEM_BY_RECORD)).toEqual([]);
     await t.drained(2);
     const freshness = (await t.queueRows()).map((r) => JSON.parse(String(r.payload_json)).reason);
     expect(freshness.sort()).toEqual(['event', 'freshness']);
