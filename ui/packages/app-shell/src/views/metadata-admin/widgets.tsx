@@ -327,9 +327,18 @@ export interface WidgetContext {
    * The capabilities the environment knows, joined with the permission sets
    * granting each and the positions holding them — fuels the
    * `ref-multi:capability` picker of an audience gate (`requiredPermissions`
-   * on a list view or a dashboard). Absent reads as {@link NOT_ASKED}.
+   * on a list view or a dashboard). Absent reads as {@link NOT_ASKED}, unless
+   * {@link WidgetContext.loadCapabilityAudience} is given.
    */
   capabilityAudience?: LoadState<CapabilityAudience>;
+  /**
+   * Reads {@link WidgetContext.capabilityAudience} when it is not given: the
+   * `ref-multi:capability` picker calls it once it is on screen, so a host
+   * whose audience row sits in a closed section sends no request. Keep it
+   * stable (`useCapabilityAudienceLoader`), or the picker reads again on
+   * every render.
+   */
+  loadCapabilityAudience?: () => Promise<CapabilityAudience>;
 }
 
 /* Stable empties for the arms that have no catalog to offer yet — `idle` and
@@ -1118,7 +1127,20 @@ const CAPABILITY_REGISTRY: RefMultiRegistry = {
 };
 
 function RefMultiCapabilityWidget(props: WidgetProps) {
-  return <RefMultiWidget {...props} registry={CAPABILITY_REGISTRY} />;
+  const { context } = props;
+  // The host hands down a loader, not a catalog: read it here, once the row is
+  // on screen. A catalog the host already holds wins.
+  const read = usePickerLoad<CapabilityAudience>(
+    context?.capabilityAudience ? null : context?.loadCapabilityAudience ?? null,
+  );
+  const effective = React.useMemo<WidgetContext | undefined>(
+    () =>
+      context?.capabilityAudience || !context?.loadCapabilityAudience
+        ? context
+        : { ...context, capabilityAudience: read },
+    [context, read],
+  );
+  return <RefMultiWidget {...props} context={effective} registry={CAPABILITY_REGISTRY} />;
 }
 
 /* -------------------------------------------------------------------------- */

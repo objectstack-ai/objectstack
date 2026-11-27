@@ -322,8 +322,9 @@ export const viewForm = defineMetadataForm({
         // form, enforced by the server) for the administrator who sets it.
         // `ref-multi:capability` offers only the capabilities the environment
         // knows (declared, or granted by a permission set) and previews which
-        // positions the picked set reaches; a host that feeds no catalog gets
-        // the typed-name box. It writes the names only — granting stays in Setup.
+        // positions the picked set reaches; the list is closed, so a host that
+        // feeds no catalog offers nothing to add. It writes the names only —
+        // granting stays in Setup.
         // The last sentence says what holds for the person setting the gate on
         // every carrier: the switcher drops the view for them too. It does not
         // promise the designer refuses it: a view item is refused on every door,

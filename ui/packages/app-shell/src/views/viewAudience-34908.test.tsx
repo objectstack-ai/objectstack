@@ -20,7 +20,8 @@
  *     an empty pick writes no key, and no picker leaves the body as before;
  *   - the Studio form widget `ref-multi:capability`: the closed list (no
  *     typed-name box on any arm), each option with its granting sets, and the
- *     same preview under it.
+ *     same preview under it; it reads the catalog through the host's loader
+ *     once it is on screen, so a closed section sends no request.
  */
 
 import '@testing-library/jest-dom/vitest';
@@ -314,7 +315,7 @@ describe('useCreateViewInPlace: the picked gate', () => {
 // ---------------------------------------------------------------------------
 
 describe('the view form\'s audience row in Studio', () => {
-  it('the view form declares the capability picker, so its hosts read the catalog', () => {
+  it('the view form declares the capability picker', () => {
     expect(formDeclaresWidget(getViewForm('en'), 'ref-multi:capability')).toBe(true);
   });
 
@@ -382,6 +383,44 @@ describe('the view form\'s audience row in Studio', () => {
     expect(screen.getByTestId('ref-multi-capability-load-failed')).toBeInTheDocument();
     expect(screen.queryByTestId('ref-multi-capability-freeform')).toBeNull();
     expect(screen.getByTestId('ref-multi-capability')).toHaveTextContent('view_deal_sales');
+  });
+
+  it('reads the catalog through the host\'s loader only once the row is on screen', async () => {
+    const load = vi.fn(async () => AUDIENCE);
+    render(
+      <SchemaForm
+        schema={{ type: 'object', properties: { requiredPermissions: { type: 'array', title: 'Required permissions', items: { type: 'string' } } } } as never}
+        form={{ type: 'simple', sections: [{ label: 'Access', collapsible: true, collapsed: true, fields: [{ field: 'requiredPermissions', widget: 'ref-multi:capability' }] }] } as never}
+        value={{ requiredPermissions: ['view_deal_sales'] }}
+        onChange={() => {}}
+        widgetContext={{ conditionScope: 'none', loadCapabilityAudience: load }}
+      />,
+    );
+    await settle();
+    // The section is closed: no request.
+    expect(load).not.toHaveBeenCalled();
+    expect(screen.queryByTestId('ref-multi-capability')).toBeNull();
+    fireEvent.click(screen.getByText('Access'));
+    await waitFor(() =>
+      expect(screen.getByTestId('ref-multi-capability-audience').textContent).toContain('销售主管, 业务员'),
+    );
+    expect(load).toHaveBeenCalledTimes(1);
+  });
+
+  it('control: a catalog the host already holds is used as given, and the loader is not called', async () => {
+    const load = vi.fn(async () => AUDIENCE);
+    render(
+      <SchemaForm
+        schema={{ type: 'object', properties: { requiredPermissions: { type: 'array', title: 'Required permissions', items: { type: 'string' } } } } as never}
+        form={{ type: 'simple', sections: [{ label: 'S', fields: [{ field: 'requiredPermissions', widget: 'ref-multi:capability' }] }] } as never}
+        value={{ requiredPermissions: ['view_deal_sales'] }}
+        onChange={() => {}}
+        widgetContext={{ conditionScope: 'none', capabilityAudience: { status: 'loaded', data: AUDIENCE }, loadCapabilityAudience: load }}
+      />,
+    );
+    await settle();
+    expect(load).not.toHaveBeenCalled();
+    expect(screen.getByTestId('ref-multi-capability-audience').textContent).toContain('销售主管, 业务员');
   });
 
   it('nothing reachable: the preview no longer promises the object\'s editors', () => {

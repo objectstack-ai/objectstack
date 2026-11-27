@@ -42,9 +42,9 @@ import { SchemaForm } from '../SchemaForm.js';
 import { IssuePrefixLines, issuesUnderPrefix, useIssuePrefixRegister, useSliceFormIssueRows } from '../issuePath.js';
 import { useObjectFields, type ObjectFieldInfo } from '../previews/useObjectFields.js';
 import { failed, loaded, type LoadState } from '../loadState.js';
-import { formDeclaresWidget, type ObjectFieldOption, type WidgetContext } from '../widgets.js';
+import type { ObjectFieldOption, WidgetContext } from '../widgets.js';
 import { useMetadataClient } from '../useMetadata.js';
-import { useCapabilityAudienceLoad } from '../useCapabilityAudienceLoad.js';
+import { useCapabilityAudienceLoader } from '../useCapabilityAudienceLoader.js';
 
 /**
  * Object picker for the view's binding — a searchable dropdown over the live
@@ -421,16 +421,13 @@ export function ViewVariantInspector({
 
   // objectstack#34908 — the audience row (`requiredPermissions`) is the
   // `ref-multi:capability` picker: it offers the capabilities the environment
-  // knows and previews the positions the picked set reaches. The three
-  // registries are read only when the form on screen declares that row.
+  // knows and previews the positions the picked set reaches. The picker reads
+  // the three registries through this loader once it is on screen.
   const metadataClient = useMetadataClient();
-  const capabilityAudience = useCapabilityAudienceLoad(
-    metadataClient,
-    formDeclaresWidget(form, 'ref-multi:capability'),
-  );
+  const loadCapabilityAudience = useCapabilityAudienceLoader(metadataClient);
   const formWidgetContext = React.useMemo<WidgetContext>(
-    () => ({ ...widgetContext, capabilityAudience }),
-    [widgetContext, capabilityAudience],
+    () => ({ ...widgetContext, loadCapabilityAudience }),
+    [widgetContext, loadCapabilityAudience],
   );
 
   /** Shallow-write a curated patch onto the variant. */
