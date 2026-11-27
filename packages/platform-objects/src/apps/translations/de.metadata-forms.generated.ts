@@ -1069,7 +1069,7 @@ export const deMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       },
       uiReadonly: {
         label: "In der Oberfläche schreibgeschützt",
-        helpText: "Niemand kann dieses Feld in der Konsole von Hand bearbeiten (Dialoge, Datensatzseite, Tabellen, Ziehen im Kanban und Kalender), während Aktionen, Importe, die API und Flows es weiterhin schreiben; jeder Schreibvorgang wird von den Validierungen des Objekts beurteilt. Ausgeschaltet lassen, wenn Schreibgeschützt eingeschaltet ist: Das hält bereits jeden Client-Schreibvorgang fern."
+        helpText: "Niemand kann dieses Feld in der Konsole von Hand bearbeiten (Dialoge, Datensatzseite, Tabellen, Ziehen im Kanban, Kalender und Gantt, Zeiterfassung), während Aktionen, Importe, die API und Flows es weiterhin schreiben; jeder Schreibvorgang wird von den Validierungen des Objekts beurteilt. Ausgeschaltet lassen, wenn Schreibgeschützt eingeschaltet ist: Das hält bereits jeden Client-Schreibvorgang fern. Der In-App-Assistent, der im Auftrag einer Person handelt, beachtet es noch nicht."
       },
       hidden: {
         label: "Ausgeblendet",
@@ -1097,7 +1097,7 @@ export const deMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       },
       uiReadonlyWhen: {
         label: "In der Oberfläche schreibgeschützt wenn",
-        helpText: "CEL-Prädikat über den Datensatz (z. B. record.status != 'draft') – solange es TRUE ist, kann niemand das Feld eines bestehenden Datensatzes in der Konsole bearbeiten (Bearbeitungsdialog, Datensatzseite, Tabellen, Ziehen in Kanban und Kalender); der Erstellungsdialog eines neuen Datensatzes wertet es nicht aus. Aktionen, Importe, die API und Flows schreiben es weiterhin, beurteilt von den Validierungen des Objekts. Liest die eigenen Spalten des Datensatzes, wie Schreibgeschützt wenn."
+        helpText: "CEL-Prädikat über den Datensatz (z. B. record.status != 'draft') – solange es TRUE ist, kann niemand das Feld eines bestehenden Datensatzes in der Konsole bearbeiten (Bearbeitungsdialog, Datensatzseite, Tabellen, Ziehen in Kanban, Kalender und Gantt, Zeiterfassung); der Erstellungsdialog eines neuen Datensatzes wertet es nicht aus. Aktionen, Importe, die API und Flows schreiben es weiterhin, beurteilt von den Validierungen des Objekts. Liest die eigenen Spalten des Datensatzes, wie Schreibgeschützt wenn. Der In-App-Assistent, der im Auftrag einer Person handelt, beachtet es noch nicht."
       },
       requiredWhen: {
         label: "Erforderlich wenn",

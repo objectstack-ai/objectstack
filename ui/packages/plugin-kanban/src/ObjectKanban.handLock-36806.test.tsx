@@ -138,3 +138,66 @@ describe('ObjectKanban: the lane field\'s lock closes the drag (objectstack#3680
     }
   });
 });
+
+/**
+ * objectstack#37448 — the swimlane board. A drop between columns writes the
+ * lane field and nothing else: a drop into another swimlane's row moves the
+ * card's COLUMN, never its swimlane value (`KanbanImpl`'s drop hands the mover
+ * column ids only), so a hand-locked swimlane field is never written by a
+ * drag. The lane field's own lock holds on this layout as on the flat board.
+ */
+describe('ObjectKanban: a drag on the swimlane board (objectstack#37448)', () => {
+  const ROWS = [
+    { id: 't1', title: CARD, status: 'backlog', owner: 'ann' },
+    { id: 't2', title: 'Ship the gadget', status: 'in_progress', owner: 'bob' },
+  ];
+
+  function swimlaneSource(laneLock: Record<string, unknown>) {
+    return {
+      getObjectSchema: vi.fn(async () => ({
+        name: OBJECT,
+        fields: {
+          title: { type: 'text', label: 'Title' },
+          status: statusField(laneLock),
+          owner: { type: 'text', label: 'Owner', uiReadonly: true },
+        },
+      })),
+      find: vi.fn(async () => ({ value: ROWS.map((r) => ({ ...r })) })),
+      update: vi.fn(async () => ({ id: 't1', status: 'in_progress' })),
+    } as unknown as DataSource & { update: ReturnType<typeof vi.fn> };
+  }
+
+  async function mountSwimlanes(laneLock: Record<string, unknown>) {
+    const ds = swimlaneSource(laneLock);
+    render(<ObjectKanban schema={{ ...schema, swimlaneField: 'owner' }} dataSource={ds} />);
+    expect(await screen.findByText(CARD)).toBeTruthy();
+    await waitFor(() => expect(ds.getObjectSchema).toHaveBeenCalled());
+    await act(async () => {
+      await Promise.resolve();
+    });
+    // The swimlane layout, not the flat board.
+    await waitFor(() => expect(document.querySelector('[data-swimlane-scroll-row]')).not.toBeNull());
+    return ds;
+  }
+
+  /** Drop `t1` onto `t2`: another column AND another swimlane. */
+  async function dropAcrossSwimlanes() {
+    expect(dnd.onDragEnd).toBeTypeOf('function');
+    await act(async () => {
+      dnd.onDragEnd!({ active: { id: 't1' }, over: { id: 't2' } });
+    });
+  }
+
+  it('a drop into another swimlane writes the lane field only, never the hand-locked swimlane field', async () => {
+    const ds = await mountSwimlanes({});
+    await dropAcrossSwimlanes();
+    await waitFor(() => expect(ds.update).toHaveBeenCalledTimes(1));
+    expect(ds.update).toHaveBeenCalledWith(OBJECT, 't1', { status: 'in_progress' });
+  });
+
+  it('the lane field\'s `uiReadonlyWhen` TRUE over the dragged record writes nothing on this layout too', async () => {
+    const ds = await mountSwimlanes({ uiReadonlyWhen: "record.status == 'backlog'" });
+    await dropAcrossSwimlanes();
+    expect(ds.update).not.toHaveBeenCalled();
+  });
+});
