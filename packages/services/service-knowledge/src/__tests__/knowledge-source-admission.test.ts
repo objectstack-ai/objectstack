@@ -119,13 +119,21 @@ interface SystemReads {
 /** A data engine whose row re-check admits every row, with a schema registry and a disabled-package predicate. */
 function makeEngine(objects: ObjectDef[], opts: { disabled?: string[]; schemaThrows?: boolean; system?: SystemReads } = {}) {
   const byName = new Map(objects.map((o) => [o.name, o]));
-  const findSpy = vi.fn(async (object: string, q: { where?: { id?: { $in?: string[] } } }, o?: { context?: ExecutionContext }) => {
+  type Where = { id?: { $in?: string[] }; $and?: Array<Record<string, unknown>> } & Record<string, unknown>;
+  const idsOf = (where?: Where): string[] =>
+    where?.id?.$in ?? ((where?.$and ?? []).find((c) => 'id' in c) as Where | undefined)?.id?.$in ?? [];
+  const findSpy = vi.fn(async (object: string, q: { where?: Where }, o?: { context?: ExecutionContext }) => {
     if (o?.context?.isSystem === true && opts.system) {
       if (opts.system.throws) throw new Error('system read failed');
       const row = opts.system.row ?? ((_obj: string, id: string) => ({ id }));
-      return (q.where?.id?.$in ?? []).map((id) => row(object, id)).filter((r) => r !== undefined);
+      // An equality conjunct beside the id list is applied, as a driver would.
+      const conditions = (q.where?.$and ?? []).filter((c) => !('id' in c));
+      return idsOf(q.where)
+        .map((id) => row(object, id))
+        .filter((r): r is Record<string, unknown> => r !== undefined)
+        .filter((r) => conditions.every((c) => Object.entries(c).every(([k, v]) => r[k] === v)));
     }
-    return (q.where?.id?.$in ?? []).map((id) => ({ id }));
+    return idsOf(q.where).map((id) => ({ id }));
   });
   return {
     find: findSpy,
@@ -697,6 +705,44 @@ describe('field gate — the earlier title rule: searched only once the index is
       const served = await svc.search('q', { executionContext: MEMBER });
       expect(served).toEqual([]);
       expect(JSON.stringify(served)).not.toContain('synthetic-earlier-title-2b9c');
+    });
+
+    it('a source with a `where`: the system read asks for the conjunction of `where` and the hits\' ids, and a record outside `where` is dropped', async () => {
+      const SCOPED: ObjectDef = { ...ACCOUNT, fields: { ...ACCOUNT.fields, status: { type: 'select' } } };
+      const where = { status: 'open' };
+      const source = { ...objectSource('s', 'account', ['body']), source: { kind: 'object', object: 'account', content: ['body'], where } } as KnowledgeSource;
+      for (const status of ['open', 'closed']) {
+        const row = (o: string, id: string) => ({ ...live(o, id), status });
+        const { svc, engine, currentHit } = setup({
+          objects: [SCOPED],
+          sources: [source],
+          security: makeSecurity(() => ['id', 'name', 'body', 'status']),
+          proven: true,
+          system: { row },
+        });
+        const served = await svc.search('q', { executionContext: MEMBER });
+        expect(served).toEqual(status === 'open' ? [currentHit(source)] : []);
+        const systemReads = engine.find.mock.calls.filter((c) => (c[2] as { context?: ExecutionContext } | undefined)?.context?.isSystem === true);
+        // The check's own read comes first; a record found outside `where` then has its document repaired.
+        expect((systemReads[0][1] as { where: unknown }).where).toEqual({ $and: [where, { id: { $in: ['rec_1'] } }] });
+      }
+    });
+
+    it('the refill round is checked too: a stale hit the second round answers is dropped', async () => {
+      const { svc, adapter, currentHit } = proven();
+      const source = svc.getSource('s')!;
+      const stale = (n: number): KnowledgeHit => ({ ...currentHit(source, `rec_${n}`), chunkId: `s-c${n}`, docHash: 'dh1:written-before-the-edit' });
+      const asked: number[] = [];
+      adapter.searchSpy.mockImplementation(async (_q: string, o: { topK: number }) => {
+        asked.push(o.topK);
+        // The first round answers as many as it was asked, every one stale, so nothing survives it and
+        // the source is refilled; the refill answers the same stale hits again and one current hit.
+        const hits = Array.from({ length: 5 }, (_v, i) => stale(i + 2));
+        return asked.length === 1 ? hits : [...hits, { ...currentHit(source, 'rec_1'), chunkId: 's-c1', score: 0.1 }];
+      });
+      const served = await svc.search('q', { executionContext: MEMBER, topK: 1 });
+      expect(asked).toEqual([5, 20]);
+      expect(served.map((hit) => hit.sourceRecordId)).toEqual(['rec_1']);
     });
 
     it('dropped: a record the system read no longer answers (deleted, or outside the source\'s `where`)', async () => {

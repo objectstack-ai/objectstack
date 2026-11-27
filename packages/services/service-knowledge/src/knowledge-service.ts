@@ -1844,7 +1844,7 @@ export class KnowledgeService implements IKnowledgeService {
 
     if (removed > 0) {
       this.options.logger?.debug?.(
-        `[knowledge] the permission re-check removed ${removed} hit(s) this caller may not read; ` +
+        `[knowledge] the permission re-check and the per-hit record check removed ${removed} hit(s); ` +
           `${Math.min(byRecord ? distinctGroups(kept, groupOf) : kept.length, topK)} of topK=${topK} answered.`,
       );
     }
