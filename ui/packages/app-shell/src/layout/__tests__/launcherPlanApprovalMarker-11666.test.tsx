@@ -19,6 +19,9 @@ import { act, cleanup, render, screen } from '@testing-library/react';
 import React from 'react';
 import { I18nProvider } from '@object-ui/i18n';
 import { builtInLocales } from '@object-ui/i18n/locales';
+// `ChatDock` reaches `import('@object-ui/plugin-grid')` through the chat pane; pay
+// its first load at collection, never inside a clocked case (`check:test-source-alias`).
+import '@object-ui/plugin-grid';
 import { AssistantTopBarButton } from '../AssistantTopBarButton';
 import { ChatDockControlProvider, type ChatDockControl } from '../chatDockControl';
 import { ChatDockLauncher } from '../ChatDock';
