@@ -500,15 +500,9 @@ export const zhHant: PlatformTranslationData = {
       title: '知識庫',
       description: 'RAG／知識來源使用的向量儲存後端。',
       groups: {
-        turso: { title: 'Turso / libSQL', description: '僅在平台資料庫不是 PostgreSQL 時使用；平台資料庫為 PostgreSQL 時，知識儲存位於平台資料庫中，不會讀取這些欄位。可搭配託管 Turso、本機檔案或記憶體使用。' },
         indexing: { title: '索引預設值', description: '在知識來源本身設定的值優先於這些預設值。' },
       },
       keys: {
-        turso_url: {
-          label: '連線 URL',
-          help: '範例：libsql://your-tenant.turso.io · file:./.objectstack/data/knowledge.db · :memory:',
-        },
-        turso_auth_token: { label: '驗證權杖', help: '僅託管 Turso URL 需要。' },
         chunk_target: { label: '目標區塊大小（字元）', help: '知識服務切分文件時每個片段的最大字元數。知識來源自身設定的大小優先；嵌入模型的輸入上限可能將其調低。' },
       },
       actions: {

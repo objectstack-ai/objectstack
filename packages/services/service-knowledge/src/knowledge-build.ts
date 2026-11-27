@@ -91,8 +91,8 @@ import type { AdapterIndexStatus, KnowledgeReindexResult } from '@objectstack/sp
  *   automatically; the operator's rebuild is the way.
  * - `unreadable` — reading the adapter failed. Nothing is built; `detail`
  *   says why.
- * - `not-built-here` — the service does not build this source: a `file` or
- *   `http` source (its adapter ingests it), or no data engine is bound.
+ * - `not-built-here` — the service cannot build this source here: no data
+ *   engine is bound.
  */
 export type KnowledgeIndexState =
   | 'nothing'
@@ -118,8 +118,12 @@ export interface KnowledgeIndexReading {
   held?: AdapterIndexStatus;
 }
 
-/** Who started a build: the boot's first-build pass, or an administrator. */
-export type KnowledgeBuildTrigger = 'boot' | 'operator';
+/**
+ * Who started a build: the boot's first-build pass, a `knowledge_source` item
+ * that was added or changed while the process runs (`reload`), or an
+ * administrator.
+ */
+export type KnowledgeBuildTrigger = 'boot' | 'reload' | 'operator';
 
 /** How far a running build has walked; the totals of a finished one. */
 export interface KnowledgeBuildProgress {

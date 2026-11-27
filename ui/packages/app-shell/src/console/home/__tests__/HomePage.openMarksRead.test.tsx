@@ -82,7 +82,12 @@ vi.mock('../../../context/NavigationContext', () => ({
 
 vi.mock('../../../hooks/useRecentItems', () => ({ useRecentItems: () => ({ recentItems: [] }) }));
 vi.mock('../../../hooks/useFavorites', () => ({ useFavorites: () => ({ favorites: [] }) }));
-vi.mock('../../../hooks/useAiSurface', () => ({ resolveAiApiBase: () => '' }));
+// The bell's roster gates navigation through `useNavMemberGates`, which asks
+// the AI surface whether to draw an app's `ai:chat` entry (objectstack#37833).
+vi.mock('../../../hooks/useAiSurface', () => ({
+  resolveAiApiBase: () => '',
+  useAiSurfaceEnabled: () => ({ enabled: false, isLoading: false, buildServed: false }),
+}));
 vi.mock('../../../views/metadata-admin/useMetadata', () => ({
   useMetadataClient: () => ({ listDrafts: async () => [] }),
 }));

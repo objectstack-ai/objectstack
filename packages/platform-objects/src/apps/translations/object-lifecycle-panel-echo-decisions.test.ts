@@ -1348,7 +1348,9 @@ describe('#19403 round 10 — the verdicts, on the live bundles', () => {
       // dashboard forms offer the audience gate (`requiredPermissions`) — two
       // row labels and the dashboard's `access` section label, authored in
       // all three locales.
-      expect(translated.length, `${locale} positive control`).toBe(844);
+      // 845 since #37304: the `knowledge_source` type's own label (ADR-0161
+      // K4), authored in every locale.
+      expect(translated.length, `${locale} positive control`).toBe(845);
     }
     // ⭐ DARK — the blindness, executable. On a synthetic two-locale catalog the
     // all-three predicate returns 0 while the per-locale one returns 1, so the

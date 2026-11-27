@@ -169,6 +169,8 @@ const CURATED_CAPABILITY_LABELS = new Set([
   'manage_mailboxes',
   // ADR-0143 D5: the organization-scoped connector connection capability.
   'manage_connector_connections',
+  // ADR-0161 K4: asked beside `manage_metadata` to author a knowledge source.
+  'manage_knowledge_sources',
 ]);
 
 export function CapabilityMultiSelectField({

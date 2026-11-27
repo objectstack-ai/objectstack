@@ -1069,7 +1069,7 @@ export const arMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       },
       uiReadonly: {
         label: "للقراءة فقط في الواجهة",
-        helpText: "لا يمكن لأحد تعديل هذا الحقل يدويًا في وحدة التحكم (مربعات الحوار وصفحة السجل والشبكات والسحب في كانبان والتقويم)، بينما تواصل الإجراءات والاستيرادات وواجهة API والتدفقات الكتابة فيه، وتحكم قواعد التحقق الخاصة بالكائن على كل كتابة. اتركه معطلًا عند تفعيل للقراءة فقط: فهو يمنع بالفعل كل كتابة من العميل."
+        helpText: "لا يمكن لأحد تعديل هذا الحقل يدويًا في وحدة التحكم (مربعات الحوار وصفحة السجل والشبكات والسحب في كانبان والتقويم ومخطط جانت، وجدول ساعات العمل)، بينما تواصل الإجراءات والاستيرادات وواجهة API والتدفقات الكتابة فيه، وتحكم قواعد التحقق الخاصة بالكائن على كل كتابة. اتركه معطلًا عند تفعيل للقراءة فقط: فهو يمنع بالفعل كل كتابة من العميل. لا يلتزم به بعدُ المساعد داخل التطبيق الذي يتصرف نيابةً عن شخص."
       },
       hidden: {
         label: "مخفي",
@@ -1097,7 +1097,7 @@ export const arMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       },
       uiReadonlyWhen: {
         label: "للقراءة فقط في الواجهة عندما",
-        helpText: "شرط CEL على السجل (مثل record.status != 'draft') — ما دام TRUE، لا يمكن لأحد تعديل الحقل في سجل موجود من وحدة التحكم (مربع التعديل، صفحة السجل، الجداول، والسحب في كانبان والتقويم)؛ ولا يُقيَّم في مربع إنشاء سجل جديد. تواصل الإجراءات والاستيراد وواجهة API والتدفقات الكتابة فيه، وتحكم عليها قواعد التحقق الخاصة بالكائن. يقرأ أعمدة السجل نفسه، مثل للقراءة فقط عندما."
+        helpText: "شرط CEL على السجل (مثل record.status != 'draft') — ما دام TRUE، لا يمكن لأحد تعديل الحقل في سجل موجود من وحدة التحكم (مربع التعديل، صفحة السجل، الجداول، والسحب في كانبان والتقويم ومخطط جانت، وجدول ساعات العمل)؛ ولا يُقيَّم في مربع إنشاء سجل جديد. تواصل الإجراءات والاستيراد وواجهة API والتدفقات الكتابة فيه، وتحكم عليها قواعد التحقق الخاصة بالكائن. يقرأ أعمدة السجل نفسه، مثل للقراءة فقط عندما. لا يلتزم به بعدُ المساعد داخل التطبيق الذي يتصرف نيابةً عن شخص."
       },
       requiredWhen: {
         label: "مطلوب عندما",
@@ -1661,7 +1661,7 @@ export const arMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       },
       requiredPermissions: {
         label: "Required Permissions",
-        helpText: "Who sees this view: the capabilities a person must hold, every one listed. Permission sets grant capabilities, and a position passes on the ones its permission sets grant. Leave it empty and everyone who can see the list sees this view. To show it to several groups, pick one capability and grant it to each group's permission set. The server enforces it: anyone else does not find the view in the list and is refused if they open it directly. The gate applies to you too: list a capability you do not hold, or misspell one, and you can no longer open this view either."
+        helpText: "Who sees this view: the capabilities a person must hold, every one listed. Permission sets grant capabilities, and a position passes on the ones its permission sets grant. Leave it empty and everyone who can see the list sees this view. To show it to several groups, pick one capability and grant it to each group's permission set. The server enforces it: anyone else does not find the view in the list and is refused if they open it directly. The gate applies to you too: list a capability you do not hold, or misspell one, and you no longer see this view in the list either."
       },
       object: {
         label: "الكائن"
@@ -3488,5 +3488,8 @@ export const arMetadataForms: NonNullable<TranslationData['metadataForms']> = {
         helpText: "A long-text field of the root object (textarea, markdown, html, richtext). Any other field is reported when the pack is saved, and the pack then carries no body."
       }
     }
+  },
+  knowledge_source: {
+    label: "مصدر معرفة"
   }
 };

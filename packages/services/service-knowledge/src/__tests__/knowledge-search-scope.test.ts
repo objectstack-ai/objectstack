@@ -68,10 +68,10 @@ describe('readSearchScope — the bounds, before any adapter is called', () => {
 /** A clause source over `clause` that lists `fields` as metadata. */
 function clauseSource(fields: string[]): KnowledgeSource {
   return {
-    id: 'clauses',
+    name: 'clauses',
     label: 'Clauses',
     adapter: 'memory',
-    source: { kind: 'object', object: 'clause', contentFields: ['body'], metadataFields: fields } as ObjectKnowledgeSource,
+    source: { kind: 'object', object: 'clause', content: ['body'], metadataFields: fields } as ObjectKnowledgeSource,
   } as KnowledgeSource;
 }
 
@@ -174,10 +174,6 @@ describe('scopeTermsFor — the terms a source is handed', () => {
     expect(scopeTermsFor(source, [{ object: 'clause', ids: [] }, { object: 'policy', ids: [] }], schemaOf()).terms).toEqual([]);
   });
 
-  it('a file or http source is handed no term: it answers nothing under a scope', () => {
-    const file = { id: 'handbook', label: 'Handbook', adapter: 'memory', source: { kind: 'file', paths: ['a.md'] } } as unknown as KnowledgeSource;
-    expect(scopeTermsFor(file, [{ object: 'clause', ids: ['c1'] }], schemaOf()).terms).toEqual([]);
-  });
 });
 
 describe('scopeCheck — every hit, after the adapter answers', () => {

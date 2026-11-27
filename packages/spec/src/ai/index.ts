@@ -16,7 +16,7 @@
  * - Tool            — Zod-typed callable surface
  * - Conversation    — message persistence + short/long-term memory
  * - Model Registry  — multi-provider LLM configuration
- * - Embedding       — embedding model + vector store references
+ * - Knowledge source — the `knowledge_source` kind the knowledge service indexes from (ADR-0161 K4)
  * - Usage           — token accounting + per-call cost
  * - MCP             — references and bindings to external MCP servers
  * - AI face name    — the derived flat name an item is listed under (ADR-0150 D6)
@@ -25,6 +25,7 @@
  * - Record citation — the citation shape an answer carries, and the body anchor it names (ADR-0160 D9)
  * - Object-query source — the `source` block the Ask data tools answer beside their result
  * - Build Progress  — phase vocabulary for the agent loop's `data-build-progress` frames
+ * - Ask question    — the envelope a question tool's result carries, from which the console draws a question card
  */
 
 export * from './agent.zod';
@@ -36,7 +37,6 @@ export { skillForm } from './skill.metadata-form';
 export { aiContextForm } from './ai-context.metadata-form';
 export * from './conversation.zod';
 export * from './model-registry.zod';
-export * from './embedding.zod';
 export * from './usage.zod';
 export * from './mcp.zod';
 export * from './face-name';
@@ -50,6 +50,7 @@ export * from './knowledge-source.zod';
 export * from './knowledge-document.zod';
 export * from './solution-blueprint.zod';
 export * from './build-progress.zod';
+export * from './ask-question.zod';
 
 // [#12414] entry-nameability: these factories' return types expand to mention
 // `/data`'s `FilterCondition` — public on its own subpath but not nameable

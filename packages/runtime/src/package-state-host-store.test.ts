@@ -47,9 +47,13 @@ import { packageStateFileName, setPackageDisabled } from './package-state-store.
 const ENVIRONMENT_ID = 'env_host_store';
 const PKG = 'com.acme.reporting';
 const OTHER = 'com.acme.billing';
+// [#37304] Also a holder of `manage_knowledge_sources`: for anyone else the
+// enable and disable doors read whether the package holds a knowledge source,
+// and this kernel registers no driver to read with. The cases here are about
+// where the package state is written.
 const ADMIN = {
     userId: 'u_admin', tenantId: 'org_qa', isSystem: false,
-    positions: [], permissions: [], systemPermissions: ['manage_metadata'],
+    positions: [], permissions: [], systemPermissions: ['manage_metadata', 'manage_knowledge_sources'],
 };
 
 interface Row { enabled?: boolean; status?: string }

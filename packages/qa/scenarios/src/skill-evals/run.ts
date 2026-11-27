@@ -170,6 +170,8 @@ export interface SkillEvalRunRecord {
   missing: string[];
   /** `must_not_contain` tokens the answer carries. */
   forbidden: string[];
+  /** `must_contain_any` groups with none of their tokens in the answer; absent ⇒ every group was met, or the case has none. */
+  unmetAny?: string[][];
   /** The answer graded; absent ⇒ the turn gave none. */
   answer?: string;
   /** Bundles of the catalog the init line listed. */
@@ -228,6 +230,7 @@ export interface Verdict {
   reason?: string;
   missing: string[];
   forbidden: string[];
+  unmetAny?: string[][];
   armEvidence?: ArmEvidence;
   trigger?: TriggerReading;
 }
@@ -306,7 +309,7 @@ export function verdictOf(c: SkillEvalCase, arm: Arm, f: VerdictFacts, catalog: 
     return { verdict: 'error', reason: `no answer to grade: the result line is \`${f.resultSubtype ?? 'absent'}\``, ...none, ...ev };
   }
   const g = grade(f.answer, c);
-  return { verdict: g.pass ? 'pass' : 'fail', missing: g.missing, forbidden: g.forbidden, ...ev };
+  return { verdict: g.pass ? 'pass' : 'fail', missing: g.missing, forbidden: g.forbidden, ...(g.unmetAny?.length ? { unmetAny: g.unmetAny } : {}), ...ev };
 }
 
 const applyVerdict = <T extends object>(base: T, v: Verdict) => ({
@@ -315,6 +318,7 @@ const applyVerdict = <T extends object>(base: T, v: Verdict) => ({
   ...(v.reason ? { reason: v.reason } : {}),
   missing: v.missing,
   forbidden: v.forbidden,
+  ...(v.unmetAny?.length ? { unmetAny: v.unmetAny } : {}),
   ...(v.armEvidence ? { armEvidence: v.armEvidence } : {}),
   ...(v.trigger ? { trigger: v.trigger } : {}),
 });
@@ -386,7 +390,7 @@ export function caseDrift(rec: Pick<SkillEvalRunRecord, 'caseHash'>, c: SkillEva
  */
 export function regradeRecord(rec: SkillEvalRunRecord, c: SkillEvalCase, catalog: CatalogView, grade: Grader = gradeAnswer): SkillEvalRunRecord {
   if (caseDrift(rec, c) === 'changed') throw new Error(`--regrade: \`${rec.key}\` has changed since the turn ran (record ${rec.caseHash}, now ${hashCase(c)}); a changed case is set apart, never regraded`);
-  const { reason: _reason, armEvidence: _ev, regradedFrom: _was, trigger: _trigger, ...rest } = rec;
+  const { reason: _reason, armEvidence: _ev, regradedFrom: _was, trigger: _trigger, unmetAny: _unmetAny, ...rest } = rec;
   const v = verdictOf(c, rec.arm, { process: rec.process, initSeen: rec.reason !== NO_INIT_LINE, bundlesLoaded: rec.bundlesLoaded, skillsInvoked: rec.skillsInvoked, ...(rec.skillFilesRead ? { skillFilesRead: rec.skillFilesRead } : {}), ...(rec.installed ? { installed: rec.installed } : {}), ...(rec.resultSubtype ? { resultSubtype: rec.resultSubtype } : {}), ...(rec.answer !== undefined ? { answer: rec.answer } : {}) }, catalog, grade);
   const out = applyVerdict(rest, v);
   const asRun = rec.regradedFrom ?? rec.verdict;

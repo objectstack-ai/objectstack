@@ -1115,7 +1115,9 @@ describe('ObjectQLPlugin - Metadata Service Integration', () => {
       // sys_metadata. The only permitted boot reads are the runtime-authored
       // re-syncs: hooks (#2588, type='hook') and actions (#2605 —
       // type='action' plus type='object' rows scanned ONLY to extract their
-      // embedded `actions[]`). Neither registers objects — the registry
+      // embedded `actions[]`), and the one read behind the boot notice for
+      // knowledge sources no knowledge service loads (#37304,
+      // type='knowledge_source'). None registers objects — the registry
       // assertion below pins that.
       const findCalls: Array<{ object: string; query?: any }> = [];
       await kernel.use({
@@ -1132,7 +1134,7 @@ describe('ObjectQLPlugin - Metadata Service Integration', () => {
 
       const metaReads = findCalls.filter((c) => c.object === 'sys_metadata');
       for (const read of metaReads) {
-        expect(read.query?.where?.type).toMatch(/^(hooks?|actions?|object)$/);
+        expect(read.query?.where?.type).toMatch(/^(hooks?|actions?|object|knowledge_sources?|knowledgeSources)$/);
       }
       const registry = (kernel.getService('objectql') as any).registry;
       expect(registry.getObject('product')).toBeUndefined();

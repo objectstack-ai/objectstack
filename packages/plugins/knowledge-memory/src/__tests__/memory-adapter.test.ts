@@ -6,10 +6,10 @@ import type { KnowledgeDocument } from '@objectstack/spec/ai';
 import type { KnowledgeSource } from '@objectstack/spec/ai';
 
 const source: KnowledgeSource = {
-  id: 'src1',
+  name: 'src1',
   label: 'Test source',
   adapter: 'memory',
-  source: { kind: 'http', urls: ['https://example.com'] } as KnowledgeSource['source'],
+  source: { kind: 'object', object: 'article', content: ['body'] },
 };
 
 const docs: KnowledgeDocument[] = [

@@ -18,6 +18,9 @@
  * one `FilterCondition` editor (`FilterConditionField`, the dataset
  * designer's) over the dataset object's fields (`useReportFilterFields`).
  *
+ * The builder replaces the page, so its header is the page's top bar: the
+ * shell's button group (help, 「Ask AI」, objectstack#37858) ends it.
+ *
  * @module
  */
 
@@ -32,6 +35,7 @@ import { useReportFilterFields } from './reportFilterFields.js';
 import { shownLabel, writtenLabel, servedLabelNote, useLabelLanguage } from './metadata-admin/inspectors/servedLabel.js';
 import { tFormat, useMetadataLocale } from './metadata-admin/i18n.js';
 import type { ServedReportText } from './studio-design/servedReportText.js';
+import { useShellPageActionsSlot } from '../layout/shellPageActionsSlot.js';
 
 export interface ReportBuilderHostProps {
   /** The report as the builder opens on it: the authored buffer, or a new report's seed. */
@@ -76,6 +80,11 @@ export function ReportBuilderHost({ initial, servedText, onSave, onClose, banner
   );
 
   const tt = useSafeTranslate();
+  // objectstack#37858 — the builder replaces the page, header and all, and
+  // keeps its Save at the top end corner: the shell's group (help, Ask AI)
+  // goes at the end of the builder's own header, so the shell's corner
+  // fallback, which counts the group, never draws over Save.
+  const renderShellGroup = useShellPageActionsSlot();
   const object = catalog.datasets.find((d) => d.name === dataset)?.object;
   const filterFields = useReportFilterFields(object, dataSource);
   const runtimeFilter =
@@ -105,6 +114,14 @@ export function ReportBuilderHost({ initial, servedText, onSave, onClose, banner
 
   return (
     <ReportBuilder
+      headerEnd={
+        renderShellGroup ? (
+          <>
+            <span aria-hidden="true" className="h-4 w-px shrink-0 bg-border" data-testid="report-builder-shell-divider" />
+            {renderShellGroup({})}
+          </>
+        ) : undefined
+      }
       report={draft}
       onChange={setDraft}
       name={{

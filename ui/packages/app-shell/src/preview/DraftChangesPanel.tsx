@@ -906,6 +906,8 @@ const TYPE_COUNT: Readonly<Record<string, (t: Translate, count: number) => strin
   skill: (t, count) => t('preview.changes.typeCount.skill', { count, defaultValue: '{{count}} AI skills' }),
   ai_context: (t, count) =>
     t('preview.changes.typeCount.ai_context', { count, defaultValue: '{{count}} AI context packs' }),
+  knowledge_source: (t, count) =>
+    t('preview.changes.typeCount.knowledge_source', { count, defaultValue: '{{count}} knowledge sources' }),
   datasource: (t, count) =>
     t('preview.changes.typeCount.datasource', { count, defaultValue: '{{count}} datasources' }),
   // objectstack#37086 — a `form` item (ADR-0159 card ②) drafts and publishes like a view.

@@ -308,8 +308,8 @@ describe("requires: ['knowledge'] — the knowledge service and one store", () =
     }
     async start(ctx: { getService<T>(name: string): T }): Promise<void> {
       const svc = ctx.getService<{ registerSource(s: unknown): void }>('knowledge');
-      svc.registerSource({ id: 'rqp_articles', label: 'Articles', adapter: 'turso', source: { kind: 'object', object: 'rqp_article', contentFields: ['title', 'body'] } });
-      svc.registerSource({ id: 'rqp_elsewhere', label: 'Elsewhere', adapter: 'pgvector', source: { kind: 'object', object: 'rqp_article', contentFields: ['body'] } });
+      svc.registerSource({ name: 'rqp_articles', label: 'Articles', adapter: 'turso', source: { kind: 'object', object: 'rqp_article', content: ['title', 'body'] } });
+      svc.registerSource({ name: 'rqp_elsewhere', label: 'Elsewhere', adapter: 'pgvector', source: { kind: 'object', object: 'rqp_article', content: ['body'] } });
     }
   }
 

@@ -9,6 +9,10 @@
  *   { "skill_name": BUNDLE, "evals": [ { "id", "prompt", "expected_output",
  *     "files": [], "assertions": { "must_contain": [..], "must_not_contain": [..] } } ] }
  *
+ * `assertions.must_contain_any` is the any-of form beside them: a list of
+ * groups, each a non-empty list of tokens, and a group is met by any one of
+ * its tokens (`[["ai:approve", "signed-in session"], ["refused", "403"]]`).
+ *
  * A TRIGGER case asks the other question about a skill: was it loaded when
  * it should be, and left alone when it should not. It is the same entry with
  * `"should_trigger": true | false` in place of `assertions`, and it is graded
@@ -24,7 +28,8 @@
  *
  * The reader is strict, never lenient: a file that does not parse, a case
  * whose prompt is not a string, an assertion list that is not a list of
- * strings, a case with no assertion at all, a trigger case that also carries
+ * strings, a `must_contain_any` that is not a list of non-empty lists of
+ * non-empty strings, a case with no assertion at all, a trigger case that also carries
  * assertions, a `files` entry outside `evals/files/` or missing from it, and a
  * bundle whose trigger cases are all of one kind (all positive cannot show a
  * false load; all negative cannot show a missed one) are located refusals —
@@ -50,6 +55,8 @@ export interface SkillEvalCase {
   expectedOutput?: string;
   mustContain: string[];
   mustNotContain: string[];
+  /** The `must_contain_any` groups, each met by any one of its tokens; absent ⇒ the case has none. */
+  mustContainAny?: string[][];
   /**
    * Set ⇒ a trigger case: graded on whether the with-skill turn loaded the
    * bundle (`true`: it should; `false`: it should not), on that arm only. Its
@@ -84,6 +91,23 @@ export interface SkillEvalCatalog {
 
 const isStringList = (v: unknown): v is string[] => Array.isArray(v) && v.every((x) => typeof x === 'string');
 
+/**
+ * Why a `must_contain_any` value is refused; `undefined` ⇒ it is a list of
+ * groups, each a non-empty list of non-empty strings. An empty group can be
+ * met by no answer, and an empty token is in every answer, so either would
+ * decide the case whatever was answered. Pure.
+ */
+export function anyOfProblem(v: unknown): string | undefined {
+  if (!Array.isArray(v)) return '`assertions.must_contain_any` must be a list of groups, each a non-empty list of strings';
+  for (const [i, group] of v.entries()) {
+    const at = `\`assertions.must_contain_any[${i}]\``;
+    if (!isStringList(group)) return `${at} is not a list of strings: a group lists the tokens any one of which meets it`;
+    if (group.length === 0) return `${at} is an empty group: no answer could meet it`;
+    if (group.includes('')) return `${at} holds an empty token: every answer contains it, so the group would be met by any answer`;
+  }
+  return undefined;
+}
+
 /** `BUNDLE/FILE_STEM#ID`. */
 export const caseKey = (bundle: string, file: string, id: number | string): string => `${bundle}/${file.replace(/\.json$/, '')}#${id}`;
 
@@ -91,15 +115,18 @@ export const caseKey = (bundle: string, file: string, id: number | string): stri
  * The case as a turn meets it: a hash of the prompt the turn is asked and the
  * two token lists its answer is graded on (`expected_output` is neither sent
  * nor graded, so it is left out), and, only when the case has them, its
- * trigger kind and its `files` list (names, not contents) — so a behaviour
- * case with no files hashes as it did before either existed. Every run record
+ * trigger kind, its `files` list (names, not contents) and its
+ * `must_contain_any` groups — so a behaviour case with none of the three
+ * hashes as it did before any existed, and a case that gains a group, or has
+ * one edited, hashes anew. Every run record
  * carries it, so `--regrade` can tell a case reworded since the round from the
  * case that ran. Pure.
  */
-export const hashCase = (c: Pick<SkillEvalCase, 'prompt' | 'mustContain' | 'mustNotContain' | 'shouldTrigger' | 'files'>): string => {
+export const hashCase = (c: Pick<SkillEvalCase, 'prompt' | 'mustContain' | 'mustNotContain' | 'mustContainAny' | 'shouldTrigger' | 'files'>): string => {
   const extra = {
     ...(c.shouldTrigger !== undefined ? { shouldTrigger: c.shouldTrigger } : {}),
     ...(c.files?.length ? { files: c.files } : {}),
+    ...(c.mustContainAny?.length ? { mustContainAny: c.mustContainAny } : {}),
   };
   const parts: unknown[] = [c.prompt, c.mustContain, c.mustNotContain];
   if (Object.keys(extra).length) parts.push(extra);
@@ -167,6 +194,7 @@ export function parseEvalFile(bundle: string, file: string, text: string): { cas
     }
     let mc: string[] = [];
     let mnc: string[] = [];
+    let any: string[][] = [];
     const trigger = e.should_trigger;
     if (trigger !== undefined) {
       if (typeof trigger !== 'boolean') {
@@ -183,17 +211,24 @@ export function parseEvalFile(bundle: string, file: string, text: string): { cas
         refusals.push({ path: at, message: '`assertions` is not an object' });
         return;
       }
-      const { must_contain: rawMc = [], must_not_contain: rawMnc = [] } = a as Record<string, unknown>;
+      const { must_contain: rawMc = [], must_not_contain: rawMnc = [], must_contain_any: rawAny = [] } = a as Record<string, unknown>;
       if (!isStringList(rawMc) || !isStringList(rawMnc)) {
         refusals.push({ path: at, message: '`assertions.must_contain` / `must_not_contain` must each be a list of strings' });
         return;
       }
-      if (rawMc.length + rawMnc.length === 0) {
-        refusals.push({ path: at, message: 'asserts nothing: a case with no `must_contain` and no `must_not_contain` would pass every answer' });
+      const badAny = anyOfProblem(rawAny);
+      if (badAny) {
+        refusals.push({ path: at, message: badAny });
+        return;
+      }
+      const groups = rawAny as string[][];
+      if (rawMc.length + rawMnc.length + groups.length === 0) {
+        refusals.push({ path: at, message: 'asserts nothing: a case with no `must_contain`, no `must_contain_any` and no `must_not_contain` would pass every answer' });
         return;
       }
       mc = rawMc;
       mnc = rawMnc;
+      any = groups;
     }
     const key = caseKey(bundle, file, id);
     if (seen.has(key)) {
@@ -210,6 +245,7 @@ export function parseEvalFile(bundle: string, file: string, text: string): { cas
       ...(typeof e.expected_output === 'string' ? { expectedOutput: e.expected_output } : {}),
       mustContain: mc,
       mustNotContain: mnc,
+      ...(any.length ? { mustContainAny: any } : {}),
       ...(typeof trigger === 'boolean' ? { shouldTrigger: trigger } : {}),
       ...(files.length ? { files } : {}),
     });

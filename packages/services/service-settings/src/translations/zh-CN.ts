@@ -615,12 +615,9 @@ export const zhCN: PlatformTranslationData = {
       title: '知识库',
       description: 'RAG / 知识源使用的向量存储后端。',
       groups: {
-        turso: { title: 'Turso / libSQL', description: '仅在平台数据库不是 PostgreSQL 时使用；平台数据库为 PostgreSQL 时，知识存储位于平台数据库中，不读取这些字段。支持托管 Turso、本地文件、内存三种模式。' },
         indexing: { title: '索引默认值', description: '在知识源上单独设定的值优先于这些默认值。' },
       },
       keys: {
-        turso_url: { label: '连接 URL', help: '示例:libsql://your-tenant.turso.io · file:./.objectstack/data/knowledge.db · :memory:' },
-        turso_auth_token: { label: 'Auth Token', help: '仅托管 Turso URL 需要。' },
         chunk_target: { label: '目标 chunk 大小(字符)', help: '知识服务切分文档时每个片段的最大字符数。知识源自身设置的大小优先；嵌入模型的输入上限可能将其调低。' },
       },
       actions: {

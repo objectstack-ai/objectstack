@@ -498,6 +498,12 @@ function lookupOf(
   return Object.assign(lookup, { requestVerdicts, pending, settling, current });
 }
 
+function sameVerdicts(a: ReadonlyMap<string, boolean>, b: ReadonlyMap<string, boolean>): boolean {
+  if (a.size !== b.size) return false;
+  for (const [key, verdict] of a) if (b.get(key) !== verdict) return false;
+  return true;
+}
+
 export function useRecordCrudVerdicts(opts: {
   /** The object the rows belong to; absent (element data source) = no question to ask. */
   objectName?: string;
@@ -549,7 +555,15 @@ export function useRecordCrudVerdicts(opts: {
   // What was published last, written in the same stroke as `setVerdicts`: a
   // wait re-asked as soon as the wire settles runs before the re-render that
   // publishes the answer, so it reads the answer here (objectstack#35795).
-  const publishedRef = React.useRef<ReadonlyMap<string, boolean>>(new Map());
+  const publishedRef = React.useRef<ReadonlyMap<string, boolean>>(verdicts);
+  // Publishes only an answer that differs: re-publishing the same verdicts as
+  // a new map would draw every row of the grid again for nothing — on a
+  // list's first load, between its rows' first render and their first paint.
+  const publishVerdicts = React.useCallback((next: ReadonlyMap<string, boolean>) => {
+    if (sameVerdicts(publishedRef.current, next)) return;
+    publishedRef.current = next;
+    setVerdicts(next);
+  }, []);
   const current = React.useCallback<RecordCrudVerdictLookup>(
     (recordId, operation) =>
       recordId == null ? undefined : publishedRef.current.get(`${operation}:${String(recordId)}`),
@@ -577,8 +591,7 @@ export function useRecordCrudVerdicts(opts: {
     if (wantUpdate) operations.push('update');
     if (wantDelete) operations.push('delete');
     if (!objectName || ids.length === 0 || operations.length === 0) {
-      publishedRef.current = new Map();
-      setVerdicts(publishedRef.current);
+      publishVerdicts(new Map());
       setPending(false);
       wireRef.current = null;
       return;
@@ -600,8 +613,7 @@ export function useRecordCrudVerdicts(opts: {
           if (typeof verdict === 'boolean') next.set(`${operation}:${id}`, verdict);
         }
       }
-      publishedRef.current = next;
-      setVerdicts(next);
+      publishVerdicts(next);
     };
 
     const settled: Promise<void>[] = [];
@@ -642,7 +654,7 @@ export function useRecordCrudVerdicts(opts: {
     return () => {
       cancelled = true;
     };
-  }, [objectName, ids, wantUpdate, wantDelete, updateOnMount, demanded, apiFetch, principal, invalidationNonce]);
+  }, [objectName, ids, wantUpdate, wantDelete, updateOnMount, demanded, apiFetch, principal, invalidationNonce, publishVerdicts]);
 
   return React.useMemo<RecordCrudVerdicts>(
     () => lookupOf(verdicts, requestVerdicts, pending, settling, current),

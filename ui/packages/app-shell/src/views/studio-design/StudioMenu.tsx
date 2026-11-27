@@ -61,13 +61,13 @@ import {
   AppWindow,
   BarChart3,
   BookOpen,
+  LibraryBig,
   Bot,
   Boxes,
   Brain,
   Building2,
   CalendarClock,
   ChevronRight,
-  Database,
   File,
   FileText,
   Gauge,
@@ -189,7 +189,6 @@ const STUDIO_MENU_TYPE_ICONS: Readonly<Record<string, LucideIcon>> = {
   email_template: Mail,
   translation: Languages,
   api: Globe,
-  datasource: Database,
   external_catalog: Unplug,
   position: Users,
   assignment_rule: UserCog,
@@ -197,6 +196,7 @@ const STUDIO_MENU_TYPE_ICONS: Readonly<Record<string, LucideIcon>> = {
   queue: Inbox,
   capability: ListTree,
   ai_context: Brain,
+  knowledge_source: LibraryBig,
 };
 
 /** The icon of each entry that is not a type: the page it opens. */

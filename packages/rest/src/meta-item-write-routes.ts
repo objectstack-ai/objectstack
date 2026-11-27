@@ -88,7 +88,10 @@
 import { rethrowAuthzStoreUnavailable, userTextLocalesOf } from '@objectstack/core';
 // [#12702 · #20156] The `/meta` item write doors' capability predicate — see
 // `rest-server.ts`' import of the same name for why it is shared.
-import { metaWriteCapabilityVerdict } from '@objectstack/metadata-core';
+import {
+    authoredKnowledgeSourceRefusal,
+    metaWriteCapabilityVerdict,
+} from '@objectstack/metadata-core';
 import type { DeleteMetaItemRequest, SaveMetaItemRequest } from '@objectstack/spec/api';
 import { handleRouteError } from './error-response.js';
 import type { MetaRouteScope, TransportScopedMetaRequest } from './meta-collection-routes.js';
@@ -116,6 +119,7 @@ export interface MetaItemWriteRouteHost {
     walledCatalogRefusal: RestServer['walledCatalogRefusal'];
     resolveProtocol: RestServer['resolveProtocol'];
     resolveMetaWriteActor: RestServer['resolveMetaWriteActor'];
+    resolveKnowledgeService: RestServer['resolveKnowledgeService'];
 }
 
 /**
@@ -245,6 +249,32 @@ export function registerMetaItemWriteRoutes(this: MetaItemWriteRouteHost, scope:
                     : (body && typeof body === 'object' && 'item' in body)
                         ? (body as any).item
                         : body;
+
+                // [ADR-0161 K4, guard two] Source admission at save: a
+                // `knowledge_source` is saved only when its author may
+                // themselves search what it would index — the knowledge
+                // service's search-time gates, asked for the author before
+                // anything is written (`authoredKnowledgeSourceRefusal`).
+                // Every other type passes untouched. `403` keeps this door's
+                // `FORBIDDEN` spelling; a verdict that cannot be reached is
+                // the gate's own `503`.
+                {
+                    const refused = await authoredKnowledgeSourceRefusal({
+                        type: req.params.type,
+                        item,
+                        executionContext: ctx,
+                        resolveKnowledgeService: () => this.resolveKnowledgeService(environmentId, req),
+                    });
+                    if (refused) {
+                        res.status(refused.status).json({
+                            error: {
+                                code: refused.status === 403 ? 'FORBIDDEN' : refused.code,
+                                message: refused.message,
+                            },
+                        });
+                        return;
+                    }
+                }
 
                 // Opt-in OCC under ADR-0008 PR-10d.3: callers (Studio,
                 // CLI) may set `If-Match` to the version token a receipt

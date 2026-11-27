@@ -42,7 +42,7 @@
 
 import { createHash } from 'node:crypto';
 import type { AdapterIndexExpectation, IKnowledgeAdapter } from '@objectstack/spec/contracts';
-import type { KnowledgeSource, ObjectKnowledgeSource } from '@objectstack/spec/ai';
+import type { KnowledgeSource } from '@objectstack/spec/ai';
 import { collectCredentialWriteResponseFields, collectInternalWriteResponseFields } from '@objectstack/core';
 import { SPLIT_ALGORITHM_VERSION, type ResolvedSplit } from './split/index.js';
 import { documentTitleField } from './knowledge-source-admission.js';
@@ -55,8 +55,8 @@ export const RECIPE_HASH_VERSION = 'rh1';
 
 /**
  * The version of the assembly rule — how the listed content values become one
- * text (`recordToDocument`: each listed field's value, `'*'` as every string
- * field, joined by a blank line). Part of the content recipe. Bump it in the
+ * text (`recordToDocument`: each listed field's value, joined by a blank
+ * line). Part of the content recipe. Bump it in the
  * change that makes assembly give another text for the same record and source.
  */
 export const ASSEMBLY_RULE_VERSION = 1;
@@ -80,7 +80,7 @@ export interface IndexFingerprintInput {
 /** What {@link computeRecipeHash} reads. */
 export interface RecipeHashInput {
   source: KnowledgeSource;
-  /** The registered object definition of an object source, when the engine exposes one. */
+  /** The registered definition of the source's object, when the engine exposes one. */
   schema?: unknown;
 }
 
@@ -108,10 +108,7 @@ export function computeIndexFingerprint(input: IndexFingerprintInput): string {
 /** The recipe hash of a source (ADR-0161 K7, "The recipe hash"). */
 export function computeRecipeHash(input: RecipeHashInput): string {
   const { source, schema } = input;
-  if (source.source.kind !== 'object') {
-    return hashed(RECIPE_HASH_VERSION, { kind: source.source.kind });
-  }
-  const objSource = source.source as ObjectKnowledgeSource;
+  const objSource = source.source;
   const withheld = [...new Set([
     ...collectCredentialWriteResponseFields(schema),
     ...collectInternalWriteResponseFields(schema),
@@ -131,17 +128,16 @@ export function indexExpectation(fingerprint: IndexFingerprintInput, recipe: Rec
 
 /**
  * The content recipe (K7, point 2): what assembly reads to build the text.
- * For an object source, the object and the ORDERED content list — the order is
- * the order of the text. Another kind is not assembled by the service; its
- * recipe is its kind.
+ * The object and the ORDERED content list — the order is the order of the
+ * text. Neither hash reads the source's name or its holder, so a source keeps
+ * its index when only its spelling moves (ADR-0161 K6: `id` became `name`).
  */
 function contentRecipe(source: KnowledgeSource): Record<string, unknown> {
-  if (source.source.kind !== 'object') return { kind: source.source.kind };
-  const objSource = source.source as ObjectKnowledgeSource;
+  const objSource = source.source;
   return {
-    kind: 'object',
+    kind: objSource.kind,
     object: objSource.object,
-    content: [...objSource.contentFields],
+    content: [...objSource.content],
     assembly: ASSEMBLY_RULE_VERSION,
   };
 }

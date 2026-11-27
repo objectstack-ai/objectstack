@@ -1069,7 +1069,7 @@ export const koMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       },
       uiReadonly: {
         label: "화면에서 읽기 전용",
-        helpText: "콘솔에서는 이 필드를 직접 편집할 수 없습니다(대화 상자, 레코드 페이지, 그리드, 칸반 및 캘린더 끌기). 작업, 가져오기, API, 플로우는 계속 기록할 수 있으며 각 기록은 개체의 유효성 검사로 판정됩니다. 읽기 전용이 켜져 있으면 끈 상태로 두세요. 읽기 전용이 이미 모든 클라이언트 기록을 막습니다."
+        helpText: "콘솔에서는 이 필드를 직접 편집할 수 없습니다(대화 상자, 레코드 페이지, 그리드, 칸반·캘린더·간트 끌기, 작업 시간표). 작업, 가져오기, API, 플로우는 계속 기록할 수 있으며 각 기록은 개체의 유효성 검사로 판정됩니다. 읽기 전용이 켜져 있으면 끈 상태로 두세요. 읽기 전용이 이미 모든 클라이언트 기록을 막습니다. 사용자를 대신해 작업하는 앱 내 어시스턴트는 아직 이를 따르지 않습니다."
       },
       hidden: {
         label: "숨김",
@@ -1097,7 +1097,7 @@ export const koMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       },
       uiReadonlyWhen: {
         label: "화면에서 읽기 전용 조건",
-        helpText: "레코드에 대한 CEL 조건식(예: record.status != 'draft') — TRUE인 동안 기존 레코드의 이 필드는 콘솔에서 편집할 수 없습니다(편집 대화상자, 레코드 페이지, 그리드, 칸반 및 캘린더 드래그). 새 레코드의 생성 대화상자는 판단하지 않습니다. 작업, 가져오기, API 및 흐름은 계속 기록하며, 객체의 유효성 검사가 판단합니다. '읽기 전용 조건'처럼 레코드 자체의 열을 읽습니다."
+        helpText: "레코드에 대한 CEL 조건식(예: record.status != 'draft') — TRUE인 동안 기존 레코드의 이 필드는 콘솔에서 편집할 수 없습니다(편집 대화상자, 레코드 페이지, 그리드, 칸반·캘린더·간트 드래그, 작업 시간표). 새 레코드의 생성 대화상자는 판단하지 않습니다. 작업, 가져오기, API 및 흐름은 계속 기록하며, 객체의 유효성 검사가 판단합니다. '읽기 전용 조건'처럼 레코드 자체의 열을 읽습니다. 사용자를 대신해 작업하는 앱 내 어시스턴트는 아직 이를 따르지 않습니다."
       },
       requiredWhen: {
         label: "필수 조건",
@@ -1661,7 +1661,7 @@ export const koMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       },
       requiredPermissions: {
         label: "Required Permissions",
-        helpText: "Who sees this view: the capabilities a person must hold, every one listed. Permission sets grant capabilities, and a position passes on the ones its permission sets grant. Leave it empty and everyone who can see the list sees this view. To show it to several groups, pick one capability and grant it to each group's permission set. The server enforces it: anyone else does not find the view in the list and is refused if they open it directly. The gate applies to you too: list a capability you do not hold, or misspell one, and you can no longer open this view either."
+        helpText: "Who sees this view: the capabilities a person must hold, every one listed. Permission sets grant capabilities, and a position passes on the ones its permission sets grant. Leave it empty and everyone who can see the list sees this view. To show it to several groups, pick one capability and grant it to each group's permission set. The server enforces it: anyone else does not find the view in the list and is refused if they open it directly. The gate applies to you too: list a capability you do not hold, or misspell one, and you no longer see this view in the list either."
       },
       object: {
         label: "객체"
@@ -3488,5 +3488,8 @@ export const koMetadataForms: NonNullable<TranslationData['metadataForms']> = {
         helpText: "A long-text field of the root object (textarea, markdown, html, richtext). Any other field is reported when the pack is saved, and the pack then carries no body."
       }
     }
+  },
+  knowledge_source: {
+    label: "지식 소스"
   }
 };

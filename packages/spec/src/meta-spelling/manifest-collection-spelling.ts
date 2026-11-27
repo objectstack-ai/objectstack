@@ -92,6 +92,7 @@ export const PLURAL_TO_SINGULAR: Record<string, string> = {
   tools: 'tool',
   skills: 'skill',
   aiContexts: 'ai_context',
+  knowledgeSources: 'knowledge_source',
   // `ragPipelines: 'rag_pipeline'` was removed (ADR-0049 enforce-or-remove): no
   // stack could declare the collection — `ObjectStackDefinitionSchema` never
   // carried the key, so `defineStack` refused it — and no producer or reader of

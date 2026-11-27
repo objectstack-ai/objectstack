@@ -345,6 +345,11 @@ describe('objectstack#36286 — which objects a create row offers', () => {
     expect(palettePrefillField(base as never, PERMS as never)).toBe('full_name');
     expect(palettePrefillField({ ...base, fields: { full_name: { type: 'lookup' } } } as never, PERMS as never)).toBeUndefined();
     expect(palettePrefillField({ ...base, fields: { full_name: { type: 'text', readonly: true } } } as never, PERMS as never)).toBeUndefined();
+    // objectstack#37448 — the hand lock too: the create page leaves a
+    // `uiReadonly` field off the form, so the typed words would land nowhere.
+    expect(palettePrefillField({ ...base, fields: { full_name: { type: 'text', uiReadonly: true } } } as never, PERMS as never)).toBeUndefined();
+    // A conditional hand lock is not judged on a create (no record yet).
+    expect(palettePrefillField({ ...base, fields: { full_name: { type: 'text', uiReadonlyWhen: 'true' } } } as never, PERMS as never)).toBe('full_name');
     const noCreateField = { ...PERMS, checkField: () => false };
     expect(palettePrefillField(base as never, noCreateField as never)).toBeUndefined();
   });

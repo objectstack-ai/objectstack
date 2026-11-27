@@ -25,8 +25,10 @@ import { FeedbackForm } from './src/ui/forms/index.js';
 import { ChartGalleryDashboard, OpsDashboard, RevenuePulseDashboard } from './src/ui/dashboards/index.js';
 import { ShowcaseTaskDataset, ShowcaseProjectDataset, ShowcaseInvoiceDataset, ShowcaseAccountDataset } from './src/ui/datasets/index.js';
 import { allReports } from './src/ui/reports/index.js';
-import { ShowcaseProjectBriefContext, ShowcaseTaskNotesContext } from './src/ai/index.js';
+import { ShowcaseProjectBriefContext, ShowcaseTaskNotesContext, ShowcaseTaskNotesKnowledge } from './src/ai/index.js';
 import { RecordContextServicePlugin } from '@objectstack/service-record-context';
+import { KnowledgeServicePlugin } from '@objectstack/service-knowledge';
+import { KnowledgeMemoryPlugin } from '@objectstack/knowledge-memory';
 import { allActions } from './src/ui/actions/index.js';
 import { CapabilityMapPage, StartHerePage, ComponentGalleryPage, ProjectWorkspacePage, ProjectDetailPage, TaskWorkbenchPage, TaskTriagePage, TaskBoardPage, TaskCalendarPage, TaskGalleryPage, TaskSchedulePage, TaskTimelinePage, TaskMapPage, TaskAllViewsPage, ActiveProjectsPage, TaskDetailPage, InvoiceDocumentPage, ReviewQueuePage, NewProjectWizardPage, MyWorkPage, SettingsPage, StylingGalleryPage, CommandCenterPage, CommandCenterJsxPage, CrmWorkbenchPage, TaskDeskPage, PageVariablesPage, ContactFormPage, RenewalsPipelinePage } from './src/ui/pages/index.js';
 import { allFlows } from './src/automation/flows/index.js';
@@ -174,6 +176,14 @@ export default defineStack({
     // [ADR-0160] The record-context service: `get_record_context` over MCP
     // reads the context packs below (`aiContexts`) as the caller.
     new RecordContextServicePlugin(),
+    // [ADR-0161 K4] The knowledge service and a store for it: the service
+    // loads the knowledge sources below (`knowledgeSources`), builds their
+    // indexes and keeps them in step with the records; `search_knowledge` over
+    // MCP answers from them as the caller. The in-memory store is the
+    // reference adapter the source names (`adapter: 'memory'`): no embedder,
+    // nothing persisted, rebuilt at each boot.
+    new KnowledgeServicePlugin(),
+    new KnowledgeMemoryPlugin(),
   ],
 
   // Infrastructure
@@ -224,6 +234,7 @@ export default defineStack({
   reports: allReports,
   // [ADR-0160] Context packs read by `get_record_context` (src/ai/).
   aiContexts: [ShowcaseProjectBriefContext, ShowcaseTaskNotesContext],
+  knowledgeSources: [ShowcaseTaskNotesKnowledge],
   actions: allActions,
   // `themes` retired at #10485 (ADR-0049) — recolour via `app.branding` instead.
 

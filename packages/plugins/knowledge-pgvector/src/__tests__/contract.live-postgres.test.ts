@@ -28,6 +28,7 @@ describe.skipIf(!PG_URL)('knowledge-pgvector on a LIVE PostgreSQL', () => {
       refusesOtherFingerprint: true,
       generations: true,
       scope: true,
+      dropSource: true,
     },
   });
 });

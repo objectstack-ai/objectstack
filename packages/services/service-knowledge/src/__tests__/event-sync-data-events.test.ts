@@ -179,13 +179,13 @@ const DRAFT: Row = { ...PUBLISHED, body: 'Draft wording, not yet approved', stat
 
 function source(where?: Record<string, unknown>): KnowledgeSource {
   return {
-    id: 'kb',
+    name: 'kb',
     label: 'Knowledge base',
     adapter: 'memory',
     source: {
       kind: 'object',
       object: 'kb_article',
-      contentFields: ['title', 'body'],
+      content: ['title', 'body'],
       ...(where ? { where } : {}),
     },
   };

@@ -1069,7 +1069,7 @@ export const enMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       },
       uiReadonly: {
         label: "Ui Readonly",
-        helpText: "People cannot edit this field in the console (dialogs, the record page, grids, kanban and calendar drag), while actions, imports, the API and flows still write it, each write judged by the object's validations. Leave it off when Read-only is on: that one already keeps every client write out."
+        helpText: "People cannot edit this field anywhere in the console (dialogs, the record page, grids, kanban, calendar and Gantt drag, the timesheet), while actions, imports, the API and flows still write it, each write judged by the object's validations. Leave it off when Read-only is on: that one already keeps every client write out. The in-app assistant acting for a person does not honour it yet."
       },
       hidden: {
         label: "Hidden",
@@ -1097,7 +1097,7 @@ export const enMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       },
       uiReadonlyWhen: {
         label: "Ui Readonly When",
-        helpText: "CEL predicate over the record (e.g. record.status != 'draft') — while it is TRUE, people cannot edit the field of an existing record in the console (the edit dialog, the record page, grids, kanban and calendar drag); a new record's create dialog is not judged. Actions, imports, the API and flows still write it, judged by the object's validations. Reads the record's own columns, as Read-only when does."
+        helpText: "CEL predicate over the record (e.g. record.status != 'draft') — while it is TRUE, people cannot edit the field of an existing record anywhere in the console (the edit dialog, the record page, grids, kanban, calendar and Gantt drag, the timesheet); a new record's create dialog is not judged. Actions, imports, the API and flows still write it, judged by the object's validations. Reads the record's own columns, as Read-only when does. The in-app assistant acting for a person does not honour it yet."
       },
       requiredWhen: {
         label: "Required When",
@@ -1661,7 +1661,7 @@ export const enMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       },
       requiredPermissions: {
         label: "Required Permissions",
-        helpText: "Who sees this view: the capabilities a person must hold, every one listed. Permission sets grant capabilities, and a position passes on the ones its permission sets grant. Leave it empty and everyone who can see the list sees this view. To show it to several groups, pick one capability and grant it to each group's permission set. The server enforces it: anyone else does not find the view in the list and is refused if they open it directly. The gate applies to you too: list a capability you do not hold, or misspell one, and you can no longer open this view either."
+        helpText: "Who sees this view: the capabilities a person must hold, every one listed. Permission sets grant capabilities, and a position passes on the ones its permission sets grant. Leave it empty and everyone who can see the list sees this view. To show it to several groups, pick one capability and grant it to each group's permission set. The server enforces it: anyone else does not find the view in the list and is refused if they open it directly. The gate applies to you too: list a capability you do not hold, or misspell one, and you no longer see this view in the list either."
       },
       object: {
         label: "Object"
@@ -3488,5 +3488,8 @@ export const enMetadataForms: NonNullable<TranslationData['metadataForms']> = {
         helpText: "A long-text field of the root object (textarea, markdown, html, richtext). Any other field is reported when the pack is saved, and the pack then carries no body."
       }
     }
+  },
+  knowledge_source: {
+    label: "Knowledge Source"
   }
 };

@@ -9,11 +9,13 @@ import { KnowledgeTursoPlugin } from '@objectstack/knowledge-turso';
 
 const kernel = new ObjectKernel();
 kernel.use(new KnowledgeServicePlugin({
-  sources: [{ id: 'task_notes', label: 'Notes', adapter: 'turso',
-    source: { kind: 'object', object: 'task', contentFields: ['notes'] }}],
+  sources: [{ name: 'task_notes', label: 'Notes', adapter: 'turso',
+    source: { kind: 'object', object: 'task', content: ['notes'] }}],
 }));
 kernel.use(new KnowledgeTursoPlugin()); // .objectstack/data/knowledge.db
 ```
+
+A source is usually a `knowledge_source` metadata item (a `*.knowledge-source.ts` file in an app, or one authored in Studio) that names this adapter with `adapter: 'turso'`; the `sources` option above registers one from code.
 
 ## Options
 
@@ -39,6 +41,8 @@ On a file the store sets WAL and a busy timeout: without them a second process w
 
 - `knowledge_generation` — one row per source and generation: the index fingerprint it was built under, the recipe hash, the vector width, the model, and whether it is active or being built. At most one of each per source, by a unique index. It does not refuse a second builder: a second build under the same fingerprint joins the one under way, and one under another fingerprint replaces it, after which the first builder's writes are refused `KNOWLEDGE_REBUILD_REQUIRED`. No generation mixes two fingerprints.
 - `knowledge_<source>_g<n>` — the passages of one generation of one source, with an `F32_BLOB(<width>)` vector column sized for that generation.
+
+`<source>` is the source's index key: its name, or for a source a package ships, the knowledge service's spelling of that package and name (so two packages' sources of one name are two tables). When a source stops being served (its metadata item was removed, or a package now holds its name), the knowledge service calls `dropSource`: the source's generation tables and rows are dropped in one transaction.
 
 ## Search
 

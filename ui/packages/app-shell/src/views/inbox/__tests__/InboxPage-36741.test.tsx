@@ -70,6 +70,7 @@ vi.mock('../../RecordDetailView', () => ({
 }));
 
 import { InboxPage } from '../InboxPage';
+import { ShellPageActionsSlotContext } from '../../../layout/shellPageActionsSlot';
 import { postInboxReadReceipts } from '../../../hooks/useInboxBell';
 import { readEarlierInboxMessages } from '../../../hooks/sharedUserFeeds';
 
@@ -278,5 +279,22 @@ describe('InboxPage — the full-page inbox (objectstack#36741)', () => {
     render(page('/apps/crm/inbox/activity'));
     expect(location()).toBe('/apps/crm/inbox/activity?item=act1');
     expect(screen.getByTestId('record-stub').textContent).toBe('task/t9');
+  });
+
+  // objectstack#37858 — the header is this page's top bar and keeps its own
+  // buttons at the end, where the shell's corner Ask AI would sit: the page
+  // draws the shell's group last in that row instead (the group counts itself,
+  // so the corner button is not drawn over «Mark all read»).
+  it('ends its header row with the shell’s group, after its own buttons', () => {
+    const group = () => <div data-testid="shell-group-stub" />;
+    render(<ShellPageActionsSlotContext.Provider value={group}>{page('/apps/crm/inbox')}</ShellPageActionsSlotContext.Provider>);
+    const cluster = screen.getByTestId('inbox-page-mark-all-read').parentElement as HTMLElement;
+    const order = Array.from(cluster.children).map((c) => c.getAttribute('data-testid'));
+    expect(order).toEqual(['inbox-page-unread-only', 'inbox-page-mark-all-read', 'inbox-page-shell-divider', 'shell-group-stub']);
+  });
+
+  it('draws no group and no hairline outside the shell', () => {
+    render(page('/apps/crm/inbox'));
+    expect(screen.queryByTestId('inbox-page-shell-divider')).toBeNull();
   });
 });

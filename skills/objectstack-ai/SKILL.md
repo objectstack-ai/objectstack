@@ -90,7 +90,6 @@ export default defineSkill({
     When managing cases:
     - Always check for duplicate cases before creating a new one.
     - Set priority by customer tier: Enterprise → High, Pro → Medium, Free → Low.
-    - Escalated cases must summarise the actions already taken.
   `,
   // Two platform tools (rung 2) and this stack's own Action (rung 3).
   tools: ['query_records', 'get_record', 'action_crm_escalate_case'],
@@ -171,31 +170,9 @@ decided entirely by the skip rule above — `actionSkipReason(action, ctx)` and
 `actionRequiresApproval(action)` (from `@objectstack/service-ai`) answer both
 questions, and Studio's "AI exposure" diagnostics use the same predicates.
 
-### The **Ask AI** button — `type: 'ask_ai'` ☁️
-
-Pins the assistant's conversation to the record the action runs on and opens
-it, sending no message. Declare it on the object, in
-`locations: ['record_header']` or `['record_more']`:
-
-<!-- os:check -->
-```typescript
-import { defineAction } from '@objectstack/spec';
-
-export default defineAction({
-  name: 'ask_about_contract',
-  label: 'Ask AI',
-  objectName: 'contract',
-  type: 'ask_ai',
-  locations: ['record_header'],
-});
-```
-
-It names nothing and is never a tool: the parse refuses a `target`,
-`ai.exposed: true`, and `actionType: 'ask_ai'` on a dashboard header (a header
-runs on no record). Nothing serves it headless: `list_actions` skips it,
-`run_action` refuses it, and no `action_` tool exists for it. The console draws
-it only where the assistant surface is on **and** the AI service honours a
-conversation focus; elsewhere it is absent, not disabled.
+**No page declares an AI button of its own**, so there is no action to write
+for one: the shell's 「问 AI」 entry opens the in-app assistant and carries the
+current record automatically.
 
 ---
 
@@ -291,13 +268,13 @@ dev/test), `@objectstack/knowledge-pgvector` (`'pgvector'`) or `@objectstack/kno
 import { KnowledgeSourceSchema, type KnowledgeSource } from '@objectstack/spec/ai';
 
 export const supportKb: KnowledgeSource = KnowledgeSourceSchema.parse({
-  id: 'support_kb',
+  name: 'support_kb',
   label: 'Support Knowledge Base',
   adapter: 'pgvector',
   source: {
     kind: 'object',
     object: 'kb_article',
-    contentFields: ['title', 'body'],       // concatenated into document content
+    content: ['title', 'body'],             // joined into document content
     metadataFields: ['category', 'owner_id'], // projected for search-time filtering
     where: { published: true },             // index published articles only
   },
@@ -452,14 +429,14 @@ absent or `true` = the binding rule above.
 part), auto-registered **only** when an analytics service (`IAnalyticsService`)
 is wired — `query_data` / `aggregate_data` return numbers, not charts.
 
-Two `AgentSchema` keys are **tombstones**, not legacy options — authoring either
-is a parse error carrying its migration
-(`packages/spec/src/ai/agent.zod.ts:234, :251`):
+Two `AgentSchema` keys are retired, not legacy options: the strict schema
+refuses each as an unknown key, naming
+https://objectstack.ai/docs/protocol-upgrade:
 
-| Retired key | REMOVED in protocol 17 — why, and what replaces it |
+| Retired key | Removed in 17, tombstone gone in 18 — why, and what replaces it |
 |:--|:--|
-| `agent.tools` | The inline slot resolved names against the *full* registry with no surface check. Not a rename: the migration deletes the key and names each tool that was listed; re-declare each in a skill (ADR-0064) |
-| `agent.knowledge` | Declaring sources/indexes on an agent never scoped retrieval — `search_knowledge` takes `sourceIds` from the model's tool-call arguments. Restrict at the knowledge-service / source level; describe intended grounding in `instructions` |
+| `agent.tools` | The inline slot resolved names against the *full* registry with no surface check. Not a rename: the strict schema refuses the key as unknown; re-declare each tool in a `defineSkill` under the stack's `skills` (ADR-0064) |
+| `agent.knowledge` | Declaring sources/indexes on an agent never scoped retrieval — `search_knowledge` takes `sourceIds` from the model's tool-call arguments. Restrict on the knowledge source (`aiExposed`, `source.where`); describe intended grounding in `instructions` |
 
 ---
 

@@ -35,18 +35,18 @@ function adapterWith(hitsBySource: Record<string, KnowledgeHit[]>): IKnowledgeAd
     upsert: vi.fn(async () => undefined),
     delete: vi.fn(async () => undefined),
     search: vi.fn(async (_query: string, opts: { source: KnowledgeSource }) => {
-      searched.push(opts.source.id);
-      return hitsBySource[opts.source.id] ?? [];
+      searched.push(opts.source.name);
+      return hitsBySource[opts.source.name] ?? [];
     }),
   } as unknown as IKnowledgeAdapter & { searched: string[] };
 }
 
 function objectSource(id: string, object: string, extra: Partial<KnowledgeSource> = {}): KnowledgeSource {
   return {
-    id,
+    name: id,
     label: `${id} label`,
     adapter: 'memory',
-    source: { kind: 'object', object, contentFields: ['body'] } as ObjectKnowledgeSource,
+    source: { kind: 'object', object, content: ['body'] } as ObjectKnowledgeSource,
     ...extra,
   };
 }
@@ -163,22 +163,18 @@ describe('search_knowledge — the caller\'s execution context', () => {
 
   it('caps the answer at the default topK when none is named', async () => {
     const adapter = adapterWith({
-      // A file source's hits name no record: nothing for the row-level re-check to drop.
-      policy_clauses: Array.from({ length: 9 }, (_, i) => {
-        const { sourceRecordId: _record, ...fileHit } = hit('policy_clauses', `p${i}`, 1 - i / 10);
-        return fileHit;
-      }),
+      policy_clauses: Array.from({ length: 9 }, (_, i) => hit('policy_clauses', `p${i}`, 1 - i / 10)),
     });
-    const service = new KnowledgeService({ logger: { warn: () => undefined } });
+    // Every row re-checks readable: the cap is the only thing that shortens the answer.
+    const dataEngine = {
+      find: async (_object: string, q: { where?: { id?: { $in?: string[] } } }) =>
+        (q.where?.id?.$in ?? []).map((id) => ({ id })),
+    } as unknown as IDataEngine;
+    const service = new KnowledgeService({ dataEngine, logger: { warn: () => undefined } });
     service.registerAdapter('memory', adapter);
-    service.registerSource({
-      id: 'policy_clauses',
-      label: 'Policies',
-      adapter: 'memory',
-      source: { kind: 'file', uris: ['file:///p.md'] },
-    } as unknown as KnowledgeSource);
-    const fileHits = (await service.knowledgeTools().searchKnowledge({ query: 'q' }, caller)).hits;
-    expect(fileHits).toHaveLength(SEARCH_KNOWLEDGE_DEFAULT_TOP_K);
+    service.registerSource(objectSource('policy_clauses', 'policy_clause'));
+    const capped = (await service.knowledgeTools().searchKnowledge({ query: 'q' }, caller)).hits;
+    expect(capped).toHaveLength(SEARCH_KNOWLEDGE_DEFAULT_TOP_K);
   });
 });
 
@@ -230,7 +226,7 @@ describe('search_knowledge — a refused source (ADR-0161 K7, rule 5)', () => {
     const answer = adapter.search as unknown as ReturnType<typeof vi.fn>;
     const inner = answer.getMockImplementation()! as (query: string, opts: { source: KnowledgeSource }) => Promise<unknown>;
     answer.mockImplementation(async (query: string, opts: { source: KnowledgeSource }) => {
-      if (refusing.includes(opts.source.id)) throw refusal();
+      if (refusing.includes(opts.source.name)) throw refusal();
       return inner(query, opts);
     });
     const engine = {
@@ -403,11 +399,11 @@ describe('search_knowledge — scope, granularity and groupBy over the knowledge
   ];
   const NOTES: Row[] = [{ id: 'n1', body: 'staff note', author: 'A' }];
   const clauses = objectSource('clauses', 'clause', {
-    source: { kind: 'object', object: 'clause', contentFields: ['body'], metadataFields: ['policy', 'status'] } as ObjectKnowledgeSource,
+    source: { kind: 'object', object: 'clause', content: ['body'], metadataFields: ['policy', 'status'] } as ObjectKnowledgeSource,
   });
   const notes = objectSource('notes', 'note', {
     aiExposed: false,
-    source: { kind: 'object', object: 'note', contentFields: ['body'], metadataFields: ['author'] } as ObjectKnowledgeSource,
+    source: { kind: 'object', object: 'note', content: ['body'], metadataFields: ['author'] } as ObjectKnowledgeSource,
   });
 
   /** The hit an index answers for `row`'s passage `n`: the document's metadata and stored docHash, as an adapter returns them. */
@@ -416,7 +412,7 @@ describe('search_knowledge — scope, granularity and groupBy over the knowledge
     return {
       chunkId: `${doc.id}#${n}`,
       documentId: doc.id,
-      sourceId: source.id,
+      sourceId: source.name,
       sourceRecordId: row.id,
       score,
       snippet: `${row.body as string} (${n})`,
@@ -443,8 +439,8 @@ describe('search_knowledge — scope, granularity and groupBy over the knowledge
       upsert: vi.fn(async () => undefined),
       delete: vi.fn(async () => undefined),
       search: vi.fn(async (_q: string, opts: { source: KnowledgeSource; topK: number }) => {
-        asked.push({ source: opts.source.id, opts: opts as unknown as Record<string, unknown> });
-        return [...(corpus[opts.source.id] ?? [])].slice(0, opts.topK);
+        asked.push({ source: opts.source.name, opts: opts as unknown as Record<string, unknown> });
+        return [...(corpus[opts.source.name] ?? [])].slice(0, opts.topK);
       }),
     } as unknown as IKnowledgeAdapter;
     const matches = (row: Row, where: Record<string, unknown> = {}): boolean =>
@@ -498,23 +494,6 @@ describe('search_knowledge — scope, granularity and groupBy over the knowledge
     const answer = await tools.searchKnowledge({ query: 'q', groupBy: 'policy' }, caller);
     expect(answer.hits.map((h) => [h.record?.id, h.groupValue])).toEqual([['c1', 'P_leave'], ['c3', 'P_travel']]);
     expect(JSON.stringify(answer)).not.toContain('draft');
-  });
-
-  it('groupBy over a file source: one hit per document, and no groupValue even where its hit carries the field', async () => {
-    const manuals = {
-      id: 'manuals',
-      label: 'Manuals',
-      adapter: 'memory',
-      source: { kind: 'file', uris: ['file:///manual.md'] },
-    } as unknown as KnowledgeSource;
-    const adapter = adapterWith({
-      manuals: [{ chunkId: 'manuals:m#0', documentId: 'manuals:m', sourceId: 'manuals', score: 0.95, snippet: 'manual', metadata: { policy: 'P_manual' } }],
-    });
-    const service = new KnowledgeService({ logger: { warn: () => undefined, debug: () => undefined } });
-    service.registerAdapter('memory', adapter);
-    service.registerSource(manuals);
-    const answer = await service.knowledgeTools().searchKnowledge({ query: 'q', groupBy: 'policy' }, caller);
-    expect(answer.hits).toEqual([{ sourceId: 'manuals', documentId: 'manuals:m', snippet: 'manual', score: 0.95 }]);
   });
 
   it('scope: only hits from the named records', async () => {

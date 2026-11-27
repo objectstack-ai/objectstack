@@ -33,7 +33,7 @@ export default class KnowledgeStatus extends Command {
   ];
 
   static override args = {
-    source: Args.string({ description: 'The knowledge source id; every source when omitted', required: false }),
+    source: Args.string({ description: 'The knowledge source, by the name this command lists it under (NAMESPACE-NAME for a package\'s source); every source when omitted', required: false }),
   };
 
   static override flags = {
@@ -55,7 +55,8 @@ export default class KnowledgeStatus extends Command {
       return;
     }
     for (const source of sources) {
-      this.log(`${source.id}  (${source.label ?? source.id}; adapter ${source.adapter ?? '?'}, ${source.kind ?? '?'} source)`);
+      const held = source.packageId ? `, package ${source.packageId}` : '';
+      this.log(`${source.id}  (${source.label ?? source.id}; adapter ${source.adapter ?? '?'}${held})`);
       const index = source.index;
       this.log(`  index: ${index?.state ?? 'unknown'}${index?.due ? ' — a build is due' : ''}${index?.detail ? ` — ${index.detail}` : ''}`);
       this.log(
