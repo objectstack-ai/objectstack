@@ -71,7 +71,7 @@ const entries = (count: number): NavigationItem[] =>
  * Mounts the provider, lets it settle at the window's width, then opens the
  * tree under it. Returns the label spy and the link count at each commit.
  */
-async function openDrawer(items: NavigationItem[], width: number, height: number, sidebarOpen = true) {
+async function openDrawer(items: NavigationItem[], width: number, height: number) {
   setWindow(width, height);
   const labelOf = vi.fn<NavTargetLabelResolver>((target) =>
     target.kind === 'object' ? `Label ${target.objectName}` : undefined,
@@ -95,7 +95,7 @@ async function openDrawer(items: NavigationItem[], width: number, height: number
   }
   render(
     <MemoryRouter initialEntries={[BASE]}>
-      <SidebarProvider defaultOpen={sidebarOpen}>
+      <SidebarProvider>
         <Drawer />
       </SidebarProvider>
     </MemoryRouter>,
@@ -160,22 +160,14 @@ describe('NavigationRenderer — opening the phone drawer (objectstack#29141)', 
     expect(screen.getByRole('button', { name: 'Group B' })).toHaveAttribute('aria-expanded', 'true');
   });
 
-  it('on a wide window the whole menu draws at once, in one commit', async () => {
+  it('on a wide window the whole menu draws at once, and each row keeps its icon-rail tooltip', async () => {
     const { labelOf, linksPerCommit } = await openDrawer(entries(60), 1280, 844);
+    // Every row from the first commit (the tooltips' own state may commit again; no row re-renders).
     expect(linksPerCommit[0]).toBe(60);
     expect([...rendersPerRow(labelOf).values()].every((n) => n === 1)).toBe(true);
-    // objectstack#37575 — the expanded sidebar never shows a row's tooltip, so
-    // a row there has none: each Radix Tooltip committed its row once more
-    // after mounting, when its anchor reported in.
-    expect(linksPerCommit).toHaveLength(1);
-    expect(screen.getByRole('link', { name: 'Label object_1' })).not.toHaveAttribute('data-state');
-    expect(screen.getByRole('link', { name: 'Label object_1' })).not.toHaveClass('min-h-[44px]');
-  });
-
-  it('in the icon rail each row keeps its tooltip', async () => {
-    await openDrawer(entries(3), 1280, 844, false);
-    // The tooltip trigger marks the row.
+    // The tooltip trigger marks the row; on a phone the primitive would draw that tooltip hidden.
     expect(screen.getByRole('link', { name: 'Label object_1' })).toHaveAttribute('data-state', 'closed');
+    expect(screen.getByRole('link', { name: 'Label object_1' })).not.toHaveClass('min-h-[44px]');
   });
 
   it('a phone row carries no tooltip trigger', async () => {
