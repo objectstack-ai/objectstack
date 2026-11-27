@@ -1660,8 +1660,8 @@ export const jaJPMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         helpText: "ビューの設定をロックしたユーザー"
       },
       requiredPermissions: {
-        label: "Required Permissions",
-        helpText: "Who sees this view: the capabilities a person must hold, every one listed. Permission sets grant capabilities, and a position passes on the ones its permission sets grant. Leave it empty and everyone who can see the list sees this view. To show it to several groups, pick one capability and grant it to each group's permission set. The server enforces it: anyone else does not find the view in the list and is refused if they open it directly."
+        label: "必要な権限",
+        helpText: "このビューを見られる人：閲覧者が保持する必要のあるケイパビリティで、列挙したものはすべて必要です。ケイパビリティは権限セットが付与し、ポジションはその権限セットが付与するものを引き継ぎます。空にすると、リストを見られる全員がこのビューを見られます。複数のグループに見せるには、ケイパビリティを 1 つ選び、各グループの権限セットに付与してください。サーバーが強制します：それ以外の人にはリストにこのビューが表示されず、直接開いても拒否されます。"
       },
       object: {
         label: "オブジェクト"
@@ -1876,8 +1876,8 @@ export const jaJPMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         description: "ウィジェット全体に適用する既定およびグローバルフィルター。"
       },
       access: {
-        label: "Access",
-        description: "Who can see this dashboard."
+        label: "アクセス",
+        description: "このダッシュボードを見られる人。"
       },
       advanced: {
         label: "詳細",
@@ -2061,8 +2061,8 @@ export const jaJPMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         label: "対象ウィジェット"
       },
       requiredPermissions: {
-        label: "Required Permissions",
-        helpText: "Who sees this dashboard: the capabilities a person must hold, every one listed. Permission sets grant capabilities, and a position passes on the ones its permission sets grant. Leave it empty and everyone sees this dashboard. To show it to several groups, pick one capability and grant it to each group's permission set. The server enforces it: anyone else does not find the dashboard in the list and is refused if they open it directly."
+        label: "必要な権限",
+        helpText: "このダッシュボードを見られる人：閲覧者が保持する必要のあるケイパビリティで、列挙したものはすべて必要です。ケイパビリティは権限セットが付与し、ポジションはその権限セットが付与するものを引き継ぎます。空にすると、全員がこのダッシュボードを見られます。複数のグループに見せるには、ケイパビリティを 1 つ選び、各グループの権限セットに付与してください。サーバーが強制します：それ以外の人にはリストにこのダッシュボードが表示されず、直接開いても拒否されます。"
       }
     }
   },

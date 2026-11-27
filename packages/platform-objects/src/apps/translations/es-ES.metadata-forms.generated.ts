@@ -1660,8 +1660,8 @@ export const esESMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         helpText: "Usuario que bloqueó la configuración de la vista"
       },
       requiredPermissions: {
-        label: "Required Permissions",
-        helpText: "Who sees this view: the capabilities a person must hold, every one listed. Permission sets grant capabilities, and a position passes on the ones its permission sets grant. Leave it empty and everyone who can see the list sees this view. To show it to several groups, pick one capability and grant it to each group's permission set. The server enforces it: anyone else does not find the view in the list and is refused if they open it directly."
+        label: "Permisos requeridos",
+        helpText: "Quién ve esta vista: las capacidades que una persona debe tener, todas las indicadas. Los conjuntos de permisos otorgan capacidades, y un puesto transmite las que otorgan sus conjuntos de permisos. Si se deja vacío, todos los que pueden ver la lista ven esta vista. Para mostrarla a varios grupos, elija una capacidad y otórguela al conjunto de permisos de cada grupo. El servidor lo aplica: los demás no encuentran la vista en la lista y se les deniega si la abren directamente."
       },
       object: {
         label: "Objeto"
@@ -1876,8 +1876,8 @@ export const esESMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         description: "Filtros predeterminados y globales aplicados a todos los widgets."
       },
       access: {
-        label: "Access",
-        description: "Who can see this dashboard."
+        label: "Acceso",
+        description: "Quién puede ver este panel."
       },
       advanced: {
         label: "Avanzado",
@@ -2061,8 +2061,8 @@ export const esESMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         label: "Widgets de destino"
       },
       requiredPermissions: {
-        label: "Required Permissions",
-        helpText: "Who sees this dashboard: the capabilities a person must hold, every one listed. Permission sets grant capabilities, and a position passes on the ones its permission sets grant. Leave it empty and everyone sees this dashboard. To show it to several groups, pick one capability and grant it to each group's permission set. The server enforces it: anyone else does not find the dashboard in the list and is refused if they open it directly."
+        label: "Permisos requeridos",
+        helpText: "Quién ve este panel: las capacidades que una persona debe tener, todas las indicadas. Los conjuntos de permisos otorgan capacidades, y un puesto transmite las que otorgan sus conjuntos de permisos. Si se deja vacío, todos ven este panel. Para mostrarlo a varios grupos, elija una capacidad y otórguela al conjunto de permisos de cada grupo. El servidor lo aplica: los demás no encuentran el panel en la lista y se les deniega si lo abren directamente."
       }
     }
   },

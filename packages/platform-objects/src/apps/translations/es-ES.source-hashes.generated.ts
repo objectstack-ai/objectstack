@@ -18,12 +18,6 @@
  */
 
 export const esESGeneratedSourceHashes: Readonly<Record<string, string>> = {
-  "metadataForms.dashboard.fields.requiredPermissions.helpText": "4fd3e8c053ed9142",
-  "metadataForms.dashboard.fields.requiredPermissions.label": "a47b2168b71f5e68",
-  "metadataForms.dashboard.sections.access.description": "fea0fbc00761c87f",
-  "metadataForms.dashboard.sections.access.label": "5a06534d8d136ba3",
-  "metadataForms.view.fields.requiredPermissions.helpText": "147215c88f9ed7ca",
-  "metadataForms.view.fields.requiredPermissions.label": "a47b2168b71f5e68",
   "objects.sys_email.fields.cc_addresses.label": "02946d952cf15623",
   "objects.sys_email.fields.error.label": "786fed84bd8d5a32",
   "objects.sys_email.fields.message_id.label": "14cd089a4062f4b1",
