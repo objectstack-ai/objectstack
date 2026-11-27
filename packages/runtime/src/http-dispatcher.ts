@@ -65,7 +65,7 @@ import { createAiDomain, handleAIRequest } from './domains/ai.js';
 import { createActionsDomain, handleActionsRequest } from './domains/actions.js';
 import { dispatchActionRequest, type ActionDispatchAnswer, type ActionDispatchRequest, type ActionResumeRequest } from './action-dispatch.js';
 import { createMcpDomains, handleMcpRequest, handleMcpSkillRequest, buildMcpBridge, resumeActionRunRequest } from './domains/mcp.js';
-import { inProcessAuthoringRegistryRequest, type InProcessAuthoringRegistry, type InProcessAuthoringRequest } from './domains/in-process-authoring.js';
+import { inProcessAuthoringRegistryRequest, type InProcessAuthoringRegistry, type InProcessAuthoringRequest } from './in-process-authoring.js';
 import { createMetaDomain, handleMetadataRequest } from './domains/meta.js';
 import { createDataDomain, handleDataRequest } from './domains/data.js';
 
@@ -2962,7 +2962,7 @@ export class HttpDispatcher {
     /**
      * [#37944] A host's in-process authoring entry over this dispatcher's deps —
      * the MCP draft door's five tools as the signed-in person
-     * (`./domains/in-process-authoring.ts#createInProcessAuthoringRegistry`,
+     * (`./in-process-authoring.ts#createInProcessAuthoringRegistry`,
      * the published entry), placed as {@link dispatchHostAction} places its call.
      */
     async hostAuthoringRegistry(request: InProcessAuthoringRequest): Promise<InProcessAuthoringRegistry> {

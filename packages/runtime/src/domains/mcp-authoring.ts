@@ -150,7 +150,7 @@
  *
  * [#37944] A host's own AI assistant that runs in the server process (an
  * in-app ask turn) calls the same five tools through
- * `createInProcessAuthoringRegistry` (`./in-process-authoring.ts`, exported by
+ * `createInProcessAuthoringRegistry` (`../in-process-authoring.ts`, exported by
  * the package). It is built by this module's {@link buildOpenAuthoringRegistry}
  * over a request the dispatcher placed, so the read gates, the writer and the
  * verdicts are these; there is no token, so its admission is the human half
@@ -455,7 +455,7 @@ export type OpenAuthoringReadGateSources = (protocol: OpenAuthoringProtocol) => 
  * (`McpAuthoringToolContext` in `@objectstack/mcp`), named structurally as
  * this package names every MCP shape: it takes no dependency on that package.
  * `in_process` is the context `createInProcessAuthoringRegistry` stamps on its
- * own calls (`./in-process-authoring.ts`); the registry reads only
+ * own calls (`../in-process-authoring.ts`); the registry reads only
  * `principal.userId`.
  */
 export interface OpenAuthoringCallContext {
@@ -540,7 +540,7 @@ export type OpenAuthoringSurface = Extract<MetadataAuthoringSurface, 'mcp' | 'co
  * registry over that verdict, with the read gates and the writer built for
  * that human. The MCP door ({@link resolveOpenAuthoringInjection}) passes its
  * `/mcp` request and `surface: 'mcp'`; the in-process entry
- * (`./in-process-authoring.ts`) passes the request the dispatcher's own
+ * (`../in-process-authoring.ts`) passes the request the dispatcher's own
  * placement step placed for it and `surface: 'copilot'`. So both read the same
  * services, the same way, and one implementation answers both.
  */

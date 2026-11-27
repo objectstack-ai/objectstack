@@ -272,8 +272,8 @@ export type { ActionResumeRequest } from './action-dispatch.js';
 // AI assistant, as the signed-in person: one implementation with the MCP
 // door, admitted on the person's own `manage_metadata`, saves stamped
 // `surface: 'copilot'`, no publish tool.
-export { createInProcessAuthoringRegistry } from './domains/in-process-authoring.js';
-export type { InProcessAuthoringRequest, InProcessAuthoringRegistry } from './domains/in-process-authoring.js';
+export { createInProcessAuthoringRegistry } from './in-process-authoring.js';
+export type { InProcessAuthoringRequest, InProcessAuthoringRegistry } from './in-process-authoring.js';
 export type { OpenAuthoringToolCall, OpenAuthoringToolResult } from './domains/mcp-authoring.js';
 // ADR-0076 D11 step ③ — thin domain-handler registry seam; owning service
 // packages register normalized handlers via HttpDispatcher.registerDomainHandler.

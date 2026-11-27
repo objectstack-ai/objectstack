@@ -1321,7 +1321,7 @@ const hostDispatchers = new WeakMap<object, HttpDispatcher>();
 /**
  * The one dispatcher a host's in-process doors run on for `kernel`, from the
  * map {@link dispatchAction} and {@link dispatchActionResume} fill: the
- * in-process authoring entry (`./domains/in-process-authoring.ts`) runs on the
+ * in-process authoring entry (`./in-process-authoring.ts`) runs on the
  * same dispatcher, and so on the same placement, as a host's action call.
  */
 export function hostDispatcherFor(kernel: ObjectKernel): HttpDispatcher {

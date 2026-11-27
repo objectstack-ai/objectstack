@@ -58,7 +58,7 @@ import {
   type OpenAuthoringProtocol,
   type OpenAuthoringReadGateSources,
 } from './mcp-authoring.js';
-import { createInProcessAuthoringRegistry } from './in-process-authoring.js';
+import { createInProcessAuthoringRegistry } from '../in-process-authoring.js';
 import { resolveExecutionContext } from '../security/resolve-execution-context.js';
 import { bindCatalogFromTables } from '../security/security-catalog.testkit.js';
 

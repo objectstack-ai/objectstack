@@ -2,7 +2,7 @@
 
 /**
  * The in-process entry to the light authoring door: the five tools the MCP
- * draft door serves (`./mcp-authoring.ts`), with the same contract, read
+ * draft door serves (`./domains/mcp-authoring.ts`), with the same contract, read
  * gates and verdicts, for an AI assistant that runs in the server process and
  * acts as the signed-in person (a host's in-app ask turn). It is built by the
  * MCP door's own assembly (`buildOpenAuthoringRegistry`) over a request placed
@@ -40,16 +40,16 @@
 import type { ObjectKernel } from '@objectstack/core';
 import type { ExecutionContext } from '@objectstack/spec/kernel';
 import type { AIToolDefinition } from '@objectstack/spec/contracts';
-import { hostDispatcherFor, type PlaceRequestInEnvironment } from '../action-dispatch.js';
-import type { HttpProtocolContext } from '../http-dispatcher.js';
-import type { DomainHandlerDeps } from '../domain-handler-registry.js';
+import { hostDispatcherFor, type PlaceRequestInEnvironment } from './action-dispatch.js';
+import type { HttpProtocolContext } from './http-dispatcher.js';
+import type { DomainHandlerDeps } from './domain-handler-registry.js';
 import {
     buildOpenAuthoringRegistry,
     createOpenAuthoringRegistry,
     type OpenAuthoringRegistry,
     type OpenAuthoringToolCall,
     type OpenAuthoringToolResult,
-} from './mcp-authoring.js';
+} from './domains/mcp-authoring.js';
 
 /** What a host hands {@link createInProcessAuthoringRegistry} for one person's turn. */
 export interface InProcessAuthoringRequest {
