@@ -443,7 +443,10 @@ export const CEILINGS = new Map([
   // Modify All cast no field vote). 27230 -> 27225 bytes; the row follows the measurement down.
   // 6800 -> 6799 (card #37304): the `supportKb` example's two renamed keys add
   // two bytes and its comment gives back six; the row follows the measurement down.
-  ['skills/objectstack-ai/SKILL.md', 6799], //          -18 (was 6824), then -5 A2′ (was 6806)
+  // 6799 -> 6617: the section that taught an authored AI button on a record
+  // page is replaced by one sentence (ADR-0160 D6, "Entry point": the shell's
+  // entry is the only one); the row follows the measurement down.
+  ['skills/objectstack-ai/SKILL.md', 6617], //          -18 (was 6824), then -5 A2′ (was 6806)
   // -12 (was 6331): the `http.server` decision-table row dropped a trailing
   // clause that taught `contributes.routes` as a key that "parses but serves
   // nothing". The key is retired — an authored entry is now REFUSED, carrying
