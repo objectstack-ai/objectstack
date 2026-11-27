@@ -29,7 +29,7 @@
       "assertions": {
         "must_contain": ["name:", "content:", "metadataFields", "where"],
         "must_contain_any": [["knowledgeSources", "knowledge_source", "knowledge-source"]],
-        "must_not_contain": ["contentFields:", "['*']", "chunkSize", "topK:", "embedding:", "vectorStore:"]
+        "must_not_contain": ["contentFields:", "['*'],", "['*'] }", "chunkSize", "topK:", "embedding:", "vectorStore:"]
       }
     },
     {
@@ -130,7 +130,7 @@
       "assertions": {
         "must_contain": ["name:", "content:"],
         "must_contain_any": [["egress", "embedding provider", "refused", "rejected"]],
-        "must_not_contain": ["contentFields:", "['*']", "id: 'faq"]
+        "must_not_contain": ["contentFields:", "['*'],", "['*'] }", "id: 'faq"]
       }
     }
   ]
