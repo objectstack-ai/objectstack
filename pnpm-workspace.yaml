@@ -323,7 +323,19 @@ overrides:
   react-dom: 19.3.0
   '@types/react': 19.3.0
   '@types/react-dom': 19.3.0
-  'minimatch@<11.0.0': '^10.2.3'
+  # minimatch, one floor per line a holder declares. GHSA-3ppc-4f35-3m26,
+  # GHSA-7r86-cg39-jmmj and GHSA-23c5-xmqv-rm74 are fixed in 3.1.4, 5.1.8 and
+  # 10.2.3; GHSA-g3hv-75wg-m249 affects 7.0.0 up to 11.0.1 and nothing below,
+  # so a 3.x or 5.x holder is safe on its own major and only a lift into 10.x
+  # exposes it. glob 7.2.3 (^3.1.1) and readdir-glob 1.1.3 (^5.1.0), both
+  # under exceljs's archiver 5 and unzipper 0.10, therefore stay on their own
+  # majors. Everything from 6.0.0 still collapses onto 10.x, which today is
+  # only @microsoft/api-extractor's exact 10.2.3 (an optional peer of tsup and
+  # unplugin-dts that no build here enables); that holder is what the
+  # osv-scanner.toml exemption for GHSA-g3hv-75wg-m249 still covers.
+  'minimatch@<4.0.0': '^3.1.4'
+  'minimatch@>=4.0.0 <6.0.0': '^5.1.8'
+  'minimatch@>=6.0.0 <11.0.0': '^10.2.3'
   'tar@>=2.0.0 <8.0.0': '^7.5.11'
   'form-data@<5.0.0': '>=4.0.6'
   'undici@>=7.23.0 <8.0.0': '^7.30.1'
