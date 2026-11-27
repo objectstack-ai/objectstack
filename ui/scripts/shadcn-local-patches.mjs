@@ -1053,6 +1053,54 @@ const badgeWeightPatches = [
 ];
 
 /**
+ * objectstack#37761 — a long unbroken token keeps an alert dialog inside
+ * `max-w-lg`.
+ *
+ * The record delete confirm puts the record's title in `AlertDialogTitle`.
+ * Upstream's content is a grid with one `auto` track and its title and
+ * description carry no wrap rule, so a token wider than the dialog (a pasted
+ * URL, a file name, a hash) set the track's width: the dialog grew past the
+ * viewport and the right-aligned Cancel / confirm buttons went off-screen.
+ * The content's grid items may shrink below their min-content width, and the
+ * title and description break such a token (`overflow-wrap: anywhere`, which,
+ * unlike `break-word`, lowers the min-content width). Every `find` was written
+ * from `alert-dialog.registry.txt`.
+ *
+ * @type {LocalPatch[]}
+ */
+const alertDialogLongTokenPatches = [
+  {
+    id: 'alert-dialog-content-items-shrink',
+    issue: 'objectstack#37761',
+    reason:
+      'The content grid lets each item shrink below its min-content width (`[&>*]:min-w-0`), ' +
+      'so one long unbroken token cannot widen the track past `max-w-lg`.',
+    find: 'z-50 grid w-full max-w-lg translate-x-[-50%]',
+    replace: 'z-50 grid w-full max-w-lg [&>*]:min-w-0 translate-x-[-50%]',
+    marker: 'max-w-lg [&>*]:min-w-0',
+    occurrences: 1,
+  },
+  {
+    id: 'alert-dialog-title-wrap-anywhere',
+    issue: 'objectstack#37761',
+    reason: 'The title breaks a token wider than the dialog instead of overflowing it.',
+    find: 'className={cn("text-lg font-semibold", className)}',
+    replace: 'className={cn("text-lg font-semibold [overflow-wrap:anywhere]", className)}',
+    marker: '"text-lg font-semibold [overflow-wrap:anywhere]"',
+    occurrences: 1,
+  },
+  {
+    id: 'alert-dialog-description-wrap-anywhere',
+    issue: 'objectstack#37761',
+    reason: 'The description breaks a token wider than the dialog instead of overflowing it.',
+    find: 'className={cn("text-sm text-muted-foreground", className)}',
+    replace: 'className={cn("text-sm text-muted-foreground [overflow-wrap:anywhere]", className)}',
+    marker: '"text-sm text-muted-foreground [overflow-wrap:anywhere]"',
+    occurrences: 1,
+  },
+];
+
+/**
  * Component name (as tracked in `shadcn-components.json`) → patches it needs.
  *
  * @type {Record<string, LocalPatch[]>}
@@ -1064,10 +1112,13 @@ export const LOCAL_PATCHES = {
     ...phoneCloseTouchTargetPatches('Dialog'),
     ...dialogSurfacePatches('Dialog', 'import { X } from "lucide-react"'),
   ],
-  'alert-dialog': dialogSurfacePatches(
-    'AlertDialog',
-    'import * as AlertDialogPrimitive from "@radix-ui/react-alert-dialog"',
-  ),
+  'alert-dialog': [
+    ...dialogSurfacePatches(
+      'AlertDialog',
+      'import * as AlertDialogPrimitive from "@radix-ui/react-alert-dialog"',
+    ),
+    ...alertDialogLongTokenPatches,
+  ],
   sidebar: [
     ...sidebarCookieNamePatches,
     ...sidebarCookieReadPatches,
