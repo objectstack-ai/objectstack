@@ -368,6 +368,23 @@ describe.skipIf(!PG_URL)('knowledge-pgvector dropSource while another process bu
     expect(await b.indexStatus(dropCtx(s))).toEqual({});
   });
 
+  it('a build with no write since the drop is refused at its completion alone, and switches nothing', async () => {
+    const a = store.adapter();
+    const schema = schemaOf(a);
+    const b = otherProcess(schema);
+    const s = source('drop_then_complete');
+    await a.upsert([doc(s, '1', 'granite quarry')], ctx(s, FP_A, 'manual'));
+    await a.beginBuild(ctx(s, FP_B));
+    await a.upsert([doc(s, '1', 'granite quarry')], ctx(s, FP_B));
+
+    await b.dropSource(dropCtx(s));
+    await expect(a.completeBuild(ctx(s, FP_B))).rejects.toMatchObject({ code: 'LOCK_CONFLICT', status: 409 });
+    expect(await heldFor(schema, s.name)).toEqual(NOTHING);
+    // The refused completion let go of the lock.
+    await b.beginBuild(ctx(s, FP_B));
+    await b.completeBuild(ctx(s, FP_B));
+  });
+
   it("a build's page whose embedding is under way when the drop commits is not written anywhere", async () => {
     const embedder = new GatedFakeEmbedder();
     const a = store.adapter({ embedder });
