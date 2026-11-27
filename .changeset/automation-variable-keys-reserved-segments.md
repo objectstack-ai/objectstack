@@ -1,11 +1,13 @@
 ---
-'@objectstack/service-automation': patch
+'@objectstack/service-automation': minor
+'@objectstack/spec': patch
+'@objectstack/runtime': patch
 ---
 
 fix(service-automation)!: automation variable keys cannot use reserved object segments, and one run's writes never change a flow's defaults
 
 Clause-②: no (narrowing)
-Metadata-protocol: none
+Metadata-protocol: narrowed
 
 <!-- adr-0087: not-required (no-migration-prescription) No schema key, accepted value, export or stored row is added, removed, renamed or re-shaped, and the spec schemas accept exactly what they accepted. What moves is what the automation engine registers and resumes: a flow naming a variable key with a reserved segment is refused at registration, and such a key in a resume signal is refused; there is nothing for a migration to rewrite and no tombstone. -->
 

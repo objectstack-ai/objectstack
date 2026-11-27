@@ -4813,7 +4813,9 @@ export async function handleAutomationRequest(deps: DomainHandlerDeps, path: str
         // resume ran and the flow failed"):
         //   PERMISSION_DENIED  → 403, the suspension is service-owned (#3801)
         //   INVALID_SIGNAL     → 400, the signal wrote the engine's `$` variable
-        //                        namespace (#3853 follow-up)
+        //                        namespace (#3853 follow-up), or named a key
+        //                        whose name or any dot-separated part of it is
+        //                        `__proto__`, `constructor` or `prototype`
         //   INVALID_SCREEN_INPUT → 400, the bag violates the suspended screen's
         //                        declared field contract — a required field the
         //                        caller was asked for is missing, or an
