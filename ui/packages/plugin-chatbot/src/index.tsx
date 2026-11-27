@@ -432,3 +432,9 @@ export type {
 // sends after 确认 / 取消; readers skip such a turn instead of showing it as
 // the person's own words.
 export { isHitlContinuation } from './hitlContinuation';
+
+// The card an AI's clarifying question is answered on: questions in,
+// `onAnswer(text)` / `onSkip()` out. The host detects the question and
+// decides when the card replaces the composer.
+export { QuestionCard } from './QuestionCard';
+export type { QuestionCardProps, QuestionCardQuestion, QuestionCardOption } from './QuestionCard';

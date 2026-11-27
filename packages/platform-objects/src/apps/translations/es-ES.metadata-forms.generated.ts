@@ -1661,7 +1661,7 @@ export const esESMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       },
       requiredPermissions: {
         label: "Permisos requeridos",
-        helpText: "Quién ve esta vista: las capacidades que una persona debe tener, todas las indicadas. Los conjuntos de permisos otorgan capacidades, y un puesto transmite las que otorgan sus conjuntos de permisos. Si se deja vacío, todos los que pueden ver la lista ven esta vista. Para mostrarla a varios grupos, elija una capacidad y otórguela al conjunto de permisos de cada grupo. El servidor lo aplica: los demás no encuentran la vista en la lista y se les deniega si la abren directamente. Esto también se aplica a usted: si indica una capacidad que no tiene, o la escribe mal, usted tampoco podrá volver a abrir esta vista."
+        helpText: "Quién ve esta vista: las capacidades que una persona debe tener, todas las indicadas. Los conjuntos de permisos otorgan capacidades, y un puesto transmite las que otorgan sus conjuntos de permisos. Si se deja vacío, todos los que pueden ver la lista ven esta vista. Para mostrarla a varios grupos, elija una capacidad y otórguela al conjunto de permisos de cada grupo. El servidor lo aplica: los demás no encuentran la vista en la lista y se les deniega si la abren directamente. Esto también se aplica a usted: si indica una capacidad que no tiene, o la escribe mal, usted tampoco verá esta vista en la lista."
       },
       object: {
         label: "Objeto"

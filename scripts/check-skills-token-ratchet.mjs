@@ -446,9 +446,11 @@ export const CEILINGS = new Map([
   // 6799 -> 6795 (#37797): LOWERED to the measurement on that PR's head merged
   // with `main`. Two retired-key rows name their replacements; one sample
   // instruction line left the skill example and over-paid by 4 tokens.
-  // 6795 -> 6787: the Ask AI example drops its `locations` line (32 bytes), so it compiles
-  // under both action location vocabularies; the row follows the measurement down.
-  ['skills/objectstack-ai/SKILL.md', 6787], //          -18 (was 6824), then -5 A2′ (was 6806)
+  // 6795 -> 6791 (#37782): the `agent.tools` row no longer teaches an aged-out migration; LOWERED to the measurement.
+  // 6791 -> 6609: the section that taught an authored AI button on a record
+  // page is replaced by one sentence (ADR-0160 D6, "Entry point": the shell's
+  // entry is the only one); the row follows the measurement down.
+  ['skills/objectstack-ai/SKILL.md', 6609], //          -18 (was 6824), then -5 A2′ (was 6806)
   // -12 (was 6331): the `http.server` decision-table row dropped a trailing
   // clause that taught `contributes.routes` as a key that "parses but serves
   // nothing". The key is retired — an authored entry is now REFUSED, carrying
@@ -2237,7 +2239,13 @@ export const CEILINGS = new Map([
   //   ceil(($(wc -c < skills/objectstack-ask/SKILL.md) - 20) / 4) == ceil(7507 / 4)
   // = 1877 (+4), the measured remainder only. Pinned AT the measurement, zero
   // headroom; no other row moves.
-  ['skills/objectstack-ask/SKILL.md', 1875], // -2 to the measurement (was 1877)
+  // 1875 -> 1873 (#34996): the step-1 rewrite (terms copied whole as the user
+  // wrote them, one worked example, the re-send sentence before a question)
+  // paid for itself inside the file and freed 9 bytes; lowered to the new
+  // measurement, shrink-only, no ruling needed. 7516 bytes less the 27-byte
+  // stamp line:
+  //   ceil(($(wc -c < skills/objectstack-ask/SKILL.md) - 27) / 4) == ceil(7489 / 4)
+  ['skills/objectstack-ask/SKILL.md', 1873], // -2 to the measurement (was 1875)
 
   // ── the objectstack-mcp-build skill joins the catalog — ruling #34691 S3 = A ──
   // (decision record: comment 6943107981 on #34691, "one copy of the shape

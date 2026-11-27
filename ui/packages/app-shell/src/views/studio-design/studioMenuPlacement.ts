@@ -21,7 +21,17 @@
  *
  * A type with no row here is drawn in `advanced`, at the end of its group. It
  * is never invisible: `buildStudioMenu` (`studioMenuModel.ts`) applies that
- * rule when it reads this list (objectstack#37201).
+ * rule when it reads this list (objectstack#37201). The one exception is a
+ * type the menu draws no row for ({@link STUDIO_MENU_NO_ROW_TYPES}).
+ *
+ * ## Types that draw no row
+ *
+ * `datasource` is a listable type the menu draws no row for, in any scope
+ * (ADR-0084, amended 2026-11-26, decision 12; objectstack#37920): a connection
+ * is configuration bound to an environment, managed in Setup → Integrations
+ * alone. The type stays registered `system`; like `field`, which the
+ * directory already hides, it is a type that draws no row, so this list holds
+ * no row for it either.
  *
  * ## Placements by name
  *
@@ -42,8 +52,8 @@
  *
  * Three pins hold this list, all in `studioMenuPlacement.test.ts`:
  *  - the registry: against `DEFAULT_METADATA_TYPE_REGISTRY`, every type the
- *    directory can list has exactly one row, and every row names a
- *    registered, listable type;
+ *    directory can list has exactly one row unless the menu draws no row for
+ *    it, and every row names a registered, listable type;
  *  - the ruled order: the rows, in order, with their tiers, as literals
  *    (ruling on #37192, and the placements by name of 2026-11-26), so a
  *    reordered or re-tiered row fails there;
@@ -101,7 +111,6 @@ export const STUDIO_MENU_PLACEMENT: readonly StudioMenuPlacementRow[] = Object.f
   { type: 'email_template', tier: 'advanced' },
   { type: 'translation', tier: 'advanced' },
   { type: 'api', tier: 'advanced' },
-  { type: 'datasource', tier: 'advanced' },
   { type: 'external_catalog', tier: 'advanced' },
   // 高级 — security (访问)
   { type: 'assignment_rule', tier: 'advanced' },
@@ -112,3 +121,10 @@ export const STUDIO_MENU_PLACEMENT: readonly StudioMenuPlacementRow[] = Object.f
   { type: 'ai_context', tier: 'advanced' },
   { type: 'knowledge_source', tier: 'advanced' },
 ] as const satisfies readonly StudioMenuPlacementRow[]);
+
+/**
+ * Listable types the menu draws no row for, in any scope (ADR-0084, amended
+ * 2026-11-26, decision 12; objectstack#37920). Each has no row in
+ * {@link STUDIO_MENU_PLACEMENT}; `buildStudioMenu` drops it.
+ */
+export const STUDIO_MENU_NO_ROW_TYPES: ReadonlySet<string> = new Set(['datasource']);

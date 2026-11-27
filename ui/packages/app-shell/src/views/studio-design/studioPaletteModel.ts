@@ -53,8 +53,8 @@ export interface StudioPaletteGroup {
 
 /**
  * The types a package's palette reads no item of: a datasource is Setup's
- * runtime configuration (ADR-0146 D1), so the menu's entry for it already
- * leaves Studio and its items have no Studio page.
+ * runtime configuration (ADR-0146 D1), so the menu draws no row for it
+ * (objectstack#37920) and its items have no Studio page.
  */
 export const STUDIO_PALETTE_ITEMLESS_TYPES: ReadonlySet<string> = new Set(['datasource']);
 

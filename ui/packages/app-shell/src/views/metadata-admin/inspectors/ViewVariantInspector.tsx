@@ -43,6 +43,8 @@ import { IssuePrefixLines, issuesUnderPrefix, useIssuePrefixRegister, useSliceFo
 import { useObjectFields, type ObjectFieldInfo } from '../previews/useObjectFields.js';
 import { failed, loaded, type LoadState } from '../loadState.js';
 import type { ObjectFieldOption, WidgetContext } from '../widgets.js';
+import { useMetadataClient } from '../useMetadata.js';
+import { useCapabilityAudienceLoader } from '../useCapabilityAudienceLoader.js';
 
 /**
  * Object picker for the view's binding — a searchable dropdown over the live
@@ -417,6 +419,17 @@ export function ViewVariantInspector({
     [isFormFamily, serverVariantSchema, locale],
   );
 
+  // objectstack#34908 — the audience row (`requiredPermissions`) is the
+  // `ref-multi:capability` picker: it offers the capabilities the environment
+  // knows and previews the positions the picked set reaches. The picker reads
+  // the three registries through this loader once it is on screen.
+  const metadataClient = useMetadataClient();
+  const loadCapabilityAudience = useCapabilityAudienceLoader(metadataClient);
+  const formWidgetContext = React.useMemo<WidgetContext>(
+    () => ({ ...widgetContext, loadCapabilityAudience }),
+    [widgetContext, loadCapabilityAudience],
+  );
+
   /** Shallow-write a curated patch onto the variant. */
   const writeVariant = (patch: Record<string, unknown>) => {
     onPatch({ [variantKey]: { ...variant, ...patch } });
@@ -572,7 +585,7 @@ export function ViewVariantInspector({
             value={variant}
             hiddenFields={['type', 'object', 'label']}
             readOnly={readOnly}
-            widgetContext={widgetContext}
+            widgetContext={formWidgetContext}
             issues={variantIssues}
             revealIssues={revealIssues}
             onInlineIssueFieldsChange={setFormIssueRows}

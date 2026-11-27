@@ -1178,7 +1178,11 @@ no terminal run record exists either, skipping (never condemning) any row whose
 store could not be read. It deliberately **does not rewrite** them — the decision
 really happened, and rolling it back automatically would put the audit trail at
 odds with the facts — so it names the stuck requests, their step, and the stale
-mirrored status for an operator to act on.
+mirrored status for an operator to act on. Each sweep reads the 500 most
+recently decided requests, so a new strand is named on the next sweep, plus
+the next 500 of a walk over every decided request by id that resumes where the
+previous sweep stopped, so an older one is named within one pass of the walk
+however many decided requests a deployment holds.
 </Callout>
 
 ### Progress and notification deep links

@@ -268,8 +268,8 @@ const board: ListView = {
     groupByField: 'status',                // a select field
     lanes: ['todo', 'in_progress', 'review'],
     summary: { type: 'sum', field: 'estimate_hours' },  // each lane's foot statistic
-    showFieldLabels: false,                // default true: cards name each field
-    hideEmptyFields: false,                // default true: cards drop an empty field
+    showFieldLabels: false,                // optional, default true: cards name each field
+    hideEmptyFields: false,                // optional, default true: cards drop an empty field
     columns: ['title', 'owner_id', 'priority'],   // fields shown on each card
   },
   sort: [{ field: 'priority', order: 'desc' }],
@@ -281,11 +281,10 @@ const board: ListView = {
 > off the board. Omit it to draw every option in its own order; a value that is
 > not one of the field's inline options, or listed twice, fails `os validate`.
 
-> `summary.type`: `none`, `count`, or `sum` / `avg` / `min` / `max` of a `field`,
-> computed by the query over every record of the lane, not only the loaded
-> cards. Known gap: over a lookup field or in a grouped view, `sum` covers one
-> fetched page and the other three show nothing. `summary` overrides the older
-> sum-only `summarizeField`.
+> `summary`, `showFieldLabels` and `hideEmptyFields` are optional. `summary.type`:
+> `none`, `count`, or `sum` / `avg` / `min` / `max` of a `field`, computed by the
+> query over every record of the lane, lanes over a lookup field included. Omit
+> `summary` to keep the older `summarizeField`'s sum, or no statistic without it.
 
 ### Adding a board, calendar, gallery or gantt beside the list
 

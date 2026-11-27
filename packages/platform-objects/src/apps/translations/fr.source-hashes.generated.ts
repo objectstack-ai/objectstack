@@ -164,7 +164,7 @@ export const frGeneratedSourceHashes: Readonly<Record<string, string>> = {
   "metadataForms.view.fields.navigation.label": "51cd9fc784a9643f",
   "metadataForms.view.fields.navigation.mode.label": "74dde5013435abdc",
   "metadataForms.view.fields.pagination.label": "309131fbaca258df",
-  "metadataForms.view.fields.requiredPermissions.helpText": "c4599be2ffa06c02",
+  "metadataForms.view.fields.requiredPermissions.helpText": "824ea3479e2e607a",
   "metadataForms.view.fields.requiredPermissions.label": "a47b2168b71f5e68",
   "metadataForms.view.fields.selection.type.label": "901bb552898b2cab",
   "metadataForms.view.fields.type.label": "901bb552898b2cab",

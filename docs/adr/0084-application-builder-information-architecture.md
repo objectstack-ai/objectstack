@@ -193,8 +193,8 @@ Every type the spec registers, enumerated at `origin/main` `151e8123` from `pack
 | **平台 Platform** | `system` | 3 | `email_template` 邮件模板 | 高级 |
 | **平台 Platform** | `system` | 4 | `translation` | 高级 |
 | **平台 Platform** | `system` | 5 | `api` | 高级 |
-| **平台 Platform** | `system` | 6 | `datasource` | 高级 |
-| **平台 Platform** | `system` | 7 | `external_catalog` | 高级 |
+| **平台 Platform** | `system` | 6 | `external_catalog` | 高级 |
+| **平台 Platform** | `system` | — | `datasource` | — |
 | **访问 Access** | `security` | 1 | `permission` 权限集 | 常用 |
 | **访问 Access** | `security` | 2 | `position` 岗位 | 常用 |
 | **访问 Access** | `security` | 3 | `assignment_rule` 分配规则 | 高级 |
@@ -210,6 +210,8 @@ Every type the spec registers, enumerated at `origin/main` `151e8123` from `pack
 *(Amended 2026-11-25: the table is redrawn one row per type and gains two columns, **Order** and **Tier** — [Amendment (2026-11-25)](#amendment-2026-11-25). Read again at `origin/main` `a33691e567`: 33 entries — the 32 of the first reading, each in the domain it had, and `ai_context`, registered `ai` on 2026-11-25 ([ADR-0160](./0160-record-scoped-ai-inquiry.md) D1). No type changed group, and the rows count 数据 Data 7 · 界面 UI 7 · 自动化 Automation 2 · 平台 Platform 7 · 访问 Access 6 · AI 4.)*
 
 *(Rewritten 2026-11-26, card [#37564](https://github.com/objectstack-ai/objectstack/issues/37564), which carries out [Amendment (2026-11-26)](#amendment-2026-11-26-moves) for two rows and decides nothing: `dataset` and `position`. `dataset` is registered `data` by the same change, so its row leaves 界面 UI, where it was seventh, for 数据 Data, where it is second, directly after `object`; each 数据 Data type behind it is one place later, and its tier is 常用. `position` keeps its place, and its tier is 常用. The registry holds the same 33 entries, and the rows now count 数据 Data 8 · 界面 UI 6 · 自动化 Automation 2 · 平台 Platform 7 · 访问 Access 6 · AI 4. The `datasource` row is not touched and `form` has no row yet: each is rewritten, or written, by the change that moves it.)*
+
+*(Rewritten 2026-11-27, card [#37920](https://github.com/objectstack-ai/objectstack/issues/37920), which carries out [Amendment (2026-11-26)](#amendment-2026-11-26-moves) for one row and decides nothing: `datasource`. The menu draws no row for it by the same change, so its row is written as `field`'s is — no order, no tier, last in its group — and `external_catalog`, the one type that was behind it, is one place earlier, sixth. The type stays registered `system` and keeps its row in this table, so 平台 Platform still counts 7: six rows with an order, and this one.)*
 
 The rows are in the menu's order: by group, then by **Order**, which counts inside a group. **Tier** is 常用 Common or 高级 Advanced. The Chinese word beside a registered name is the one the ruling or its proposal uses for that type; a type neither names in Chinese has none. `field` carries no order and no tier because it draws no row (the second reading below).
 

@@ -122,6 +122,29 @@ import type { PlatformLocaleTag } from '@objectstack/spec/system';
  * ask in one breath asks, which is what a question that named its number
  * got until this section.
  *
+ * ## A word that is not the user's own is sent again, not asked about
+ *
+ * [#34996] The candidate finder offers a member for any word that contains or
+ * is contained in one of its names, so a word the client cut out of the
+ * user's phrase ("claims" out of "number of claims") or put in its own words
+ * comes back with a measure among its candidates, and the question the note
+ * then orders is about a word the user never wrote. Whose word it is, only
+ * the client can tell. So before either question about such a word
+ * (`candidateTail`, `leftCandidateTail`) the note carries ONE sentence
+ * (`ownPhraseFirst`): a word cut out of a longer phrase of the question, or
+ * reworded, is not asked about, and `list_datasets` is called once more with
+ * the phrase as the user wrote it, never the whole question. The answer to
+ * that second call is composed like any other: this file cannot know a call
+ * is a re-send, so a phrase that still has a measure among its candidates is
+ * asked about, and one that matches nothing and has no candidate takes the
+ * labelled fallback (D3 rule 4), as it would have had the client sent it
+ * first. The question that follows is conditioned
+ * on the word being the user's own, for the reason the section above gives: a
+ * reader told to re-send and to ask in one breath asks. Nothing about the
+ * answer changes: `matches`, `candidates`, `decision` and `terms` are what
+ * they were, and a measure candidate for the user's own word is still asked,
+ * never selected (D3).
+ *
  * ## An incomplete catalogue
  *
  * A `partial: true` answer still carries `nextStep`, computed from what it
@@ -167,6 +190,14 @@ interface DatasetToolCopy {
   readonly severalTail: string;
   readonly candidateHit: (term: string, members: string) => string;
   readonly candidateTail: string;
+  /**
+   * Before either question about a word with a measure among its candidates
+   * (`candidateTail`, `leftCandidateTail`): a word the client cut out of a
+   * longer phrase of the question, or reworded, is sent again as the user
+   * wrote it instead of being asked about. Whose word it is, is the client's
+   * to judge; this file cannot.
+   */
+  readonly ownPhraseFirst: string;
   /** A word with no match whose candidates are all dimensions: offered as a possible grouping. */
   readonly groupingCandidateHit: (term: string, members: string) => string;
   /** After the possible groupings: not a question, and no stop for a matched measure. */
@@ -201,7 +232,8 @@ const COPY: Readonly<Record<NextStepLocale, DatasetToolCopy>> = {
     severalHit: (t, ms) => `"${t}" equals several measures: ${ms}.`,
     severalTail: 'Ask the user which one they mean, listing each one\'s label, dataset label and description; do not pick one, and compute nothing until they answer.',
     candidateHit: (t, ms) => `"${t}" matches no member exactly; possible readings: ${ms}.`,
-    candidateTail: 'Ask the user which one they mean, listing each one\'s label, dataset label and description (with a single reading, ask whether it is the one meant); do not pick one, never treat a reading as a match, and compute nothing until they answer.',
+    candidateTail: 'For a word that is the user\'s own, ask the user which one they mean, listing each one\'s label, dataset label and description (with a single reading, ask whether it is the one meant); do not pick one, never treat a reading as a match, and compute nothing until they answer.',
+    ownPhraseFirst: 'First check each such word against the question: a word you cut out of a longer phrase the user wrote, or reworded, is not asked about; call list_datasets once more with that phrase exactly as written, never the whole question.',
     groupingCandidateHit: (t, ms) => `"${t}" matches no member exactly; it may name a grouping: ${ms}.`,
     groupingCandidateTail: 'A possible grouping is not a question: do not ask the user about it, and it does not stop a matched measure; group the answer only as the question asks.',
     groupingHit: (t, ms) => `"${t}" equals a grouping, not a number: ${ms}.`,
@@ -210,7 +242,7 @@ const COPY: Readonly<Record<NextStepLocale, DatasetToolCopy>> = {
     groupingTail: 'A grouping alone is no answer: ask the user which number they mean.',
     noNumberTail: 'Only when the question has no word for a thing measured, ask the user which number they mean instead.',
     partialTail: 'The catalogue was incomplete (see warning): a measure missing from this answer may still exist, so repeat the warning in the answer.',
-    leftCandidateTail: 'For each word above with possible readings, ask the user which one is meant before using it; do not pick one.',
+    leftCandidateTail: 'For each word above with possible readings that is the user\'s own, ask the user which one is meant before using it; do not pick one.',
     leftFallbackTail: 'For those words, use the object query tools (query_records, aggregate_records) and say in the answer that no governed metric was used for them.',
     source: (ms, ds, dims) => `${ms.length === 1 ? 'Metric' : 'Metrics'}: ${ms.join(', ')} (dataset: ${ds})${dims.length > 0 ? `; grouped by: ${dims.join(', ')}` : ''}`,
   },
@@ -225,7 +257,8 @@ const COPY: Readonly<Record<NextStepLocale, DatasetToolCopy>> = {
     severalHit: (t, ms) => `「${t}」等于多个指标：${ms}。`,
     severalTail: '先问用户指的是哪一个，列出每一个的名称、所属数据集名称和说明；不要替用户选，用户回答前不要计算。',
     candidateHit: (t, ms) => `「${t}」没有精确匹配任何成员，可能指的是：${ms}。`,
-    candidateTail: '先问用户指的是哪一个，列出每一个的名称、所属数据集名称和说明（只有一个时，问是不是它）；不要替用户选，也不要把它当作匹配，用户回答前不要计算。',
+    candidateTail: '如果这个词就是用户的原话，先问用户指的是哪一个，列出每一个的名称、所属数据集名称和说明（只有一个时，问是不是它）；不要替用户选，也不要把它当作匹配，用户回答前不要计算。',
+    ownPhraseFirst: '先逐个对照用户的问题：如果某个词是你从用户写的更长词组里截出来的，或是你改写过的，就不要就它提问，改用用户原话里的完整词组（不是整句问题）再调用一次 list_datasets。',
     groupingCandidateHit: (t, ms) => `「${t}」没有精确匹配任何成员，可能指分组维度：${ms}。`,
     groupingCandidateTail: '可能的分组维度不需要追问：不要就它问用户，它也不妨碍计算已匹配的指标；只按问题本身的要求分组。',
     groupingHit: (t, ms) => `「${t}」是分组维度，不是数字：${ms}。`,
@@ -234,7 +267,7 @@ const COPY: Readonly<Record<NextStepLocale, DatasetToolCopy>> = {
     groupingTail: '只有分组维度还不能回答：问用户想看哪个数字。',
     noNumberTail: '只有当问题本身没有说要看哪个数字时，才改为问用户想看哪个数字。',
     partialTail: '数据集目录不完整（见 warning）：这里没有列出的指标仍可能存在，请在回答中转述该警告。',
-    leftCandidateTail: '上面有候选的词，先问用户指的是哪一个再使用；不要替用户选。',
+    leftCandidateTail: '上面有候选的词，如果就是用户的原话，先问用户指的是哪一个再使用；不要替用户选。',
     leftFallbackTail: '这些词改用对象查询工具（query_records、aggregate_records），并在回答中注明它们未使用治理指标（非指标口径）。',
     source: (ms, ds, dims) => `指标：${ms.join('、')}（数据集：${ds}）${dims.length > 0 ? `；维度：${dims.join('、')}` : ''}`,
   },
@@ -249,7 +282,8 @@ const COPY: Readonly<Record<NextStepLocale, DatasetToolCopy>> = {
     severalHit: (t, ms) => `「${t}」等於多個指標：${ms}。`,
     severalTail: '先問使用者指的是哪一個，列出每一個的名稱、所屬資料集名稱和說明；不要替使用者選，使用者回答前不要計算。',
     candidateHit: (t, ms) => `「${t}」沒有精確符合任何成員，可能指的是：${ms}。`,
-    candidateTail: '先問使用者指的是哪一個，列出每一個的名稱、所屬資料集名稱和說明（只有一個時，問是不是它）；不要替使用者選，也不要把它當作符合，使用者回答前不要計算。',
+    candidateTail: '如果這個詞就是使用者的原話，先問使用者指的是哪一個，列出每一個的名稱、所屬資料集名稱和說明（只有一個時，問是不是它）；不要替使用者選，也不要把它當作符合，使用者回答前不要計算。',
+    ownPhraseFirst: '先逐一對照使用者的問題：如果某個詞是你從使用者寫的更長詞組裡截出來的，或是你改寫過的，就不要就它提問，改用使用者原話裡的完整詞組（不是整句問題）再呼叫一次 list_datasets。',
     groupingCandidateHit: (t, ms) => `「${t}」沒有精確符合任何成員，可能指分組維度：${ms}。`,
     groupingCandidateTail: '可能的分組維度不需要追問：不要就它問使用者，它也不妨礙計算已符合的指標；只按問題本身的要求分組。',
     groupingHit: (t, ms) => `「${t}」是分組維度，不是數字：${ms}。`,
@@ -258,7 +292,7 @@ const COPY: Readonly<Record<NextStepLocale, DatasetToolCopy>> = {
     groupingTail: '只有分組維度還不能回答：問使用者想看哪個數字。',
     noNumberTail: '只有當問題本身沒有說要看哪個數字時，才改為問使用者想看哪個數字。',
     partialTail: '資料集目錄不完整（見 warning）：這裡沒有列出的指標仍可能存在，請在回答中轉述該警告。',
-    leftCandidateTail: '上面有候選的詞，先問使用者指的是哪一個再使用；不要替使用者選。',
+    leftCandidateTail: '上面有候選的詞，如果就是使用者的原話，先問使用者指的是哪一個再使用；不要替使用者選。',
     leftFallbackTail: '這些詞改用物件查詢工具（query_records、aggregate_records），並在回答中註明它們未使用治理指標（非指標口徑）。',
     source: (ms, ds, dims) => `指標：${ms.join('、')}（資料集：${ds}）${dims.length > 0 ? `；維度：${dims.join('、')}` : ''}`,
   },
@@ -273,7 +307,8 @@ const COPY: Readonly<Record<NextStepLocale, DatasetToolCopy>> = {
     severalHit: (t, ms) => `「${t}」は複数の指標に一致します：${ms}。`,
     severalTail: 'どれを指しているかユーザーに確認し、それぞれの名前、データセット名、説明を示してください。代わりに選ばず、回答があるまで計算しないでください。',
     candidateHit: (t, ms) => `「${t}」はどのメンバーにも完全には一致しません。候補：${ms}。`,
-    candidateTail: 'どれを指しているかユーザーに確認し、それぞれの名前、データセット名、説明を示してください（候補が一つなら、それで合っているか確認してください）。代わりに選ばず、候補を一致として扱わず、回答があるまで計算しないでください。',
+    candidateTail: 'ユーザー自身が書いた語については、どれを指しているかユーザーに確認し、それぞれの名前、データセット名、説明を示してください（候補が一つなら、それで合っているか確認してください）。代わりに選ばず、候補を一致として扱わず、回答があるまで計算しないでください。',
+    ownPhraseFirst: 'まず各語を質問と照らし合わせてください。ユーザーが書いたより長い語句から切り出した語や、言い換えた語については確認せず、ユーザーが書いたとおりの語句（質問文全体ではなく）でもう一度だけ list_datasets を呼び出してください。',
     groupingCandidateHit: (t, ms) => `「${t}」はどのメンバーにも完全には一致しません。グループ分けの候補：${ms}。`,
     groupingCandidateTail: 'グループ分けの候補は確認の対象ではありません。ユーザーに確認せず、一致した指標の計算も止めないでください。グループ分けは質問が求めるとおりにしてください。',
     groupingHit: (t, ms) => `「${t}」は数値ではなくグループ分けです：${ms}。`,
@@ -282,7 +317,7 @@ const COPY: Readonly<Record<NextStepLocale, DatasetToolCopy>> = {
     groupingTail: 'グループ分けだけでは回答になりません：どの数値を知りたいかユーザーに確認してください。',
     noNumberTail: '質問そのものがどの数値も指していない場合に限り、代わりにどの数値を知りたいかユーザーに確認してください。',
     partialTail: 'データセットのカタログは不完全です（warning を参照）：ここにない指標が存在する可能性があるため、回答でその警告を伝えてください。',
-    leftCandidateTail: '候補のある上記の語は、使う前にどれを指しているかユーザーに確認してください。代わりに選ばないでください。',
+    leftCandidateTail: '候補のある上記の語がユーザー自身の書いた語であれば、使う前にどれを指しているかユーザーに確認してください。代わりに選ばないでください。',
     leftFallbackTail: 'これらの語にはオブジェクトのクエリツール（query_records、aggregate_records）を使い、管理された指標を使っていないことを回答に明記してください。',
     source: (ms, ds, dims) => `指標：${ms.join('、')}（データセット：${ds}）${dims.length > 0 ? `；ディメンション：${dims.join('、')}` : ''}`,
   },
@@ -424,7 +459,7 @@ function leftOutSentences(
   const leftOut = readings.filter((r) => r.decision === 'candidates_only' && r.decision !== decision);
   const asked = leftOut.filter((r) => !r.groupingOnly);
   for (const r of asked) sentences.push(copy.candidateHit(r.term, members(r.candidates)));
-  if (asked.length > 0) sentences.push(copy.leftCandidateTail);
+  if (asked.length > 0) sentences.push(copy.ownPhraseFirst, copy.leftCandidateTail);
   sentences.push(...groupingCandidateSentences(leftOut, copy, members));
   const unknown = readings.filter(fallsBack);
   for (const r of unknown) sentences.push(copy.unknownHit(r.term));
@@ -488,7 +523,7 @@ export function composeDatasetNextStep(source: DatasetNextStepSource): DatasetNe
       const asked = reported.filter((r) => !r.groupingOnly);
       const beside = readings.some(fallsBack);
       for (const r of asked) sentences.push(copy.candidateHit(r.term, members(r.candidates)));
-      if (asked.length > 0) sentences.push(copy.candidateTail);
+      if (asked.length > 0) sentences.push(copy.ownPhraseFirst, copy.candidateTail);
       sentences.push(...groupingCandidateSentences(reported, copy, members));
       if (asked.length === 0 && !beside) sentences.push(copy.groupingTail);
       sentences.push(...leftOutSentences(decision, readings, copy, members));
