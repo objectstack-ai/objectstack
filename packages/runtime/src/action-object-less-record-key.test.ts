@@ -107,7 +107,7 @@ function makeRig() {
     /** Data reads of a routed row (the subject load and the selection read). */
     const rowReads = () => ql.find.mock.calls.filter(([object]: [string]) => object === NOTE || object === TICKET).length;
 
-    return { kernel, dispatcher, metadata, ql, executeAction, rowReads };
+    return { kernel, dispatcher, metadata, ql, audit, executeAction, rowReads };
 }
 
 type Rig = ReturnType<typeof makeRig>;
@@ -154,7 +154,7 @@ async function viaDoor(rig: Rig, door: Door, call: Call): Promise<Answer> {
     }
     const request: any = { request: {}, environmentId: 'platform', executionContext: MEMBER_EC };
     const deps: any = {
-        resolveService: async (_ctx: any, name: string) => (name === 'audit' ? rig.kernel.getService('audit') : undefined),
+        resolveService: async (_ctx: any, name: string) => (name === 'audit' ? rig.audit : undefined),
         getObjectQL: async () => rig.ql,
     };
     try {
