@@ -245,12 +245,12 @@ describe('validateKnowledgeSource on the runtime publish door', () => {
   });
 
   it('the door passes the whole-collection reading when no package scope is stated', () => {
-    const verdict = runRuntimeAuthoringRules({
-      type: 'knowledge_source',
-      item: kbSource({ object: 'faq_entry', content: ['answer'], metadataFields: [] }),
-      context: { objects, manifest: { id: 'app.kb', dependencies: { 'com.acme.faq': '^1.0.0' } } },
-    });
-    expect(verdict.errors.map((f) => [f.rule, f.severity])).toEqual([[KNOWLEDGE_SOURCE_OBJECT_UNKNOWN, 'error']]);
+    const item = kbSource({ object: 'faq_entry', content: ['answer'], metadataFields: [] });
+    // An empty served collection is no universe at the door: no object verdict is drawn from it.
+    expect(runRuntimeAuthoringRules({ type: 'knowledge_source', item, context: { objects: [] } }).errors).toEqual([]);
+    // Non-vacuous: a served collection that lacks the object refuses it.
+    expect(runRuntimeAuthoringRules({ type: 'knowledge_source', item, context: { objects } }).errors
+      .map((f) => [f.rule, f.severity])).toEqual([[KNOWLEDGE_SOURCE_OBJECT_UNKNOWN, 'error']]);
   });
 
   it('an empty whole collection at the door is no universe, and judges no object', () => {
