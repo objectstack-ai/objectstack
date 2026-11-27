@@ -2253,6 +2253,8 @@ const de = {
       // ui ADR-0057 Amendment A4 — the app's AI inquiry page: its static scope badge.
       askPage: {
         scopeBadge: "Diese App zuerst",
+        recentTitle: "Letzte Unterhaltungen",
+        recentEmpty: "Fragen, die Sie hier stellen, erscheinen hier.",
       },
       renameConversation: "Unterhaltung umbenennen",
       deleteConversation: "Unterhaltung löschen",
@@ -4550,6 +4552,18 @@ const de = {
     },
     recordCitations: {
       title: 'Zitiert aus Datensätzen',
+    },
+    questionCard: {
+      aiAsks: 'KI fragt:',
+      progress: 'Frage {{current}} von {{total}}',
+      typeYourOwn: 'Etwas anderes eingeben…',
+      recommended: 'Empfohlen',
+      skip: 'Überspringen',
+      back: 'Zurück',
+      next: 'Weiter',
+      send: 'Senden',
+      pending: 'Eine Frage wartet auf Ihre Antwort',
+      answerLine: '{{header}}: {{answer}}',
     },
     tool: {
       aggregate_data: "Die Daten zusammenfassen",

@@ -2253,6 +2253,8 @@ const ko = {
       // ui ADR-0057 Amendment A4 — the app's AI inquiry page: its static scope badge.
       askPage: {
         scopeBadge: "이 앱 우선",
+        recentTitle: "최근 대화",
+        recentEmpty: "여기서 한 질문이 여기에 표시됩니다.",
       },
       renameConversation: "대화 이름 변경",
       deleteConversation: "대화 삭제",
@@ -4549,6 +4551,18 @@ const ko = {
     },
     recordCitations: {
       title: '레코드에서 인용',
+    },
+    questionCard: {
+      aiAsks: 'AI 질문:',
+      progress: '질문 {{current}}/{{total}}',
+      typeYourOwn: '직접 입력…',
+      recommended: '추천',
+      skip: '건너뛰기',
+      back: '이전',
+      next: '다음',
+      send: '보내기',
+      pending: '답변을 기다리는 질문이 있습니다',
+      answerLine: '{{header}}: {{answer}}',
     },
     tool: {
       aggregate_data: "관련 데이터 집계하기",

@@ -2255,6 +2255,8 @@ const ja = {
       // ui ADR-0057 Amendment A4 — the app's AI inquiry page: its static scope badge.
       askPage: {
         scopeBadge: "このアプリを優先",
+        recentTitle: "最近の会話",
+        recentEmpty: "ここでした質問がここに表示されます。",
       },
       renameConversation: "会話の名前を変更",
       deleteConversation: "会話を削除",
@@ -4552,6 +4554,18 @@ const ja = {
     },
     recordCitations: {
       title: 'レコードからの引用',
+    },
+    questionCard: {
+      aiAsks: 'AI からの質問：',
+      progress: '質問 {{current}}/{{total}}',
+      typeYourOwn: 'その他（自分で入力）…',
+      recommended: 'おすすめ',
+      skip: 'スキップ',
+      back: '前へ',
+      next: '次へ',
+      send: '送信',
+      pending: '回答待ちの質問があります',
+      answerLine: '{{header}}：{{answer}}',
     },
     tool: {
       aggregate_data: "関連データを集計する",

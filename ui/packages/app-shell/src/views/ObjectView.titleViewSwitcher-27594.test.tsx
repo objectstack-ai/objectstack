@@ -166,9 +166,16 @@ function openSwitcher() {
   return screen.getByTestId('list-view-switcher-menu');
 }
 
-/** The list's footer once its load settled: it says how many records the view holds. */
+/**
+ * The list's footer count once its load settled: it says how many records the
+ * view holds. A grid draws it in its resident footer row
+ * (`data-table-summary-lead`, objectstack#35702) and the record-count bar then
+ * not at all; any other view draws it in the bar.
+ */
+const FOOTER_COUNT = '[data-testid="data-table-summary-lead"], [data-testid="record-count-bar"]';
+const footerCountElement = () => document.querySelector<HTMLElement>(FOOTER_COUNT);
 const footerCount = () =>
-  waitFor(() => expect(screen.getByTestId('record-count-bar')).toHaveTextContent('1 record'), { timeout: 5000 });
+  waitFor(() => expect(footerCountElement()).toHaveTextContent('1 record'), { timeout: 5000 });
 
 /** The ids of the rows in the dropdown's All section, in order. */
 const allRowIds = () =>
@@ -308,7 +315,7 @@ describe('objectstack#27594 — the list title is the view switcher', () => {
     // phone as it was).
     await footerCount();
     expect(screen.getByTestId('list-view-switcher-count')).toHaveClass('max-sm:hidden');
-    expect(screen.getByTestId('list-toolbar-leading').contains(screen.getByTestId('record-count-bar'))).toBe(false);
+    expect(screen.getByTestId('list-toolbar-leading').contains(footerCountElement())).toBe(false);
     expect(screen.queryByTestId('view-tab-bar')).toBeNull();
     expect(screen.queryByTestId('view-tab-row')).toBeNull();
 

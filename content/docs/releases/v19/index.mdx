@@ -270,9 +270,13 @@ all in this list.
 
 ### 自动迁移 — listed for you by `os migrate meta` [#migrated-for-you]
 
-Each carries a registered ADR-0087 entry. `protocol-18-range-refused` sits
-on the protocol-19 step; the other 30 landed after 18.6.0 on the protocol-18
-step, which `os migrate meta --from 18` does not replay and `--from 17` does.
+Each carries a registered ADR-0087 entry. In `19.0.0-next.0` two sit on the
+protocol-19 step, `protocol-18-range-refused` and
+`data-table-staged-edit-retired`
+([#37437](https://github.com/objectstack-ai/objectstack/pull/37437)); a later
+prerelease may add more, and `os migrate meta` lists them. The other 39 landed
+after 18.6.0 on the protocol-18 step, which `os migrate meta --from 18` does
+not replay and `--from 17` does.
 
 #### Seeds
 
@@ -389,8 +393,8 @@ Reach 18.6.0 first, walking each 18.x page's upgrade checklist, through the
    literal to rewrite, so there the command writes nothing and lists the range;
    change it by hand in each package manifest.
 3. **List the line's registered entries.** `os migrate meta --from 17` also
-   replays the protocol-18 step, where 30 of the
-   [31 registered entries](#migrated-for-you) sit. Most are semantic entries:
+   replays the protocol-18 step, where 39 of the
+   [41 registered entries](#migrated-for-you) sit. Most are semantic entries:
    for those the command rewrites nothing, and prints each with the surface,
    the replacement and how to tell it is done.
 4. **Run the build, and fix what it refuses.**

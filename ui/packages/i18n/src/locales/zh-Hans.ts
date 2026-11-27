@@ -2598,6 +2598,8 @@ const zh = {
       // ui ADR-0057 Amendment A4 — the app's AI inquiry page: its static scope badge.
       askPage: {
         scopeBadge: '本应用优先',
+        recentTitle: '最近的对话',
+        recentEmpty: '在这里提的问题会显示在这里。',
       },
       renameConversation: '重命名对话',
       deleteConversation: '删除对话',
@@ -4804,6 +4806,18 @@ const zh = {
     },
     recordCitations: {
       title: '引自记录',
+    },
+    questionCard: {
+      aiAsks: 'AI 问：',
+      progress: '第 {{current}}/{{total}} 题',
+      typeYourOwn: '自己输入…',
+      recommended: '推荐',
+      skip: '跳过',
+      back: '上一题',
+      next: '下一题',
+      send: '发送',
+      pending: '有一个问题待回答',
+      answerLine: '{{header}}：{{answer}}',
     },
     tool: {
       aggregate_data: '汇总相关数据',

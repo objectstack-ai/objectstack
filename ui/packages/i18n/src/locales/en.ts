@@ -3069,6 +3069,8 @@ const en = {
       // ui ADR-0057 Amendment A4 — the app's AI inquiry page: its static scope badge.
       askPage: {
         scopeBadge: 'Answers prefer this app',
+        recentTitle: 'Recent conversations',
+        recentEmpty: 'Questions you ask here will appear here.',
       },
       renameConversation: 'Rename conversation',
       deleteConversation: 'Delete conversation',
@@ -5485,6 +5487,19 @@ const en = {
     },
     recordCitations: {
       title: 'Cited from records',
+    },
+    // The question card the AI asks a clarifying question on, in the composer's place.
+    questionCard: {
+      aiAsks: 'AI asks:',
+      progress: 'Question {{current}} of {{total}}',
+      typeYourOwn: 'Type something else…',
+      recommended: 'Recommended',
+      skip: 'Skip',
+      back: 'Back',
+      next: 'Next',
+      send: 'Send',
+      pending: 'A question is waiting for your answer',
+      answerLine: '{{header}}: {{answer}}',
     },
     tool: {
       aggregate_data: 'Aggregate the data',

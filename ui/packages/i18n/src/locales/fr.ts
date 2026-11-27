@@ -2313,6 +2313,8 @@ const fr = {
       // ui ADR-0057 Amendment A4 — the app's AI inquiry page: its static scope badge.
       askPage: {
         scopeBadge: "Cette application en priorité",
+        recentTitle: "Conversations récentes",
+        recentEmpty: "Les questions posées ici apparaîtront ici.",
       },
       renameConversation: "Renommer la conversation",
       deleteConversation: "Supprimer la conversation",
@@ -4640,6 +4642,18 @@ const fr = {
     },
     recordCitations: {
       title: 'Cité depuis les enregistrements',
+    },
+    questionCard: {
+      aiAsks: 'L’IA demande :',
+      progress: 'Question {{current}} sur {{total}}',
+      typeYourOwn: 'Saisir autre chose…',
+      recommended: 'Recommandé',
+      skip: 'Passer',
+      back: 'Précédent',
+      next: 'Suivant',
+      send: 'Envoyer',
+      pending: 'Une question attend votre réponse',
+      answerLine: '{{header}} : {{answer}}',
     },
     tool: {
       aggregate_data: "Synthétiser les données",

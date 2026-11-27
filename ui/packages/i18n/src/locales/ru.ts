@@ -2383,6 +2383,8 @@ const ru = {
       // ui ADR-0057 Amendment A4 — the app's AI inquiry page: its static scope badge.
       askPage: {
         scopeBadge: "Сначала это приложение",
+        recentTitle: "Недавние разговоры",
+        recentEmpty: "Вопросы, заданные здесь, появятся здесь.",
       },
       renameConversation: "Переименовать диалог",
       deleteConversation: "Удалить диалог",
@@ -4747,6 +4749,18 @@ const ru = {
     },
     recordCitations: {
       title: 'Цитаты из записей',
+    },
+    questionCard: {
+      aiAsks: 'ИИ спрашивает:',
+      progress: 'Вопрос {{current}} из {{total}}',
+      typeYourOwn: 'Ввести свой вариант…',
+      recommended: 'Рекомендуется',
+      skip: 'Пропустить',
+      back: 'Назад',
+      next: 'Далее',
+      send: 'Отправить',
+      pending: 'Вопрос ждёт вашего ответа',
+      answerLine: '{{header}}: {{answer}}',
     },
     tool: {
       aggregate_data: "Агрегировать данные",

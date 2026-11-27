@@ -10,7 +10,7 @@
  * (objectstack#35425, which reversed the narrowing to the app's own locale
  * list). A language the app's own content is not translated into stays
  * selectable and carries one muted line saying that content shows in the
- * default language; the provider's `appContentLanguages` says which those are,
+ * default language; `useAppContentLanguages()` says which those are,
  * and a page that does not know (signed out) marks none. This file owns the
  * *labels* and that hint, because the native
  * names are the one piece of that no API response supplies:
@@ -34,7 +34,7 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from '@object-ui/components';
-import { resolveBuiltInLanguage, useObjectTranslation } from '@object-ui/i18n';
+import { resolveBuiltInLanguage, useAppContentLanguages, useObjectTranslation } from '@object-ui/i18n';
 import { PLATFORM_LOCALES } from '@objectstack/spec/system';
 import { confirmUnsavedLeave } from '../chrome/unsavedEdits.js';
 import { useLanguageSelection } from '../hooks/useUserLocale.js';
@@ -82,7 +82,8 @@ export function localeLabel(code: string): string {
 }
 
 export function LocaleSwitcher() {
-  const { t, language, offerableLanguages, appContentLanguages } = useObjectTranslation();
+  const { t, language, offerableLanguages } = useObjectTranslation();
+  const appContentLanguages = useAppContentLanguages();
   // ⛔ Not the i18n context's bare `changeLanguage`: while signed in the switch
   // has to reach `sys_user.locale`, or the globe and the profile page go on
   // naming two settings (objectui#10059). Signed out it IS the bare switch.

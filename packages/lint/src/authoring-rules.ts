@@ -122,6 +122,7 @@ import { validateJsxPages } from './validate-jsx-pages.js';
 import { validateReactPages } from './validate-react-pages.js';
 import { validatePageSourceStyling } from './validate-page-source-styling.js';
 import { validateCapabilityReferences } from './validate-capability-references.js';
+import { validateBookAudienceClaims } from './validate-book-audience-claims.js';
 import {
   validateFlowApiTriggerSecret,
   validateFlowSubflowTargets,
@@ -1638,6 +1639,22 @@ export const AUTHORING_RULES: readonly AuthoringRule[] = [
       + 'graduates from advisory to gating there rather than merely being ported. That promotion is a '
       + 'severity change on a published rule id and belongs in its own PR, not riding a wiring change.',
     run: (stack) => validateCapabilityReferences(stack),
+  },
+  // ADR-0046 §6.7 — a gated book claims its pages by name. `include: '*'` on a
+  // book with a `{ permissionSet }` / `{ systemPermission }` audience also
+  // claims every doc bound to no package (in every package scope) and hides it
+  // from every reader outside the audience. Decidable from the book alone, so it
+  // gates, and it judges the written book at the runtime door too: a Studio,
+  // REST `/meta` or MCP author of a book is the same author.
+  {
+    name: 'validateBookAudienceClaims',
+    tier: 'gating',
+    input: 'parsed',
+    commands: ALL,
+    source: 'packages/lint/src/validate-book-audience-claims.ts',
+    surfaces: CLI_AND_RUNTIME,
+    runtimeTypes: ['book'],
+    run: (stack) => validateBookAudienceClaims(stack),
   },
   // A flow that LOOKS armed and never launches — silently. Reads the pre-parse
   // tier so an author sees what they wrote.

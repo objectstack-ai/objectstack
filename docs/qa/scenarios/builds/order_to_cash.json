@@ -1,0 +1,5341 @@
+{
+  "manifest": {
+    "id": "com.example.demoorder",
+    "namespace": "demoorder",
+    "defaultDatasource": "default",
+    "version": "0.1.0",
+    "type": "app",
+    "scope": "project",
+    "name": "Demoorder",
+    "engines": {
+      "protocol": "^19"
+    }
+  },
+  "objects": [
+    {
+      "name": "demoorder_account",
+      "label": "Account",
+      "pluralLabel": "Accounts",
+      "description": "A customer account owned by one sales rep.",
+      "icon": "building-2",
+      "color": "blue",
+      "isSystem": false,
+      "datasource": "default",
+      "fields": {
+        "name": {
+          "label": "Account Name",
+          "type": "text",
+          "required": true,
+          "searchable": true,
+          "multiple": false,
+          "unique": false,
+          "maxLength": 200,
+          "hidden": false,
+          "readonly": false,
+          "sortable": true,
+          "externalId": false
+        },
+        "industry": {
+          "label": "Industry",
+          "type": "select",
+          "required": false,
+          "searchable": false,
+          "multiple": false,
+          "unique": false,
+          "options": [
+            {
+              "label": "Retail",
+              "value": "retail"
+            },
+            {
+              "label": "Logistics",
+              "value": "logistics"
+            },
+            {
+              "label": "Healthcare",
+              "value": "healthcare"
+            },
+            {
+              "label": "Hospitality",
+              "value": "hospitality"
+            },
+            {
+              "label": "Food Service",
+              "value": "food_service"
+            },
+            {
+              "label": "Education",
+              "value": "education"
+            },
+            {
+              "label": "Manufacturing",
+              "value": "manufacturing"
+            },
+            {
+              "label": "Telecom",
+              "value": "telecom"
+            },
+            {
+              "label": "Other",
+              "value": "other"
+            }
+          ],
+          "hidden": false,
+          "readonly": false,
+          "sortable": true,
+          "externalId": false
+        },
+        "billing_city": {
+          "label": "Billing City",
+          "type": "text",
+          "required": false,
+          "searchable": false,
+          "multiple": false,
+          "unique": false,
+          "maxLength": 120,
+          "hidden": false,
+          "readonly": false,
+          "sortable": true,
+          "externalId": false
+        },
+        "owner": {
+          "label": "Sales Rep",
+          "type": "lookup",
+          "description": "The one sales rep who owns the account.",
+          "required": false,
+          "searchable": false,
+          "multiple": false,
+          "unique": false,
+          "reference": "demoorder_employee",
+          "deleteBehavior": "restrict",
+          "hidden": false,
+          "readonly": false,
+          "sortable": true,
+          "externalId": false
+        },
+        "payment_terms": {
+          "label": "Payment Terms",
+          "type": "select",
+          "required": true,
+          "searchable": false,
+          "multiple": false,
+          "unique": false,
+          "options": [
+            {
+              "label": "Net 30",
+              "value": "net_30",
+              "default": true
+            },
+            {
+              "label": "Net 45",
+              "value": "net_45"
+            }
+          ],
+          "hidden": false,
+          "readonly": false,
+          "sortable": true,
+          "externalId": false
+        }
+      },
+      "fieldGroups": [
+        {
+          "key": "basic",
+          "label": "Basic Information",
+          "fields": [
+            "name",
+            "owner",
+            "industry",
+            "billing_city"
+          ],
+          "collapse": "none"
+        },
+        {
+          "key": "billing",
+          "label": "Billing",
+          "fields": [
+            "payment_terms"
+          ],
+          "collapse": "none"
+        }
+      ],
+      "nameField": "name",
+      "highlightFields": [
+        "owner",
+        "payment_terms",
+        "industry",
+        "billing_city"
+      ],
+      "relatedLists": [
+        {
+          "list": "demoorder_activity",
+          "columns": [
+            "activity_date",
+            "type",
+            "subject",
+            "owner"
+          ]
+        },
+        {
+          "list": "demoorder_sales_order",
+          "columns": [
+            "name",
+            "order_date",
+            "status",
+            "total_amount"
+          ]
+        },
+        {
+          "list": "demoorder_invoice",
+          "columns": [
+            "name",
+            "due_date",
+            "amount",
+            "balance",
+            "status"
+          ]
+        }
+      ],
+      "sharingModel": "public_read_write"
+    },
+    {
+      "name": "demoorder_activity",
+      "label": "Activity",
+      "pluralLabel": "Activities",
+      "description": "A follow-up with an account: meeting, call, email or collection call.",
+      "icon": "phone-call",
+      "color": "pink",
+      "isSystem": false,
+      "datasource": "default",
+      "fields": {
+        "subject": {
+          "label": "Subject",
+          "type": "text",
+          "required": true,
+          "searchable": true,
+          "multiple": false,
+          "unique": false,
+          "maxLength": 200,
+          "hidden": false,
+          "readonly": false,
+          "sortable": true,
+          "externalId": false
+        },
+        "account": {
+          "label": "Account",
+          "type": "lookup",
+          "required": true,
+          "searchable": false,
+          "multiple": false,
+          "unique": false,
+          "reference": "demoorder_account",
+          "deleteBehavior": "restrict",
+          "hidden": false,
+          "readonly": false,
+          "sortable": true,
+          "externalId": false
+        },
+        "invoice": {
+          "label": "Invoice",
+          "type": "lookup",
+          "required": false,
+          "searchable": false,
+          "multiple": false,
+          "unique": false,
+          "reference": "demoorder_invoice",
+          "deleteBehavior": "set_null",
+          "hidden": false,
+          "readonly": false,
+          "sortable": true,
+          "externalId": false
+        },
+        "type": {
+          "label": "Type",
+          "type": "select",
+          "required": true,
+          "searchable": false,
+          "multiple": false,
+          "unique": false,
+          "options": [
+            {
+              "label": "Meeting",
+              "value": "meeting"
+            },
+            {
+              "label": "Call",
+              "value": "call",
+              "default": true
+            },
+            {
+              "label": "Email",
+              "value": "email"
+            },
+            {
+              "label": "Collection Call",
+              "value": "collection_call"
+            }
+          ],
+          "hidden": false,
+          "readonly": false,
+          "sortable": true,
+          "externalId": false
+        },
+        "activity_date": {
+          "label": "Date",
+          "type": "date",
+          "required": true,
+          "searchable": false,
+          "multiple": false,
+          "unique": false,
+          "hidden": false,
+          "readonly": false,
+          "sortable": true,
+          "externalId": false
+        },
+        "owner": {
+          "label": "Assigned To",
+          "type": "lookup",
+          "required": false,
+          "searchable": false,
+          "multiple": false,
+          "unique": false,
+          "reference": "demoorder_employee",
+          "deleteBehavior": "set_null",
+          "hidden": false,
+          "readonly": false,
+          "sortable": true,
+          "externalId": false
+        },
+        "notes": {
+          "label": "Notes",
+          "type": "textarea",
+          "required": false,
+          "searchable": false,
+          "multiple": false,
+          "unique": false,
+          "maxLength": 4000,
+          "hidden": false,
+          "readonly": false,
+          "sortable": true,
+          "externalId": false
+        },
+        "account_owner": {
+          "label": "Account Rep",
+          "type": "lookup",
+          "required": false,
+          "searchable": false,
+          "multiple": false,
+          "unique": false,
+          "reference": "demoorder_employee",
+          "deleteBehavior": "set_null",
+          "expression": {
+            "dialect": "cel",
+            "source": "record.account.owner"
+          },
+          "hidden": false,
+          "readonly": true,
+          "sortable": true,
+          "externalId": false
+        }
+      },
+      "indexes": [
+        {
+          "fields": [
+            "account",
+            "activity_date"
+          ],
+          "unique": false
+        }
+      ],
+      "fieldGroups": [
+        {
+          "key": "basic",
+          "label": "Activity",
+          "fields": [
+            "subject",
+            "type",
+            "activity_date",
+            "account",
+            "invoice",
+            "owner",
+            "account_owner"
+          ],
+          "collapse": "none"
+        },
+        {
+          "key": "more",
+          "label": "Notes",
+          "fields": [
+            "notes"
+          ],
+          "collapse": "none"
+        }
+      ],
+      "nameField": "subject",
+      "highlightFields": [
+        "account",
+        "type",
+        "activity_date",
+        "owner"
+      ],
+      "sharingModel": "public_read_write"
+    },
+    {
+      "name": "demoorder_employee",
+      "label": "Employee",
+      "pluralLabel": "Employees",
+      "description": "A person in the sales or finance organization.",
+      "icon": "user",
+      "color": "blue",
+      "isSystem": false,
+      "datasource": "default",
+      "fields": {
+        "name": {
+          "label": "Name",
+          "type": "text",
+          "required": true,
+          "searchable": true,
+          "multiple": false,
+          "unique": false,
+          "maxLength": 120,
+          "hidden": false,
+          "readonly": false,
+          "sortable": true,
+          "externalId": false
+        },
+        "job_function": {
+          "label": "Job Function",
+          "type": "select",
+          "required": true,
+          "searchable": false,
+          "multiple": false,
+          "unique": false,
+          "options": [
+            {
+              "label": "Sales Rep",
+              "value": "sales_rep",
+              "default": true
+            },
+            {
+              "label": "Sales Manager",
+              "value": "sales_manager"
+            },
+            {
+              "label": "AR Clerk",
+              "value": "ar_clerk"
+            },
+            {
+              "label": "Finance Manager",
+              "value": "finance_manager"
+            }
+          ],
+          "hidden": false,
+          "readonly": false,
+          "sortable": true,
+          "externalId": false
+        },
+        "team": {
+          "label": "Team",
+          "type": "select",
+          "required": true,
+          "searchable": false,
+          "multiple": false,
+          "unique": false,
+          "options": [
+            {
+              "label": "East",
+              "value": "east",
+              "default": true
+            },
+            {
+              "label": "West",
+              "value": "west"
+            },
+            {
+              "label": "Finance",
+              "value": "finance"
+            }
+          ],
+          "hidden": false,
+          "readonly": false,
+          "sortable": true,
+          "externalId": false
+        },
+        "manager": {
+          "label": "Manager",
+          "type": "lookup",
+          "required": false,
+          "searchable": false,
+          "multiple": false,
+          "unique": false,
+          "reference": "demoorder_employee",
+          "deleteBehavior": "set_null",
+          "hidden": false,
+          "readonly": false,
+          "sortable": true,
+          "externalId": false
+        },
+        "user": {
+          "label": "Sign-in User",
+          "type": "user",
+          "required": false,
+          "searchable": false,
+          "multiple": false,
+          "unique": false,
+          "reference": "sys_user",
+          "hidden": false,
+          "readonly": false,
+          "sortable": true,
+          "externalId": false
+        },
+        "manager_user": {
+          "label": "Manager Sign-in",
+          "type": "user",
+          "required": false,
+          "searchable": false,
+          "multiple": false,
+          "unique": false,
+          "reference": "sys_user",
+          "expression": {
+            "dialect": "cel",
+            "source": "record.manager.?user.orValue(null)"
+          },
+          "hidden": false,
+          "readonly": true,
+          "sortable": true,
+          "externalId": false
+        }
+      },
+      "fieldGroups": [
+        {
+          "key": "basic",
+          "label": "Basic Information",
+          "fields": [
+            "name",
+            "job_function",
+            "team",
+            "manager"
+          ],
+          "collapse": "none"
+        },
+        {
+          "key": "access",
+          "label": "Sign-in",
+          "fields": [
+            "user",
+            "manager_user"
+          ],
+          "collapse": "none"
+        }
+      ],
+      "nameField": "name",
+      "highlightFields": [
+        "job_function",
+        "team",
+        "manager"
+      ],
+      "sharingModel": "public_read",
+      "membershipKeys": {
+        "my_employee_ids": {
+          "userField": "user",
+          "valueField": "id"
+        },
+        "team_employee_ids": {
+          "userField": "manager_user",
+          "valueField": "id"
+        }
+      }
+    },
+    {
+      "name": "demoorder_invoice",
+      "label": "Invoice",
+      "pluralLabel": "Invoices",
+      "description": "The invoice for a fulfilled sales order, and what is still owed on it.",
+      "icon": "receipt",
+      "color": "green",
+      "isSystem": false,
+      "datasource": "default",
+      "fields": {
+        "name": {
+          "label": "Invoice Number",
+          "type": "autonumber",
+          "format": "INV-{YYYY}-{0000}",
+          "required": false,
+          "searchable": false,
+          "multiple": false,
+          "unique": "organization",
+          "hidden": false,
+          "readonly": true,
+          "sortable": true,
+          "externalId": false
+        },
+        "order": {
+          "label": "Sales Order",
+          "type": "lookup",
+          "required": true,
+          "searchable": false,
+          "multiple": false,
+          "unique": false,
+          "reference": "demoorder_sales_order",
+          "deleteBehavior": "restrict",
+          "lookupFilters": [
+            {
+              "field": "status",
+              "operator": "eq",
+              "value": "fulfilled"
+            }
+          ],
+          "hidden": false,
+          "readonly": false,
+          "sortable": true,
+          "externalId": false
+        },
+        "account": {
+          "label": "Account",
+          "type": "lookup",
+          "required": true,
+          "searchable": false,
+          "multiple": false,
+          "unique": false,
+          "reference": "demoorder_account",
+          "deleteBehavior": "restrict",
+          "expression": {
+            "dialect": "cel",
+            "source": "record.order.account"
+          },
+          "hidden": false,
+          "readonly": true,
+          "sortable": true,
+          "externalId": false
+        },
+        "account_owner": {
+          "label": "Account Rep",
+          "type": "lookup",
+          "required": false,
+          "searchable": false,
+          "multiple": false,
+          "unique": false,
+          "reference": "demoorder_employee",
+          "deleteBehavior": "set_null",
+          "expression": {
+            "dialect": "cel",
+            "source": "record.account.owner"
+          },
+          "hidden": false,
+          "readonly": true,
+          "sortable": true,
+          "externalId": false
+        },
+        "invoice_date": {
+          "label": "Invoice Date",
+          "type": "date",
+          "required": true,
+          "searchable": false,
+          "multiple": false,
+          "unique": false,
+          "hidden": false,
+          "readonly": false,
+          "sortable": true,
+          "externalId": false
+        },
+        "due_date": {
+          "label": "Due Date",
+          "type": "date",
+          "required": false,
+          "searchable": false,
+          "multiple": false,
+          "unique": false,
+          "expression": {
+            "dialect": "cel",
+            "source": "isoDate(addDays(date(record.invoice_date), record.account.payment_terms == 'net_45' ? 45 : 30))"
+          },
+          "hidden": false,
+          "readonly": true,
+          "sortable": true,
+          "externalId": false
+        },
+        "amount": {
+          "label": "Amount",
+          "type": "currency",
+          "required": false,
+          "searchable": false,
+          "multiple": false,
+          "unique": false,
+          "expression": {
+            "dialect": "cel",
+            "source": "record.order.total_amount"
+          },
+          "hidden": false,
+          "readonly": true,
+          "sortable": true,
+          "externalId": false
+        },
+        "amount_paid": {
+          "label": "Amount Paid",
+          "type": "summary",
+          "required": false,
+          "searchable": false,
+          "multiple": false,
+          "unique": false,
+          "summaryOperations": {
+            "object": "demoorder_payment",
+            "field": "amount",
+            "function": "sum"
+          },
+          "hidden": false,
+          "readonly": false,
+          "sortable": true,
+          "externalId": false
+        },
+        "write_off_amount": {
+          "label": "Written Off",
+          "type": "currency",
+          "required": false,
+          "searchable": false,
+          "multiple": false,
+          "unique": false,
+          "min": 0,
+          "hidden": false,
+          "readonly": false,
+          "sortable": true,
+          "externalId": false
+        },
+        "written_off_on": {
+          "label": "Written Off On",
+          "type": "date",
+          "required": false,
+          "searchable": false,
+          "multiple": false,
+          "unique": false,
+          "hidden": false,
+          "readonly": false,
+          "sortable": true,
+          "externalId": false
+        },
+        "balance": {
+          "label": "Balance",
+          "type": "currency",
+          "required": false,
+          "searchable": false,
+          "multiple": false,
+          "unique": false,
+          "expression": {
+            "dialect": "cel",
+            "source": "double(coalesce(record.?amount.orValue(null), 0)) - double(coalesce(record.?amount_paid.orValue(null), 0)) - double(coalesce(record.?write_off_amount.orValue(null), 0))"
+          },
+          "hidden": false,
+          "readonly": true,
+          "sortable": true,
+          "externalId": false
+        },
+        "status": {
+          "label": "Status",
+          "type": "select",
+          "required": false,
+          "searchable": false,
+          "multiple": false,
+          "unique": false,
+          "options": [
+            {
+              "label": "Open",
+              "value": "open",
+              "color": "#3B82F6"
+            },
+            {
+              "label": "Partially Paid",
+              "value": "partially_paid",
+              "color": "#F59E0B"
+            },
+            {
+              "label": "Paid",
+              "value": "paid",
+              "color": "#10B981"
+            },
+            {
+              "label": "Written Off",
+              "value": "written_off",
+              "color": "#6B7280"
+            }
+          ],
+          "expression": {
+            "dialect": "cel",
+            "source": "double(coalesce(record.?write_off_amount.orValue(null), 0)) > 0.0 ? 'written_off' : (double(coalesce(record.?amount_paid.orValue(null), 0)) >= double(coalesce(record.?amount.orValue(null), 0)) ? 'paid' : (double(coalesce(record.?amount_paid.orValue(null), 0)) > 0.0 ? 'partially_paid' : 'open'))"
+          },
+          "hidden": false,
+          "readonly": true,
+          "sortable": true,
+          "externalId": false
+        },
+        "notes": {
+          "label": "Notes",
+          "type": "textarea",
+          "description": "Billing notes for the AR team.",
+          "required": false,
+          "searchable": false,
+          "multiple": false,
+          "unique": false,
+          "hidden": false,
+          "readonly": false,
+          "sortable": true,
+          "externalId": false
+        },
+        "aging_as_of": {
+          "label": "Aged As Of",
+          "type": "date",
+          "required": false,
+          "searchable": false,
+          "multiple": false,
+          "unique": false,
+          "hidden": false,
+          "readonly": true,
+          "sortable": true,
+          "externalId": false
+        },
+        "aging_bucket": {
+          "label": "Aging Bucket",
+          "type": "select",
+          "required": false,
+          "searchable": false,
+          "multiple": false,
+          "unique": false,
+          "options": [
+            {
+              "label": "Current",
+              "value": "current",
+              "color": "#10B981"
+            },
+            {
+              "label": "1-30 Days Overdue",
+              "value": "overdue_1_30",
+              "color": "#F59E0B"
+            },
+            {
+              "label": "31-60 Days Overdue",
+              "value": "overdue_31_60",
+              "color": "#F97316"
+            },
+            {
+              "label": "61-90 Days Overdue",
+              "value": "overdue_61_90",
+              "color": "#EF4444"
+            },
+            {
+              "label": "Over 90 Days Overdue",
+              "value": "overdue_over_90",
+              "color": "#991B1B"
+            }
+          ],
+          "expression": {
+            "dialect": "cel",
+            "source": "double(coalesce(record.?amount.orValue(null), 0)) - double(coalesce(record.?amount_paid.orValue(null), 0)) - double(coalesce(record.?write_off_amount.orValue(null), 0)) <= 0.0 ? null : (daysBetween(date(record.due_date), record.?aging_as_of.orValue(null) != null ? date(record.aging_as_of) : today()) <= 0 ? 'current' : (daysBetween(date(record.due_date), record.?aging_as_of.orValue(null) != null ? date(record.aging_as_of) : today()) <= 30 ? 'overdue_1_30' : (daysBetween(date(record.due_date), record.?aging_as_of.orValue(null) != null ? date(record.aging_as_of) : today()) <= 60 ? 'overdue_31_60' : (daysBetween(date(record.due_date), record.?aging_as_of.orValue(null) != null ? date(record.aging_as_of) : today()) <= 90 ? 'overdue_61_90' : 'overdue_over_90'))))"
+          },
+          "hidden": false,
+          "readonly": true,
+          "sortable": true,
+          "externalId": false
+        }
+      },
+      "indexes": [
+        {
+          "fields": [
+            "order"
+          ],
+          "unique": "organization"
+        },
+        {
+          "fields": [
+            "due_date"
+          ],
+          "unique": false
+        }
+      ],
+      "fieldGroups": [
+        {
+          "key": "basic",
+          "label": "Invoice",
+          "fields": [
+            "name",
+            "order",
+            "account",
+            "account_owner",
+            "invoice_date",
+            "due_date",
+            "notes"
+          ],
+          "collapse": "none"
+        },
+        {
+          "key": "amounts",
+          "label": "Amounts",
+          "fields": [
+            "amount",
+            "amount_paid",
+            "write_off_amount",
+            "balance",
+            "status"
+          ],
+          "collapse": "none"
+        },
+        {
+          "key": "aging",
+          "label": "Aging",
+          "fields": [
+            "aging_bucket",
+            "aging_as_of",
+            "written_off_on"
+          ],
+          "collapse": "none"
+        }
+      ],
+      "validations": [
+        {
+          "name": "write_off_within_balance",
+          "active": true,
+          "events": [
+            "update"
+          ],
+          "priority": 100,
+          "severity": "error",
+          "message": "A write-off may not exceed the open balance.",
+          "type": "script",
+          "condition": {
+            "dialect": "cel",
+            "source": "double(coalesce(record.?write_off_amount.orValue(null), 0)) != double(coalesce(previous.?write_off_amount.orValue(null), 0)) && double(coalesce(record.?write_off_amount.orValue(null), 0)) > double(coalesce(record.?amount.orValue(null), 0)) - double(coalesce(record.?amount_paid.orValue(null), 0)) + 0.005"
+          }
+        },
+        {
+          "name": "write_off_not_negative",
+          "active": true,
+          "events": [
+            "insert",
+            "update"
+          ],
+          "priority": 100,
+          "severity": "error",
+          "message": "A write-off cannot be negative.",
+          "type": "script",
+          "condition": {
+            "dialect": "cel",
+            "source": "double(coalesce(record.?write_off_amount.orValue(null), 0)) < 0.0"
+          }
+        },
+        {
+          "name": "write_off_is_final",
+          "active": true,
+          "events": [
+            "update"
+          ],
+          "priority": 100,
+          "severity": "error",
+          "message": "A write-off cannot be undone.",
+          "type": "script",
+          "condition": {
+            "dialect": "cel",
+            "source": "previous != null && previous.write_off_amount != null && double(previous.write_off_amount) > 0.0 && (record.write_off_amount != previous.write_off_amount || record.written_off_on != previous.written_off_on)"
+          }
+        }
+      ],
+      "nameField": "name",
+      "highlightFields": [
+        "account",
+        "due_date",
+        "amount",
+        "balance",
+        "status",
+        "aging_bucket"
+      ],
+      "relatedLists": [
+        {
+          "list": "demoorder_payment",
+          "columns": [
+            "name",
+            "payment_date",
+            "amount",
+            "method"
+          ]
+        },
+        {
+          "list": "demoorder_activity",
+          "columns": [
+            "activity_date",
+            "type",
+            "subject",
+            "owner"
+          ]
+        }
+      ],
+      "sharingModel": "public_read_write",
+      "actions": [
+        {
+          "name": "demoorder_write_off_balance",
+          "label": "Write Off Balance",
+          "objectName": "demoorder_invoice",
+          "icon": "circle-slash",
+          "locations": [
+            "record_more"
+          ],
+          "type": "script",
+          "body": {
+            "language": "js",
+            "source": "\n      const invoices = ctx.api.object('demoorder_invoice');\n      const inv = await invoices.findOne({ where: { id: ctx.recordId } });\n      if (!inv) throw { code: 'INVOICE_NOT_FOUND' };\n      const balance = Number(inv.balance || 0);\n      if (!(inv.status === 'open' || inv.status === 'partially_paid') || !(balance > 0)) {\n        throw { code: 'NOTHING_TO_WRITE_OFF' };\n      }\n      const today = new Date().toISOString().slice(0, 10);\n      await invoices.update({ id: ctx.recordId, write_off_amount: balance, written_off_on: today });\n      return { written_off: balance };\n    ",
+            "capabilities": [
+              "api.read",
+              "api.write"
+            ],
+            "timeoutMs": 10000
+          },
+          "refusals": {
+            "INVOICE_NOT_FOUND": {
+              "message": "That invoice was not found.",
+              "status": 404
+            },
+            "NOTHING_TO_WRITE_OFF": {
+              "message": "Only an open or partially paid invoice with a balance can be written off.",
+              "status": 409
+            }
+          },
+          "variant": "danger",
+          "confirmText": {
+            "dialect": "template",
+            "source": "Write off the open balance of {{ record.name }} as bad debt? This cannot be undone."
+          },
+          "successMessage": {
+            "dialect": "template",
+            "source": "Balance written off."
+          },
+          "refreshAfter": true,
+          "visible": {
+            "dialect": "cel",
+            "source": "has(record.status) && record.status in ['open', 'partially_paid']"
+          },
+          "requiredPermissions": [
+            "demoorder.write_off"
+          ],
+          "ai": {
+            "exposed": true,
+            "description": "Write off an invoice's whole open balance as bad debt (Finance only). Irreversible: the invoice becomes written off and its balance zero. A person confirms before it runs.",
+            "requiresConfirmation": true
+          }
+        }
+      ]
+    },
+    {
+      "name": "demoorder_order_line",
+      "label": "Order Line",
+      "pluralLabel": "Order Lines",
+      "description": "A product line on a sales order.",
+      "icon": "list",
+      "color": "orange",
+      "isSystem": false,
+      "datasource": "default",
+      "fields": {
+        "name": {
+          "label": "Line",
+          "type": "text",
+          "description": "The line's product name, copied when the line is saved.",
+          "required": false,
+          "searchable": false,
+          "multiple": false,
+          "unique": false,
+          "expression": {
+            "dialect": "cel",
+            "source": "record.product.name"
+          },
+          "hidden": false,
+          "readonly": true,
+          "sortable": true,
+          "externalId": false
+        },
+        "order": {
+          "label": "Sales Order",
+          "type": "master_detail",
+          "required": true,
+          "searchable": false,
+          "multiple": false,
+          "unique": false,
+          "reference": "demoorder_sales_order",
+          "deleteBehavior": "cascade",
+          "inlineEdit": "grid",
+          "inlineTitle": "Order Lines",
+          "hidden": false,
+          "readonly": false,
+          "sortable": true,
+          "externalId": false
+        },
+        "product": {
+          "label": "Product",
+          "type": "lookup",
+          "required": true,
+          "searchable": false,
+          "multiple": false,
+          "unique": false,
+          "reference": "demoorder_product",
+          "deleteBehavior": "restrict",
+          "lookupAutofill": [
+            {
+              "target": "unit_price",
+              "source": "list_price"
+            }
+          ],
+          "hidden": false,
+          "readonly": false,
+          "sortable": true,
+          "externalId": false
+        },
+        "description": {
+          "label": "Description",
+          "type": "text",
+          "description": "What the line covers, when the product name does not say it.",
+          "required": false,
+          "searchable": false,
+          "multiple": false,
+          "unique": false,
+          "maxLength": 255,
+          "hidden": false,
+          "readonly": false,
+          "sortable": true,
+          "externalId": false
+        },
+        "quantity": {
+          "label": "Quantity",
+          "type": "number",
+          "required": true,
+          "searchable": false,
+          "multiple": false,
+          "unique": false,
+          "defaultValue": 1,
+          "min": 1,
+          "hidden": false,
+          "readonly": false,
+          "sortable": true,
+          "externalId": false
+        },
+        "unit_price": {
+          "label": "Unit Price",
+          "type": "currency",
+          "required": true,
+          "searchable": false,
+          "multiple": false,
+          "unique": false,
+          "min": 0,
+          "hidden": false,
+          "readonly": false,
+          "sortable": true,
+          "externalId": false
+        },
+        "discount_pct": {
+          "label": "Discount (%)",
+          "type": "number",
+          "required": false,
+          "searchable": false,
+          "multiple": false,
+          "unique": false,
+          "defaultValue": 0,
+          "scale": 2,
+          "min": 0,
+          "max": 30,
+          "hidden": false,
+          "readonly": false,
+          "sortable": true,
+          "externalId": false
+        },
+        "amount": {
+          "label": "Amount",
+          "type": "currency",
+          "required": false,
+          "searchable": false,
+          "multiple": false,
+          "unique": false,
+          "expression": {
+            "dialect": "cel",
+            "source": "double(record.quantity) * double(record.unit_price) * (1.0 - double(record.discount_pct) / 100.0)"
+          },
+          "hidden": false,
+          "readonly": true,
+          "sortable": true,
+          "externalId": false
+        }
+      },
+      "fieldGroups": [
+        {
+          "key": "basic",
+          "label": "Line",
+          "fields": [
+            "order",
+            "product",
+            "description",
+            "quantity",
+            "unit_price",
+            "discount_pct",
+            "amount"
+          ],
+          "collapse": "none"
+        }
+      ],
+      "validations": [
+        {
+          "name": "discount_ceiling",
+          "active": true,
+          "events": [
+            "insert",
+            "update"
+          ],
+          "priority": 100,
+          "severity": "error",
+          "message": "No discount may exceed 30%.",
+          "type": "script",
+          "condition": {
+            "dialect": "cel",
+            "source": "record.discount_pct > 30"
+          }
+        },
+        {
+          "name": "discount_not_negative",
+          "active": true,
+          "events": [
+            "insert",
+            "update"
+          ],
+          "priority": 100,
+          "severity": "error",
+          "message": "A discount cannot be negative.",
+          "type": "script",
+          "condition": {
+            "dialect": "cel",
+            "source": "record.discount_pct < 0"
+          }
+        }
+      ],
+      "highlightFields": [
+        "product",
+        "quantity",
+        "unit_price",
+        "discount_pct",
+        "amount"
+      ],
+      "sharingModel": "controlled_by_parent"
+    },
+    {
+      "name": "demoorder_payment",
+      "label": "Payment",
+      "pluralLabel": "Payments",
+      "description": "A customer payment recorded against an invoice.",
+      "icon": "banknote",
+      "color": "green",
+      "isSystem": false,
+      "datasource": "default",
+      "fields": {
+        "name": {
+          "label": "Payment Number",
+          "type": "autonumber",
+          "format": "PAY-{YYYY}-{0000}",
+          "required": false,
+          "searchable": false,
+          "multiple": false,
+          "unique": "organization",
+          "hidden": false,
+          "readonly": true,
+          "sortable": true,
+          "externalId": false
+        },
+        "invoice": {
+          "label": "Invoice",
+          "type": "lookup",
+          "required": true,
+          "searchable": false,
+          "multiple": false,
+          "unique": false,
+          "reference": "demoorder_invoice",
+          "deleteBehavior": "restrict",
+          "hidden": false,
+          "readonly": false,
+          "sortable": true,
+          "externalId": false
+        },
+        "amount": {
+          "label": "Amount",
+          "type": "currency",
+          "required": true,
+          "searchable": false,
+          "multiple": false,
+          "unique": false,
+          "hidden": false,
+          "readonly": false,
+          "sortable": true,
+          "externalId": false
+        },
+        "payment_date": {
+          "label": "Payment Date",
+          "type": "date",
+          "required": true,
+          "searchable": false,
+          "multiple": false,
+          "unique": false,
+          "hidden": false,
+          "readonly": false,
+          "sortable": true,
+          "externalId": false
+        },
+        "method": {
+          "label": "Method",
+          "type": "select",
+          "required": true,
+          "searchable": false,
+          "multiple": false,
+          "unique": false,
+          "options": [
+            {
+              "label": "ACH",
+              "value": "ach",
+              "default": true
+            },
+            {
+              "label": "Wire",
+              "value": "wire"
+            },
+            {
+              "label": "Check",
+              "value": "check"
+            },
+            {
+              "label": "Card",
+              "value": "card"
+            }
+          ],
+          "hidden": false,
+          "readonly": false,
+          "sortable": true,
+          "externalId": false
+        },
+        "bank_reference": {
+          "label": "Bank Reference",
+          "type": "text",
+          "required": false,
+          "searchable": false,
+          "multiple": false,
+          "unique": false,
+          "maxLength": 80,
+          "hidden": false,
+          "readonly": false,
+          "sortable": true,
+          "externalId": false
+        },
+        "account_owner": {
+          "label": "Account Rep",
+          "type": "lookup",
+          "required": false,
+          "searchable": false,
+          "multiple": false,
+          "unique": false,
+          "reference": "demoorder_employee",
+          "deleteBehavior": "set_null",
+          "expression": {
+            "dialect": "cel",
+            "source": "record.invoice.account_owner"
+          },
+          "hidden": false,
+          "readonly": true,
+          "sortable": true,
+          "externalId": false
+        }
+      },
+      "fieldGroups": [
+        {
+          "key": "basic",
+          "label": "Payment",
+          "fields": [
+            "name",
+            "invoice",
+            "amount",
+            "payment_date",
+            "method",
+            "bank_reference",
+            "account_owner"
+          ],
+          "collapse": "none"
+        }
+      ],
+      "validations": [
+        {
+          "name": "amount_positive",
+          "active": true,
+          "events": [
+            "insert",
+            "update"
+          ],
+          "priority": 100,
+          "severity": "error",
+          "message": "A payment amount must be greater than zero.",
+          "type": "script",
+          "condition": {
+            "dialect": "cel",
+            "source": "record.amount <= 0.0"
+          }
+        }
+      ],
+      "nameField": "name",
+      "highlightFields": [
+        "invoice",
+        "payment_date",
+        "amount",
+        "method"
+      ],
+      "sharingModel": "public_read_write",
+      "actions": [
+        {
+          "name": "demoorder_record_payment",
+          "label": "Record Payment",
+          "objectName": "demoorder_payment",
+          "icon": "banknote",
+          "locations": [
+            "list_toolbar"
+          ],
+          "type": "flow",
+          "target": "record_payment",
+          "params": [
+            {
+              "field": "invoice",
+              "required": true
+            },
+            {
+              "field": "amount",
+              "required": true
+            },
+            {
+              "field": "payment_date",
+              "required": false
+            },
+            {
+              "field": "method",
+              "required": false
+            },
+            {
+              "field": "bank_reference",
+              "required": false
+            }
+          ],
+          "submitText": "Record Payment",
+          "successMessage": {
+            "dialect": "template",
+            "source": "Payment recorded."
+          },
+          "refreshAfter": true,
+          "requiredPermissions": [
+            "demoorder.record_payment"
+          ],
+          "ai": {
+            "exposed": true,
+            "description": "Record a customer payment against an invoice. The amount must be more than zero and may not exceed the invoice's open balance; the invoice's amount paid, balance and status follow.",
+            "paramHints": {
+              "invoice": {
+                "description": "The id of the invoice being paid."
+              },
+              "amount": {
+                "description": "Payment amount, at most the open balance."
+              },
+              "method": {
+                "description": "ach, wire, check or card",
+                "enum": [
+                  "ach",
+                  "wire",
+                  "check",
+                  "card"
+                ]
+              }
+            },
+            "requiresConfirmation": false
+          }
+        }
+      ]
+    },
+    {
+      "name": "demoorder_product",
+      "label": "Product",
+      "pluralLabel": "Products",
+      "description": "A catalog product with its list price and cost.",
+      "icon": "package",
+      "color": "green",
+      "isSystem": false,
+      "datasource": "default",
+      "fields": {
+        "name": {
+          "label": "Product Name",
+          "type": "text",
+          "required": true,
+          "searchable": true,
+          "multiple": false,
+          "unique": false,
+          "maxLength": 200,
+          "hidden": false,
+          "readonly": false,
+          "sortable": true,
+          "externalId": false
+        },
+        "sku": {
+          "label": "SKU",
+          "type": "text",
+          "required": true,
+          "searchable": true,
+          "multiple": false,
+          "unique": false,
+          "maxLength": 40,
+          "hidden": false,
+          "readonly": false,
+          "sortable": true,
+          "externalId": false
+        },
+        "category": {
+          "label": "Category",
+          "type": "select",
+          "required": true,
+          "searchable": false,
+          "multiple": false,
+          "unique": false,
+          "options": [
+            {
+              "label": "Hardware",
+              "value": "hardware",
+              "default": true
+            },
+            {
+              "label": "Services",
+              "value": "services"
+            },
+            {
+              "label": "Subscription",
+              "value": "subscription"
+            }
+          ],
+          "hidden": false,
+          "readonly": false,
+          "sortable": true,
+          "externalId": false
+        },
+        "list_price": {
+          "label": "List Price",
+          "type": "currency",
+          "required": true,
+          "searchable": false,
+          "multiple": false,
+          "unique": false,
+          "min": 0,
+          "hidden": false,
+          "readonly": false,
+          "sortable": true,
+          "externalId": false
+        },
+        "unit_cost": {
+          "label": "Unit Cost",
+          "type": "currency",
+          "required": false,
+          "searchable": false,
+          "multiple": false,
+          "unique": false,
+          "min": 0,
+          "hidden": false,
+          "readonly": false,
+          "sortable": true,
+          "externalId": false
+        }
+      },
+      "indexes": [
+        {
+          "fields": [
+            "sku"
+          ],
+          "unique": "organization"
+        }
+      ],
+      "fieldGroups": [
+        {
+          "key": "basic",
+          "label": "Basic Information",
+          "fields": [
+            "name",
+            "sku",
+            "category"
+          ],
+          "collapse": "none"
+        },
+        {
+          "key": "pricing",
+          "label": "Pricing",
+          "fields": [
+            "list_price",
+            "unit_cost"
+          ],
+          "collapse": "none"
+        }
+      ],
+      "nameField": "name",
+      "highlightFields": [
+        "sku",
+        "category",
+        "list_price"
+      ],
+      "sharingModel": "public_read"
+    },
+    {
+      "name": "demoorder_sales_order",
+      "label": "Sales Order",
+      "pluralLabel": "Sales Orders",
+      "description": "A sales order with its lines, entered by the owning rep.",
+      "icon": "shopping-cart",
+      "color": "orange",
+      "isSystem": false,
+      "datasource": "default",
+      "fields": {
+        "name": {
+          "label": "Order Number",
+          "type": "autonumber",
+          "format": "SO-{YYYY}-{0000}",
+          "required": false,
+          "searchable": false,
+          "multiple": false,
+          "unique": "organization",
+          "hidden": false,
+          "readonly": true,
+          "sortable": true,
+          "externalId": false
+        },
+        "account": {
+          "label": "Account",
+          "type": "lookup",
+          "required": true,
+          "searchable": false,
+          "multiple": false,
+          "unique": false,
+          "reference": "demoorder_account",
+          "deleteBehavior": "restrict",
+          "hidden": false,
+          "readonly": false,
+          "sortable": true,
+          "externalId": false
+        },
+        "owner": {
+          "label": "Sales Rep",
+          "type": "lookup",
+          "description": "The sales rep who entered the order.",
+          "required": false,
+          "searchable": false,
+          "multiple": false,
+          "unique": false,
+          "reference": "demoorder_employee",
+          "deleteBehavior": "restrict",
+          "hidden": false,
+          "readonly": false,
+          "sortable": true,
+          "externalId": false
+        },
+        "order_date": {
+          "label": "Order Date",
+          "type": "date",
+          "required": true,
+          "searchable": false,
+          "multiple": false,
+          "unique": false,
+          "hidden": false,
+          "readonly": false,
+          "sortable": true,
+          "externalId": false
+        },
+        "status": {
+          "label": "Status",
+          "type": "select",
+          "required": true,
+          "searchable": false,
+          "multiple": false,
+          "unique": false,
+          "options": [
+            {
+              "label": "Draft",
+              "value": "draft",
+              "color": "#6B7280",
+              "default": true
+            },
+            {
+              "label": "Pending Approval",
+              "value": "pending_approval",
+              "color": "#F59E0B"
+            },
+            {
+              "label": "Confirmed",
+              "value": "confirmed",
+              "color": "#3B82F6"
+            },
+            {
+              "label": "Fulfilled",
+              "value": "fulfilled",
+              "color": "#10B981"
+            },
+            {
+              "label": "Cancelled",
+              "value": "cancelled",
+              "color": "#EF4444"
+            }
+          ],
+          "hidden": false,
+          "readonly": false,
+          "sortable": true,
+          "externalId": false
+        },
+        "total_amount": {
+          "label": "Total Amount",
+          "type": "summary",
+          "required": false,
+          "searchable": false,
+          "multiple": false,
+          "unique": false,
+          "summaryOperations": {
+            "object": "demoorder_order_line",
+            "field": "amount",
+            "function": "sum"
+          },
+          "hidden": false,
+          "readonly": false,
+          "sortable": true,
+          "externalId": false
+        },
+        "max_discount_pct": {
+          "label": "Highest Line Discount (%)",
+          "type": "summary",
+          "required": false,
+          "searchable": false,
+          "multiple": false,
+          "unique": false,
+          "summaryOperations": {
+            "object": "demoorder_order_line",
+            "field": "discount_pct",
+            "function": "max"
+          },
+          "hidden": false,
+          "readonly": false,
+          "sortable": true,
+          "externalId": false
+        },
+        "approver": {
+          "label": "Approver",
+          "type": "lookup",
+          "description": "The owner's sales manager the discount is sent to.",
+          "required": false,
+          "searchable": false,
+          "multiple": false,
+          "unique": false,
+          "reference": "demoorder_employee",
+          "deleteBehavior": "set_null",
+          "hidden": false,
+          "readonly": false,
+          "sortable": true,
+          "externalId": false
+        },
+        "approved_on": {
+          "label": "Approved On",
+          "type": "date",
+          "required": false,
+          "searchable": false,
+          "multiple": false,
+          "unique": false,
+          "hidden": false,
+          "readonly": false,
+          "sortable": true,
+          "externalId": false
+        },
+        "customer_po": {
+          "label": "Customer PO",
+          "type": "text",
+          "description": "The customer's purchase order number.",
+          "required": false,
+          "searchable": false,
+          "multiple": false,
+          "unique": false,
+          "maxLength": 80,
+          "hidden": false,
+          "readonly": false,
+          "sortable": true,
+          "externalId": false
+        }
+      },
+      "fieldGroups": [
+        {
+          "key": "basic",
+          "label": "Order",
+          "fields": [
+            "name",
+            "account",
+            "owner",
+            "order_date",
+            "status",
+            "customer_po"
+          ],
+          "collapse": "none"
+        },
+        {
+          "key": "lines",
+          "label": "Order Lines",
+          "relatedList": "demoorder_order_line",
+          "collapse": "none"
+        },
+        {
+          "key": "totals",
+          "label": "Totals",
+          "fields": [
+            "total_amount",
+            "max_discount_pct"
+          ],
+          "collapse": "none"
+        },
+        {
+          "key": "approval",
+          "label": "Discount Approval",
+          "fields": [
+            "approver",
+            "approved_on"
+          ],
+          "collapse": "none"
+        }
+      ],
+      "validations": [
+        {
+          "name": "rep_needed_past_draft",
+          "active": true,
+          "events": [
+            "insert",
+            "update"
+          ],
+          "priority": 100,
+          "severity": "error",
+          "message": "An order needs a sales rep before it leaves draft.",
+          "type": "script",
+          "condition": {
+            "dialect": "cel",
+            "source": "has(record.status) && record.status != 'draft' && (!has(record.owner) || record.owner == null)"
+          }
+        },
+        {
+          "name": "order_lifecycle",
+          "active": true,
+          "events": [
+            "insert",
+            "update"
+          ],
+          "priority": 100,
+          "severity": "error",
+          "message": "That status change is not allowed for this order.",
+          "type": "state_machine",
+          "field": "status",
+          "transitions": {
+            "draft": [
+              "pending_approval",
+              "confirmed",
+              "cancelled"
+            ],
+            "pending_approval": [
+              "confirmed",
+              "draft",
+              "cancelled"
+            ],
+            "confirmed": [
+              "fulfilled",
+              "cancelled"
+            ],
+            "fulfilled": [],
+            "cancelled": []
+          },
+          "initialStates": [
+            "draft"
+          ]
+        },
+        {
+          "name": "discount_needs_approval",
+          "active": true,
+          "events": [
+            "insert",
+            "update"
+          ],
+          "priority": 100,
+          "severity": "error",
+          "message": "An order with a line discounted above 10% is confirmed only once the sales manager approves it.",
+          "type": "script",
+          "condition": {
+            "dialect": "cel",
+            "source": "record.status in ['confirmed', 'fulfilled'] && record.max_discount_pct != null && record.max_discount_pct > 10 && record.approved_on == null"
+          }
+        },
+        {
+          "name": "pending_needs_approver",
+          "active": true,
+          "events": [
+            "insert",
+            "update"
+          ],
+          "priority": 100,
+          "severity": "error",
+          "message": "An order sent for approval names the sales manager who approves it.",
+          "type": "script",
+          "condition": {
+            "dialect": "cel",
+            "source": "record.status == 'pending_approval' && record.approver == null"
+          }
+        },
+        {
+          "name": "no_self_approval",
+          "active": true,
+          "events": [
+            "insert",
+            "update"
+          ],
+          "priority": 100,
+          "severity": "error",
+          "message": "A rep cannot approve their own order.",
+          "type": "script",
+          "condition": {
+            "dialect": "cel",
+            "source": "record.approver != null && record.approver == record.owner"
+          }
+        },
+        {
+          "name": "approval_names_approver",
+          "active": true,
+          "events": [
+            "insert",
+            "update"
+          ],
+          "priority": 100,
+          "severity": "error",
+          "message": "An approval date needs the approver who gave it.",
+          "type": "script",
+          "condition": {
+            "dialect": "cel",
+            "source": "record.approved_on != null && record.approver == null"
+          }
+        }
+      ],
+      "nameField": "name",
+      "highlightFields": [
+        "account",
+        "owner",
+        "order_date",
+        "status",
+        "total_amount"
+      ],
+      "sharingModel": "public_read_write",
+      "actions": [
+        {
+          "name": "demoorder_create_sales_order",
+          "label": "New Order With Lines",
+          "objectName": "demoorder_sales_order",
+          "icon": "plus",
+          "locations": [
+            "list_toolbar"
+          ],
+          "type": "flow",
+          "target": "create_sales_order",
+          "params": [
+            {
+              "field": "account",
+              "required": true
+            },
+            {
+              "field": "order_date",
+              "required": false
+            },
+            {
+              "name": "lines",
+              "label": "Lines",
+              "type": "json",
+              "required": true,
+              "helpText": {
+                "dialect": "template",
+                "source": "A list of lines, each naming a product id, a quantity and optionally a unit price and a discount percent. The unit price defaults to the product list price."
+              }
+            }
+          ],
+          "submitText": "Create Order",
+          "successMessage": {
+            "dialect": "template",
+            "source": "Order created."
+          },
+          "refreshAfter": true,
+          "ai": {
+            "exposed": true,
+            "description": "Create a draft sales order with its lines for an account the signed-in sales rep owns. Each line names a product id, a quantity, and optionally a unit price (defaults to the product list price) and a discount percent (0-30).",
+            "paramHints": {
+              "account": {
+                "description": "The id of an account the signed-in rep owns."
+              },
+              "order_date": {
+                "description": "Order date as YYYY-MM-DD; defaults to today."
+              },
+              "lines": {
+                "description": "List of { product, quantity, unit_price?, discount_pct? } objects; at least one."
+              }
+            },
+            "requiresConfirmation": false
+          }
+        },
+        {
+          "name": "demoorder_decide_discount_approval",
+          "label": "Decide Discount Approval",
+          "objectName": "demoorder_sales_order",
+          "icon": "check-check",
+          "locations": [
+            "record_header",
+            "list_item"
+          ],
+          "type": "flow",
+          "target": "decide_discount_approval",
+          "params": [
+            {
+              "name": "decision",
+              "label": "Decision",
+              "type": "select",
+              "required": true,
+              "options": [
+                {
+                  "label": "Approve",
+                  "value": "approve"
+                },
+                {
+                  "label": "Reject",
+                  "value": "reject"
+                }
+              ]
+            },
+            {
+              "name": "comment",
+              "label": "Comment",
+              "type": "textarea",
+              "required": false
+            }
+          ],
+          "submitText": "Record Decision",
+          "successMessage": {
+            "dialect": "template",
+            "source": "Decision recorded."
+          },
+          "refreshAfter": true,
+          "visible": {
+            "dialect": "cel",
+            "source": "has(record.status) && record.status == 'pending_approval'"
+          },
+          "requiredPermissions": [
+            "demoorder.approve_discount"
+          ],
+          "ai": {
+            "exposed": true,
+            "description": "Approve or reject the discount on a sales order pending approval, as the signed-in sales manager who is the order's approver. Approving confirms the order and records the approval date; rejecting returns it to draft.",
+            "paramHints": {
+              "decision": {
+                "description": "approve or reject",
+                "enum": [
+                  "approve",
+                  "reject"
+                ]
+              }
+            },
+            "requiresConfirmation": false
+          }
+        },
+        {
+          "name": "demoorder_submit_for_discount_approval",
+          "label": "Submit For Discount Approval",
+          "objectName": "demoorder_sales_order",
+          "icon": "send",
+          "locations": [
+            "record_header",
+            "list_item"
+          ],
+          "type": "flow",
+          "target": "submit_for_discount_approval",
+          "successMessage": {
+            "dialect": "template",
+            "source": "Sent to the rep's sales manager for approval."
+          },
+          "refreshAfter": true,
+          "visible": {
+            "dialect": "cel",
+            "source": "has(record.status) && record.status == 'draft' && has(record.max_discount_pct) && record.max_discount_pct != null && record.max_discount_pct > 10"
+          },
+          "ai": {
+            "exposed": true,
+            "description": "Send a draft sales order that has a line discounted above 10% to the order owner's sales manager for discount approval; the order moves to pending approval.",
+            "requiresConfirmation": false
+          }
+        }
+      ]
+    }
+  ],
+  "picklists": [],
+  "apps": [
+    {
+      "name": "demoorder_main_app",
+      "label": "Order to Cash",
+      "active": true,
+      "isDefault": false,
+      "navigation": [
+        {
+          "id": "nav_accounts",
+          "icon": "building-2",
+          "type": "object",
+          "objectName": "demoorder_account"
+        },
+        {
+          "id": "nav_orders",
+          "icon": "shopping-cart",
+          "type": "object",
+          "objectName": "demoorder_sales_order"
+        },
+        {
+          "id": "nav_invoices",
+          "icon": "receipt",
+          "type": "object",
+          "objectName": "demoorder_invoice"
+        },
+        {
+          "id": "nav_payments",
+          "icon": "banknote",
+          "type": "object",
+          "objectName": "demoorder_payment"
+        },
+        {
+          "id": "nav_activities",
+          "icon": "phone-call",
+          "type": "object",
+          "objectName": "demoorder_activity"
+        },
+        {
+          "id": "nav_aging",
+          "label": "Receivables Aging",
+          "icon": "chart-bar",
+          "type": "dashboard",
+          "dashboardName": "demoorder_receivables_aging_report"
+        },
+        {
+          "id": "nav_aging_report",
+          "label": "Aging by Account",
+          "icon": "table",
+          "type": "report",
+          "reportName": "receivables_aging"
+        },
+        {
+          "id": "nav_products",
+          "icon": "package",
+          "type": "object",
+          "objectName": "demoorder_product"
+        },
+        {
+          "id": "nav_employees",
+          "icon": "users",
+          "type": "object",
+          "objectName": "demoorder_employee"
+        },
+        {
+          "id": "nav_guide",
+          "label": "Guide",
+          "icon": "book-open",
+          "type": "doc",
+          "doc": "demoorder_guide"
+        }
+      ]
+    }
+  ],
+  "views": [
+    {
+      "list": {
+        "label": "All Accounts",
+        "type": "grid",
+        "data": {
+          "provider": "object",
+          "object": "demoorder_account"
+        },
+        "columns": [
+          "name",
+          "industry",
+          "billing_city",
+          "owner",
+          "payment_terms"
+        ],
+        "sort": [
+          {
+            "field": "name",
+            "order": "asc"
+          }
+        ]
+      }
+    },
+    {
+      "list": {
+        "label": "All Activities",
+        "type": "grid",
+        "data": {
+          "provider": "object",
+          "object": "demoorder_activity"
+        },
+        "columns": [
+          "subject",
+          "account",
+          "type",
+          "activity_date",
+          "owner",
+          "invoice"
+        ],
+        "sort": [
+          {
+            "field": "activity_date",
+            "order": "desc"
+          }
+        ]
+      },
+      "listViews": {
+        "collection_calls": {
+          "label": "Collection Calls",
+          "type": "grid",
+          "data": {
+            "provider": "object",
+            "object": "demoorder_activity"
+          },
+          "columns": [
+            "subject",
+            "account",
+            "invoice",
+            "activity_date",
+            "owner"
+          ],
+          "filter": [
+            {
+              "field": "type",
+              "operator": "equals",
+              "value": "collection_call"
+            }
+          ],
+          "sort": [
+            {
+              "field": "activity_date",
+              "order": "desc"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "list": {
+        "label": "All Invoices",
+        "type": "grid",
+        "data": {
+          "provider": "object",
+          "object": "demoorder_invoice"
+        },
+        "columns": [
+          "name",
+          "account",
+          "order",
+          "invoice_date",
+          "due_date",
+          "amount",
+          "amount_paid",
+          "balance",
+          "status",
+          "aging_bucket"
+        ],
+        "sort": [
+          {
+            "field": "invoice_date",
+            "order": "desc"
+          }
+        ]
+      },
+      "listViews": {
+        "open": {
+          "label": "Open Balance",
+          "type": "grid",
+          "data": {
+            "provider": "object",
+            "object": "demoorder_invoice"
+          },
+          "columns": [
+            "name",
+            "account",
+            "due_date",
+            "amount",
+            "amount_paid",
+            "balance",
+            "status",
+            "aging_bucket"
+          ],
+          "filter": [
+            {
+              "field": "status",
+              "operator": "in",
+              "value": [
+                "open",
+                "partially_paid"
+              ]
+            }
+          ],
+          "sort": [
+            {
+              "field": "due_date",
+              "order": "asc"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "list": {
+        "label": "All Payments",
+        "type": "grid",
+        "data": {
+          "provider": "object",
+          "object": "demoorder_payment"
+        },
+        "columns": [
+          "name",
+          "invoice",
+          "payment_date",
+          "amount",
+          "method",
+          "bank_reference"
+        ],
+        "sort": [
+          {
+            "field": "payment_date",
+            "order": "desc"
+          }
+        ]
+      }
+    },
+    {
+      "list": {
+        "label": "All Orders",
+        "type": "grid",
+        "data": {
+          "provider": "object",
+          "object": "demoorder_sales_order"
+        },
+        "columns": [
+          "name",
+          "account",
+          "owner",
+          "order_date",
+          "status",
+          "total_amount",
+          "max_discount_pct"
+        ],
+        "sort": [
+          {
+            "field": "order_date",
+            "order": "desc"
+          }
+        ]
+      },
+      "listViews": {
+        "awaiting_approval": {
+          "label": "Awaiting Approval",
+          "type": "grid",
+          "data": {
+            "provider": "object",
+            "object": "demoorder_sales_order"
+          },
+          "columns": [
+            "name",
+            "account",
+            "owner",
+            "approver",
+            "total_amount",
+            "max_discount_pct"
+          ],
+          "filter": [
+            {
+              "field": "status",
+              "operator": "equals",
+              "value": "pending_approval"
+            }
+          ],
+          "sort": [
+            {
+              "field": "order_date",
+              "order": "asc"
+            }
+          ]
+        },
+        "drafts": {
+          "label": "Drafts",
+          "type": "grid",
+          "data": {
+            "provider": "object",
+            "object": "demoorder_sales_order"
+          },
+          "columns": [
+            "name",
+            "account",
+            "owner",
+            "order_date",
+            "total_amount",
+            "max_discount_pct"
+          ],
+          "filter": [
+            {
+              "field": "status",
+              "operator": "equals",
+              "value": "draft"
+            }
+          ],
+          "sort": [
+            {
+              "field": "order_date",
+              "order": "desc"
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "dashboards": [
+    {
+      "name": "demoorder_receivables_aging_report",
+      "label": "Receivables Aging",
+      "description": "Open balance by aging bucket and account.",
+      "widgets": [
+        {
+          "id": "total_open_balance",
+          "title": "Open Balance",
+          "type": "metric",
+          "dataset": "receivables_aging",
+          "values": [
+            "outstanding_balance"
+          ],
+          "layout": {
+            "x": 0,
+            "y": 0,
+            "w": 4,
+            "h": 2
+          },
+          "filterBindings": {
+            "dateRange": false
+          }
+        },
+        {
+          "id": "open_invoices",
+          "title": "Open Invoices",
+          "type": "metric",
+          "dataset": "receivables_aging",
+          "values": [
+            "open_invoice_count"
+          ],
+          "layout": {
+            "x": 4,
+            "y": 0,
+            "w": 4,
+            "h": 2
+          },
+          "filterBindings": {
+            "dateRange": false
+          }
+        },
+        {
+          "id": "over_90",
+          "title": "Over 90 Days Past Due",
+          "type": "metric",
+          "colorVariant": "danger",
+          "filter": {
+            "aging_bucket": "overdue_over_90"
+          },
+          "dataset": "receivables_aging",
+          "values": [
+            "outstanding_balance"
+          ],
+          "layout": {
+            "x": 8,
+            "y": 0,
+            "w": 4,
+            "h": 2
+          },
+          "filterBindings": {
+            "dateRange": false
+          }
+        },
+        {
+          "id": "balance_by_bucket",
+          "title": "Open Balance by Aging Bucket",
+          "type": "bar",
+          "dataset": "receivables_aging",
+          "dimensions": [
+            "aging_bucket"
+          ],
+          "values": [
+            "outstanding_balance"
+          ],
+          "layout": {
+            "x": 0,
+            "y": 2,
+            "w": 6,
+            "h": 4
+          },
+          "filterBindings": {
+            "dateRange": false
+          }
+        },
+        {
+          "id": "top_accounts",
+          "title": "Accounts Owing the Most",
+          "type": "horizontal-bar",
+          "dataset": "receivables_aging",
+          "dimensions": [
+            "account"
+          ],
+          "values": [
+            "outstanding_balance"
+          ],
+          "layout": {
+            "x": 6,
+            "y": 2,
+            "w": 6,
+            "h": 4
+          },
+          "options": {
+            "sortBy": "outstanding_balance",
+            "sortOrder": "desc",
+            "limit": 10
+          },
+          "filterBindings": {
+            "dateRange": false
+          }
+        },
+        {
+          "id": "aging_by_account",
+          "title": "Open Balance by Account and Aging Bucket",
+          "type": "pivot",
+          "dataset": "receivables_aging",
+          "dimensions": [
+            "account",
+            "aging_bucket"
+          ],
+          "values": [
+            "outstanding_balance"
+          ],
+          "layout": {
+            "x": 0,
+            "y": 6,
+            "w": 12,
+            "h": 5
+          },
+          "filterBindings": {
+            "dateRange": false
+          }
+        },
+        {
+          "id": "billed_in_period",
+          "title": "Billed in Period",
+          "type": "metric",
+          "dataset": "billing",
+          "values": [
+            "billed_amount"
+          ],
+          "layout": {
+            "x": 0,
+            "y": 11,
+            "w": 6,
+            "h": 2
+          }
+        },
+        {
+          "id": "orders_in_period",
+          "title": "Orders Booked in Period",
+          "type": "metric",
+          "dataset": "order_book",
+          "values": [
+            "order_count"
+          ],
+          "layout": {
+            "x": 6,
+            "y": 11,
+            "w": 6,
+            "h": 2
+          },
+          "filterBindings": {
+            "dateRange": "order_date"
+          }
+        }
+      ],
+      "columns": 12,
+      "dateRange": {
+        "field": "invoice_date",
+        "defaultRange": "this_month",
+        "allowCustomRange": true
+      }
+    }
+  ],
+  "reports": [
+    {
+      "name": "receivables_aging",
+      "label": "Receivables Aging",
+      "description": "Open balance by account and aging bucket.",
+      "type": "matrix",
+      "dataset": "receivables_aging",
+      "rows": [
+        "account"
+      ],
+      "columns": [
+        "aging_bucket"
+      ],
+      "values": [
+        "outstanding_balance"
+      ],
+      "order": [
+        {
+          "by": "outstanding_balance",
+          "direction": "desc"
+        }
+      ],
+      "drilldown": true,
+      "chart": {
+        "type": "bar",
+        "xAxis": "account",
+        "yAxis": "outstanding_balance",
+        "showLegend": true,
+        "showDataLabels": false,
+        "seriesBy": "aging_bucket"
+      },
+      "exportOptions": {
+        "formats": [
+          "csv",
+          "xlsx"
+        ]
+      }
+    }
+  ],
+  "datasets": [
+    {
+      "name": "billing",
+      "label": "Billing",
+      "description": "Invoices: what was billed and what customers still owe.",
+      "object": "demoorder_invoice",
+      "dimensions": [
+        {
+          "name": "aging",
+          "label": "Aging bucket",
+          "field": "aging_bucket",
+          "synonyms": [
+            "aging"
+          ],
+          "description": "How long an open balance has been past due."
+        }
+      ],
+      "measures": [
+        {
+          "name": "billed_amount",
+          "label": "Billed amount",
+          "aggregate": "sum",
+          "field": "amount",
+          "synonyms": [
+            "billings",
+            "revenue",
+            "营收",
+            "开票金额"
+          ],
+          "description": "The sum of the invoices' amounts, every status counted."
+        },
+        {
+          "name": "open_balance",
+          "label": "Open balance",
+          "aggregate": "sum",
+          "field": "balance",
+          "synonyms": [
+            "receivables",
+            "amount owed",
+            "应收账款"
+          ],
+          "description": "What customers still owe on their invoices: each invoice's amount less what was paid."
+        }
+      ]
+    },
+    {
+      "name": "order_book",
+      "label": "Order book",
+      "description": "Sales orders and the amounts booked on them, by status.",
+      "object": "demoorder_sales_order",
+      "dimensions": [
+        {
+          "name": "order_status",
+          "label": "Order status",
+          "field": "status",
+          "synonyms": [
+            "order stage"
+          ],
+          "description": "Where an order stands, from draft to fulfilled."
+        }
+      ],
+      "measures": [
+        {
+          "name": "booked_amount",
+          "label": "Booked amount",
+          "aggregate": "sum",
+          "field": "total_amount",
+          "synonyms": [
+            "bookings",
+            "revenue",
+            "营收",
+            "订单金额",
+            "成交额"
+          ],
+          "description": "The sum of the sales orders' total amounts, every status counted, cancelled ones included."
+        },
+        {
+          "name": "order_count",
+          "label": "Order count",
+          "aggregate": "count",
+          "synonyms": [
+            "number of orders",
+            "订单数"
+          ],
+          "description": "How many sales orders there are."
+        }
+      ]
+    },
+    {
+      "name": "receivables_aging",
+      "label": "Receivables aging",
+      "description": "Invoices with an open balance, by aging bucket and account.",
+      "object": "demoorder_invoice",
+      "filter": {
+        "balance": {
+          "$gt": 0
+        }
+      },
+      "dimensions": [
+        {
+          "name": "aging_bucket",
+          "label": "Days past due",
+          "field": "aging_bucket",
+          "synonyms": [
+            "past-due bucket",
+            "账龄"
+          ],
+          "description": "How far past its due date an invoice with an open balance is."
+        },
+        {
+          "name": "account",
+          "label": "Account",
+          "field": "account",
+          "type": "lookup",
+          "synonyms": [
+            "customer",
+            "客户"
+          ],
+          "description": "The customer account the invoice was billed to."
+        }
+      ],
+      "measures": [
+        {
+          "name": "outstanding_balance",
+          "label": "Outstanding balance",
+          "aggregate": "sum",
+          "field": "balance",
+          "format": "$0,0.00",
+          "polarity": "lower",
+          "synonyms": [
+            "outstanding",
+            "unpaid balance",
+            "未收款"
+          ],
+          "description": "The open balance of invoices not yet fully paid or written off."
+        },
+        {
+          "name": "open_invoice_count",
+          "label": "Open invoices",
+          "aggregate": "count",
+          "synonyms": [
+            "unpaid invoices",
+            "未结发票数"
+          ],
+          "description": "How many invoices still carry an open balance."
+        }
+      ]
+    }
+  ],
+  "actions": [
+    {
+      "name": "demoorder_create_sales_order",
+      "label": "New Order With Lines",
+      "objectName": "demoorder_sales_order",
+      "icon": "plus",
+      "locations": [
+        "list_toolbar"
+      ],
+      "type": "flow",
+      "target": "create_sales_order",
+      "params": [
+        {
+          "field": "account",
+          "required": true
+        },
+        {
+          "field": "order_date",
+          "required": false
+        },
+        {
+          "name": "lines",
+          "label": "Lines",
+          "type": "json",
+          "required": true,
+          "helpText": {
+            "dialect": "template",
+            "source": "A list of lines, each naming a product id, a quantity and optionally a unit price and a discount percent. The unit price defaults to the product list price."
+          }
+        }
+      ],
+      "submitText": "Create Order",
+      "successMessage": {
+        "dialect": "template",
+        "source": "Order created."
+      },
+      "refreshAfter": true,
+      "ai": {
+        "exposed": true,
+        "description": "Create a draft sales order with its lines for an account the signed-in sales rep owns. Each line names a product id, a quantity, and optionally a unit price (defaults to the product list price) and a discount percent (0-30).",
+        "paramHints": {
+          "account": {
+            "description": "The id of an account the signed-in rep owns."
+          },
+          "order_date": {
+            "description": "Order date as YYYY-MM-DD; defaults to today."
+          },
+          "lines": {
+            "description": "List of { product, quantity, unit_price?, discount_pct? } objects; at least one."
+          }
+        },
+        "requiresConfirmation": false
+      }
+    },
+    {
+      "name": "demoorder_decide_discount_approval",
+      "label": "Decide Discount Approval",
+      "objectName": "demoorder_sales_order",
+      "icon": "check-check",
+      "locations": [
+        "record_header",
+        "list_item"
+      ],
+      "type": "flow",
+      "target": "decide_discount_approval",
+      "params": [
+        {
+          "name": "decision",
+          "label": "Decision",
+          "type": "select",
+          "required": true,
+          "options": [
+            {
+              "label": "Approve",
+              "value": "approve"
+            },
+            {
+              "label": "Reject",
+              "value": "reject"
+            }
+          ]
+        },
+        {
+          "name": "comment",
+          "label": "Comment",
+          "type": "textarea",
+          "required": false
+        }
+      ],
+      "submitText": "Record Decision",
+      "successMessage": {
+        "dialect": "template",
+        "source": "Decision recorded."
+      },
+      "refreshAfter": true,
+      "visible": {
+        "dialect": "cel",
+        "source": "has(record.status) && record.status == 'pending_approval'"
+      },
+      "requiredPermissions": [
+        "demoorder.approve_discount"
+      ],
+      "ai": {
+        "exposed": true,
+        "description": "Approve or reject the discount on a sales order pending approval, as the signed-in sales manager who is the order's approver. Approving confirms the order and records the approval date; rejecting returns it to draft.",
+        "paramHints": {
+          "decision": {
+            "description": "approve or reject",
+            "enum": [
+              "approve",
+              "reject"
+            ]
+          }
+        },
+        "requiresConfirmation": false
+      }
+    },
+    {
+      "name": "demoorder_record_payment",
+      "label": "Record Payment",
+      "objectName": "demoorder_payment",
+      "icon": "banknote",
+      "locations": [
+        "list_toolbar"
+      ],
+      "type": "flow",
+      "target": "record_payment",
+      "params": [
+        {
+          "field": "invoice",
+          "required": true
+        },
+        {
+          "field": "amount",
+          "required": true
+        },
+        {
+          "field": "payment_date",
+          "required": false
+        },
+        {
+          "field": "method",
+          "required": false
+        },
+        {
+          "field": "bank_reference",
+          "required": false
+        }
+      ],
+      "submitText": "Record Payment",
+      "successMessage": {
+        "dialect": "template",
+        "source": "Payment recorded."
+      },
+      "refreshAfter": true,
+      "requiredPermissions": [
+        "demoorder.record_payment"
+      ],
+      "ai": {
+        "exposed": true,
+        "description": "Record a customer payment against an invoice. The amount must be more than zero and may not exceed the invoice's open balance; the invoice's amount paid, balance and status follow.",
+        "paramHints": {
+          "invoice": {
+            "description": "The id of the invoice being paid."
+          },
+          "amount": {
+            "description": "Payment amount, at most the open balance."
+          },
+          "method": {
+            "description": "ach, wire, check or card",
+            "enum": [
+              "ach",
+              "wire",
+              "check",
+              "card"
+            ]
+          }
+        },
+        "requiresConfirmation": false
+      }
+    },
+    {
+      "name": "demoorder_submit_for_discount_approval",
+      "label": "Submit For Discount Approval",
+      "objectName": "demoorder_sales_order",
+      "icon": "send",
+      "locations": [
+        "record_header",
+        "list_item"
+      ],
+      "type": "flow",
+      "target": "submit_for_discount_approval",
+      "successMessage": {
+        "dialect": "template",
+        "source": "Sent to the rep's sales manager for approval."
+      },
+      "refreshAfter": true,
+      "visible": {
+        "dialect": "cel",
+        "source": "has(record.status) && record.status == 'draft' && has(record.max_discount_pct) && record.max_discount_pct != null && record.max_discount_pct > 10"
+      },
+      "ai": {
+        "exposed": true,
+        "description": "Send a draft sales order that has a line discounted above 10% to the order owner's sales manager for discount approval; the order moves to pending approval.",
+        "requiresConfirmation": false
+      }
+    },
+    {
+      "name": "demoorder_write_off_balance",
+      "label": "Write Off Balance",
+      "objectName": "demoorder_invoice",
+      "icon": "circle-slash",
+      "locations": [
+        "record_more"
+      ],
+      "type": "script",
+      "body": {
+        "language": "js",
+        "source": "\n      const invoices = ctx.api.object('demoorder_invoice');\n      const inv = await invoices.findOne({ where: { id: ctx.recordId } });\n      if (!inv) throw { code: 'INVOICE_NOT_FOUND' };\n      const balance = Number(inv.balance || 0);\n      if (!(inv.status === 'open' || inv.status === 'partially_paid') || !(balance > 0)) {\n        throw { code: 'NOTHING_TO_WRITE_OFF' };\n      }\n      const today = new Date().toISOString().slice(0, 10);\n      await invoices.update({ id: ctx.recordId, write_off_amount: balance, written_off_on: today });\n      return { written_off: balance };\n    ",
+        "capabilities": [
+          "api.read",
+          "api.write"
+        ],
+        "timeoutMs": 10000
+      },
+      "refusals": {
+        "INVOICE_NOT_FOUND": {
+          "message": "That invoice was not found.",
+          "status": 404
+        },
+        "NOTHING_TO_WRITE_OFF": {
+          "message": "Only an open or partially paid invoice with a balance can be written off.",
+          "status": 409
+        }
+      },
+      "variant": "danger",
+      "confirmText": {
+        "dialect": "template",
+        "source": "Write off the open balance of {{ record.name }} as bad debt? This cannot be undone."
+      },
+      "successMessage": {
+        "dialect": "template",
+        "source": "Balance written off."
+      },
+      "refreshAfter": true,
+      "visible": {
+        "dialect": "cel",
+        "source": "has(record.status) && record.status in ['open', 'partially_paid']"
+      },
+      "requiredPermissions": [
+        "demoorder.write_off"
+      ],
+      "ai": {
+        "exposed": true,
+        "description": "Write off an invoice's whole open balance as bad debt (Finance only). Irreversible: the invoice becomes written off and its balance zero. A person confirms before it runs.",
+        "requiresConfirmation": true
+      }
+    }
+  ],
+  "flows": [
+    {
+      "name": "create_collection_calls",
+      "label": "Create Collection Calls",
+      "description": "Create a collection call for the AR clerk when an invoice is 15 days past due and not fully paid.",
+      "version": 1,
+      "status": "active",
+      "type": "schedule",
+      "nodes": [
+        {
+          "id": "start",
+          "type": "start",
+          "label": "Daily Sweep: 15 Days Past Due",
+          "config": {
+            "timeRelative": {
+              "object": "demoorder_invoice",
+              "dateField": "due_date",
+              "offsetDays": [
+                -15
+              ],
+              "filter": {
+                "status": {
+                  "$in": [
+                    "open",
+                    "partially_paid"
+                  ]
+                }
+              }
+            },
+            "schedule": {
+              "type": "cron",
+              "expression": "0 7 * * *",
+              "timezone": "UTC"
+            }
+          }
+        },
+        {
+          "id": "get_existing",
+          "type": "get_record",
+          "label": "Existing Collection Call",
+          "config": {
+            "objectName": "demoorder_activity",
+            "filter": {
+              "invoice": {
+                "dialect": "cel",
+                "source": "record.id"
+              },
+              "type": "collection_call"
+            },
+            "outputVariable": "existing"
+          }
+        },
+        {
+          "id": "already",
+          "type": "decision",
+          "label": "Already Called?"
+        },
+        {
+          "id": "get_clerk",
+          "type": "get_record",
+          "label": "Find The AR Clerk",
+          "config": {
+            "objectName": "demoorder_employee",
+            "filter": {
+              "job_function": "ar_clerk"
+            },
+            "outputVariable": "clerk"
+          }
+        },
+        {
+          "id": "create_call",
+          "type": "create_record",
+          "label": "Create Collection Call",
+          "config": {
+            "objectName": "demoorder_activity",
+            "fields": {
+              "account": {
+                "dialect": "cel",
+                "source": "record.account"
+              },
+              "invoice": {
+                "dialect": "cel",
+                "source": "record.id"
+              },
+              "type": "collection_call",
+              "subject": {
+                "dialect": "cel",
+                "source": "'Collection call: ' + record.name + ' 15 days past due'"
+              },
+              "activity_date": {
+                "dialect": "cel",
+                "source": "isoDate(today())"
+              },
+              "owner": {
+                "dialect": "cel",
+                "source": "clerk != null ? clerk.id : null"
+              },
+              "owner_id": {
+                "dialect": "cel",
+                "source": "clerk != null ? clerk.user : null"
+              }
+            }
+          }
+        },
+        {
+          "id": "done",
+          "type": "end",
+          "label": "Done"
+        }
+      ],
+      "edges": [
+        {
+          "id": "e1",
+          "source": "start",
+          "target": "get_existing",
+          "type": "default",
+          "isDefault": false
+        },
+        {
+          "id": "e2",
+          "source": "get_existing",
+          "target": "already",
+          "type": "default",
+          "isDefault": false
+        },
+        {
+          "id": "e3",
+          "source": "already",
+          "target": "get_clerk",
+          "condition": {
+            "dialect": "cel",
+            "source": "existing == null"
+          },
+          "type": "default",
+          "isDefault": false
+        },
+        {
+          "id": "e4",
+          "source": "already",
+          "target": "done",
+          "condition": {
+            "dialect": "cel",
+            "source": "existing != null"
+          },
+          "type": "default",
+          "isDefault": false
+        },
+        {
+          "id": "e5",
+          "source": "get_clerk",
+          "target": "create_call",
+          "type": "default",
+          "isDefault": false
+        },
+        {
+          "id": "e6",
+          "source": "create_call",
+          "target": "done",
+          "type": "default",
+          "isDefault": false
+        }
+      ],
+      "runAs": "system"
+    },
+    {
+      "name": "create_sales_order",
+      "label": "Create Sales Order",
+      "description": "Create a draft sales order with its lines for an account the signed-in rep owns.",
+      "version": 1,
+      "status": "active",
+      "type": "autolaunched",
+      "variables": [
+        {
+          "name": "account",
+          "type": "text",
+          "isInput": true,
+          "isOutput": false
+        },
+        {
+          "name": "order_date",
+          "type": "text",
+          "isInput": true,
+          "isOutput": false,
+          "defaultValue": ""
+        },
+        {
+          "name": "lines",
+          "type": "list",
+          "isInput": true,
+          "isOutput": false
+        },
+        {
+          "name": "order_id",
+          "type": "text",
+          "isInput": false,
+          "isOutput": true
+        },
+        {
+          "name": "failed_lines",
+          "type": "number",
+          "isInput": false,
+          "isOutput": false,
+          "defaultValue": 0
+        }
+      ],
+      "nodes": [
+        {
+          "id": "start",
+          "type": "start",
+          "label": "Start"
+        },
+        {
+          "id": "get_me",
+          "type": "get_record",
+          "label": "Find My Employee Record",
+          "config": {
+            "objectName": "demoorder_employee",
+            "filter": {
+              "user": {
+                "dialect": "cel",
+                "source": "current_user.id"
+              }
+            },
+            "outputVariable": "me"
+          }
+        },
+        {
+          "id": "have_me",
+          "type": "decision",
+          "label": "Signed-in Rep Known?"
+        },
+        {
+          "id": "get_account",
+          "type": "get_record",
+          "label": "Find My Account",
+          "config": {
+            "objectName": "demoorder_account",
+            "filter": {
+              "id": {
+                "dialect": "cel",
+                "source": "account"
+              },
+              "owner": {
+                "dialect": "cel",
+                "source": "me.id"
+              }
+            },
+            "outputVariable": "acct"
+          }
+        },
+        {
+          "id": "owns_account",
+          "type": "decision",
+          "label": "Rep Owns The Account?"
+        },
+        {
+          "id": "has_lines",
+          "type": "decision",
+          "label": "Lines Given?"
+        },
+        {
+          "id": "lines_valid",
+          "type": "decision",
+          "label": "Lines Well Formed?"
+        },
+        {
+          "id": "create_order",
+          "type": "create_record",
+          "label": "Create Order",
+          "config": {
+            "objectName": "demoorder_sales_order",
+            "fields": {
+              "account": {
+                "dialect": "cel",
+                "source": "acct.id"
+              },
+              "owner": {
+                "dialect": "cel",
+                "source": "me.id"
+              },
+              "order_date": {
+                "dialect": "cel",
+                "source": "order_date != null && order_date != '' ? order_date : isoDate(today())"
+              },
+              "status": "draft"
+            },
+            "outputVariable": "new_order"
+          }
+        },
+        {
+          "id": "each_line",
+          "type": "loop",
+          "label": "Create Each Line",
+          "config": {
+            "collection": {
+              "dialect": "cel",
+              "source": "lines"
+            },
+            "iteratorVariable": "line",
+            "body": {
+              "nodes": [
+                {
+                  "id": "line_guard",
+                  "type": "try_catch",
+                  "label": "Save The Line",
+                  "config": {
+                    "try": {
+                      "nodes": [
+                        {
+                          "id": "get_product",
+                          "type": "get_record",
+                          "label": "Read Product",
+                          "config": {
+                            "objectName": "demoorder_product",
+                            "filter": {
+                              "id": {
+                                "dialect": "cel",
+                                "source": "line.product"
+                              }
+                            },
+                            "outputVariable": "prod"
+                          }
+                        },
+                        {
+                          "id": "create_line",
+                          "type": "create_record",
+                          "label": "Create Line",
+                          "config": {
+                            "objectName": "demoorder_order_line",
+                            "fields": {
+                              "order": {
+                                "dialect": "cel",
+                                "source": "new_order.id"
+                              },
+                              "product": {
+                                "dialect": "cel",
+                                "source": "line.product"
+                              },
+                              "quantity": {
+                                "dialect": "cel",
+                                "source": "has(line.quantity) && line.quantity != null ? line.quantity : 1"
+                              },
+                              "unit_price": {
+                                "dialect": "cel",
+                                "source": "has(line.unit_price) && line.unit_price != null ? line.unit_price : prod.list_price"
+                              },
+                              "discount_pct": {
+                                "dialect": "cel",
+                                "source": "has(line.discount_pct) && line.discount_pct != null ? line.discount_pct : 0"
+                              }
+                            }
+                          }
+                        }
+                      ],
+                      "edges": [
+                        {
+                          "id": "l1",
+                          "source": "get_product",
+                          "target": "create_line",
+                          "type": "default",
+                          "isDefault": false
+                        }
+                      ]
+                    },
+                    "catch": {
+                      "nodes": [
+                        {
+                          "id": "count_failed",
+                          "type": "assignment",
+                          "label": "Count The Refused Line",
+                          "config": {
+                            "assignments": {
+                              "failed_lines": {
+                                "dialect": "cel",
+                                "source": "failed_lines + 1"
+                              }
+                            }
+                          }
+                        }
+                      ],
+                      "edges": []
+                    }
+                  }
+                }
+              ],
+              "edges": []
+            }
+          }
+        },
+        {
+          "id": "all_saved",
+          "type": "decision",
+          "label": "Every Line Saved?"
+        },
+        {
+          "id": "set_output",
+          "type": "assignment",
+          "label": "Return Order Id",
+          "config": {
+            "assignments": {
+              "order_id": {
+                "dialect": "cel",
+                "source": "new_order.id"
+              }
+            }
+          }
+        },
+        {
+          "id": "done",
+          "type": "end",
+          "label": "Order Created"
+        },
+        {
+          "id": "no_employee",
+          "type": "end",
+          "label": "No Employee",
+          "config": {
+            "outcome": "refused",
+            "message": "Your sign-in is not linked to an employee record."
+          }
+        },
+        {
+          "id": "not_owner",
+          "type": "end",
+          "label": "Not Your Account",
+          "config": {
+            "outcome": "refused",
+            "message": "You can only enter orders for accounts you own."
+          }
+        },
+        {
+          "id": "no_lines",
+          "type": "end",
+          "label": "No Lines",
+          "config": {
+            "outcome": "refused",
+            "message": "An order needs at least one line."
+          }
+        },
+        {
+          "id": "bad_lines",
+          "type": "end",
+          "label": "Bad Lines",
+          "config": {
+            "outcome": "refused",
+            "message": "Each line needs a product and a quantity of at least 1, and a discount from 0 to 30 percent."
+          }
+        },
+        {
+          "id": "some_refused",
+          "type": "end",
+          "label": "Some Lines Refused",
+          "config": {
+            "outcome": "refused",
+            "message": "The order {{ new_order.name }} was created, but {{ failed_lines }} of its lines could not be saved."
+          }
+        }
+      ],
+      "edges": [
+        {
+          "id": "e1",
+          "source": "start",
+          "target": "get_me",
+          "type": "default",
+          "isDefault": false
+        },
+        {
+          "id": "e2",
+          "source": "get_me",
+          "target": "have_me",
+          "type": "default",
+          "isDefault": false
+        },
+        {
+          "id": "e3",
+          "source": "have_me",
+          "target": "get_account",
+          "condition": {
+            "dialect": "cel",
+            "source": "me != null"
+          },
+          "type": "default",
+          "isDefault": false
+        },
+        {
+          "id": "e4",
+          "source": "have_me",
+          "target": "no_employee",
+          "condition": {
+            "dialect": "cel",
+            "source": "me == null"
+          },
+          "type": "default",
+          "isDefault": false
+        },
+        {
+          "id": "e5",
+          "source": "get_account",
+          "target": "owns_account",
+          "type": "default",
+          "isDefault": false
+        },
+        {
+          "id": "e6",
+          "source": "owns_account",
+          "target": "has_lines",
+          "condition": {
+            "dialect": "cel",
+            "source": "acct != null"
+          },
+          "type": "default",
+          "isDefault": false
+        },
+        {
+          "id": "e7",
+          "source": "owns_account",
+          "target": "not_owner",
+          "condition": {
+            "dialect": "cel",
+            "source": "acct == null"
+          },
+          "type": "default",
+          "isDefault": false
+        },
+        {
+          "id": "e8",
+          "source": "has_lines",
+          "target": "lines_valid",
+          "condition": {
+            "dialect": "cel",
+            "source": "lines != null && size(lines) > 0"
+          },
+          "type": "default",
+          "isDefault": false
+        },
+        {
+          "id": "e8a",
+          "source": "lines_valid",
+          "target": "create_order",
+          "condition": {
+            "dialect": "cel",
+            "source": "lines.all(l, has(l.product) && l.product != null && l.product != '' && (!has(l.quantity) || l.quantity == null || double(l.quantity) >= 1.0) && (!has(l.discount_pct) || l.discount_pct == null || (double(l.discount_pct) >= 0.0 && double(l.discount_pct) <= 30.0)))"
+          },
+          "type": "default",
+          "isDefault": false
+        },
+        {
+          "id": "e8b",
+          "source": "lines_valid",
+          "target": "bad_lines",
+          "condition": {
+            "dialect": "cel",
+            "source": "!(lines.all(l, has(l.product) && l.product != null && l.product != '' && (!has(l.quantity) || l.quantity == null || double(l.quantity) >= 1.0) && (!has(l.discount_pct) || l.discount_pct == null || (double(l.discount_pct) >= 0.0 && double(l.discount_pct) <= 30.0))))"
+          },
+          "type": "default",
+          "isDefault": false
+        },
+        {
+          "id": "e9",
+          "source": "has_lines",
+          "target": "no_lines",
+          "condition": {
+            "dialect": "cel",
+            "source": "lines == null || size(lines) == 0"
+          },
+          "type": "default",
+          "isDefault": false
+        },
+        {
+          "id": "e10",
+          "source": "create_order",
+          "target": "each_line",
+          "type": "default",
+          "isDefault": false
+        },
+        {
+          "id": "e11",
+          "source": "each_line",
+          "target": "all_saved",
+          "type": "default",
+          "isDefault": false
+        },
+        {
+          "id": "e11a",
+          "source": "all_saved",
+          "target": "set_output",
+          "condition": {
+            "dialect": "cel",
+            "source": "failed_lines == 0"
+          },
+          "type": "default",
+          "isDefault": false
+        },
+        {
+          "id": "e11b",
+          "source": "all_saved",
+          "target": "some_refused",
+          "condition": {
+            "dialect": "cel",
+            "source": "failed_lines > 0"
+          },
+          "type": "default",
+          "isDefault": false
+        },
+        {
+          "id": "e12",
+          "source": "set_output",
+          "target": "done",
+          "type": "default",
+          "isDefault": false
+        }
+      ],
+      "runAs": "user"
+    },
+    {
+      "name": "decide_discount_approval",
+      "label": "Decide Discount Approval",
+      "description": "Approve or reject an order the signed-in manager is the approver of.",
+      "version": 1,
+      "status": "active",
+      "type": "autolaunched",
+      "variables": [
+        {
+          "name": "decision",
+          "type": "text",
+          "isInput": true,
+          "isOutput": false
+        },
+        {
+          "name": "comment",
+          "type": "text",
+          "isInput": true,
+          "isOutput": false,
+          "defaultValue": ""
+        }
+      ],
+      "nodes": [
+        {
+          "id": "start",
+          "type": "start",
+          "label": "Start"
+        },
+        {
+          "id": "is_pending",
+          "type": "decision",
+          "label": "Waiting For Approval?"
+        },
+        {
+          "id": "get_approver",
+          "type": "get_record",
+          "label": "Read Approver",
+          "config": {
+            "objectName": "demoorder_employee",
+            "filter": {
+              "id": {
+                "dialect": "cel",
+                "source": "record.approver"
+              }
+            },
+            "outputVariable": "appr"
+          }
+        },
+        {
+          "id": "is_approver",
+          "type": "decision",
+          "label": "Caller Is The Approver?"
+        },
+        {
+          "id": "which",
+          "type": "decision",
+          "label": "Approve Or Reject?"
+        },
+        {
+          "id": "approve",
+          "type": "update_record",
+          "label": "Confirm Order",
+          "config": {
+            "objectName": "demoorder_sales_order",
+            "filter": {
+              "id": {
+                "dialect": "cel",
+                "source": "record.id"
+              }
+            },
+            "fields": {
+              "status": "confirmed",
+              "approved_on": {
+                "dialect": "cel",
+                "source": "isoDate(today())"
+              }
+            }
+          }
+        },
+        {
+          "id": "reject",
+          "type": "update_record",
+          "label": "Back To Draft",
+          "config": {
+            "objectName": "demoorder_sales_order",
+            "filter": {
+              "id": {
+                "dialect": "cel",
+                "source": "record.id"
+              }
+            },
+            "fields": {
+              "status": "draft",
+              "approver": null
+            }
+          }
+        },
+        {
+          "id": "approved",
+          "type": "end",
+          "label": "Approved"
+        },
+        {
+          "id": "rejected",
+          "type": "end",
+          "label": "Rejected"
+        },
+        {
+          "id": "not_pending",
+          "type": "end",
+          "label": "Not Pending",
+          "config": {
+            "outcome": "refused",
+            "message": "This order is not waiting for a discount approval."
+          }
+        },
+        {
+          "id": "not_approver",
+          "type": "end",
+          "label": "Not The Approver",
+          "config": {
+            "outcome": "refused",
+            "message": "Only the order's approver can approve or reject it."
+          }
+        },
+        {
+          "id": "bad_decision",
+          "type": "end",
+          "label": "Unknown Decision",
+          "config": {
+            "outcome": "refused",
+            "message": "The decision is either 'approve' or 'reject'."
+          }
+        }
+      ],
+      "edges": [
+        {
+          "id": "e1",
+          "source": "start",
+          "target": "is_pending",
+          "type": "default",
+          "isDefault": false
+        },
+        {
+          "id": "e2",
+          "source": "is_pending",
+          "target": "get_approver",
+          "condition": {
+            "dialect": "cel",
+            "source": "record.status == 'pending_approval' && record.approver != null"
+          },
+          "type": "default",
+          "isDefault": false
+        },
+        {
+          "id": "e3",
+          "source": "is_pending",
+          "target": "not_pending",
+          "condition": {
+            "dialect": "cel",
+            "source": "record.status != 'pending_approval' || record.approver == null"
+          },
+          "type": "default",
+          "isDefault": false
+        },
+        {
+          "id": "e4",
+          "source": "get_approver",
+          "target": "is_approver",
+          "type": "default",
+          "isDefault": false
+        },
+        {
+          "id": "e5",
+          "source": "is_approver",
+          "target": "which",
+          "condition": {
+            "dialect": "cel",
+            "source": "appr != null && appr.user != null && appr.user == current_user.id"
+          },
+          "type": "default",
+          "isDefault": false
+        },
+        {
+          "id": "e6",
+          "source": "is_approver",
+          "target": "not_approver",
+          "condition": {
+            "dialect": "cel",
+            "source": "appr == null || appr.user == null || appr.user != current_user.id"
+          },
+          "type": "default",
+          "isDefault": false
+        },
+        {
+          "id": "e7",
+          "source": "which",
+          "target": "approve",
+          "condition": {
+            "dialect": "cel",
+            "source": "decision == 'approve'"
+          },
+          "type": "default",
+          "isDefault": false
+        },
+        {
+          "id": "e8",
+          "source": "which",
+          "target": "reject",
+          "condition": {
+            "dialect": "cel",
+            "source": "decision == 'reject'"
+          },
+          "type": "default",
+          "isDefault": false
+        },
+        {
+          "id": "e9",
+          "source": "which",
+          "target": "bad_decision",
+          "condition": {
+            "dialect": "cel",
+            "source": "decision != 'approve' && decision != 'reject'"
+          },
+          "type": "default",
+          "isDefault": false
+        },
+        {
+          "id": "e10",
+          "source": "approve",
+          "target": "approved",
+          "type": "default",
+          "isDefault": false
+        },
+        {
+          "id": "e11",
+          "source": "reject",
+          "target": "rejected",
+          "type": "default",
+          "isDefault": false
+        }
+      ],
+      "runAs": "user",
+      "requiredPermissions": [
+        "demoorder.approve_discount"
+      ]
+    },
+    {
+      "name": "record_payment",
+      "label": "Record Payment",
+      "description": "Record a customer payment against an invoice, up to its open balance.",
+      "version": 1,
+      "status": "active",
+      "type": "autolaunched",
+      "variables": [
+        {
+          "name": "invoice",
+          "type": "text",
+          "isInput": true,
+          "isOutput": false
+        },
+        {
+          "name": "amount",
+          "type": "number",
+          "isInput": true,
+          "isOutput": false
+        },
+        {
+          "name": "payment_date",
+          "type": "text",
+          "isInput": true,
+          "isOutput": false,
+          "defaultValue": ""
+        },
+        {
+          "name": "method",
+          "type": "text",
+          "isInput": true,
+          "isOutput": false,
+          "defaultValue": ""
+        },
+        {
+          "name": "bank_reference",
+          "type": "text",
+          "isInput": true,
+          "isOutput": false,
+          "defaultValue": ""
+        },
+        {
+          "name": "payment_id",
+          "type": "text",
+          "isInput": false,
+          "isOutput": true
+        }
+      ],
+      "nodes": [
+        {
+          "id": "start",
+          "type": "start",
+          "label": "Start"
+        },
+        {
+          "id": "get_invoice",
+          "type": "get_record",
+          "label": "Read Invoice",
+          "config": {
+            "objectName": "demoorder_invoice",
+            "filter": {
+              "id": {
+                "dialect": "cel",
+                "source": "invoice"
+              }
+            },
+            "outputVariable": "inv"
+          }
+        },
+        {
+          "id": "fits",
+          "type": "decision",
+          "label": "Within Open Balance?"
+        },
+        {
+          "id": "write",
+          "type": "subflow",
+          "label": "Write The Payment",
+          "config": {
+            "flowName": "write_payment",
+            "input": {
+              "invoice": {
+                "dialect": "cel",
+                "source": "inv.id"
+              },
+              "amount": {
+                "dialect": "cel",
+                "source": "amount"
+              },
+              "payment_date": {
+                "dialect": "cel",
+                "source": "payment_date != null && payment_date != '' ? payment_date : isoDate(today())"
+              },
+              "method": {
+                "dialect": "cel",
+                "source": "method != null && method != '' ? method : 'ach'"
+              },
+              "bank_reference": {
+                "dialect": "cel",
+                "source": "bank_reference"
+              }
+            },
+            "outputVariable": "written"
+          }
+        },
+        {
+          "id": "set_output",
+          "type": "assignment",
+          "label": "Return Payment Id",
+          "config": {
+            "assignments": {
+              "payment_id": {
+                "dialect": "cel",
+                "source": "written.payment_id"
+              }
+            }
+          }
+        },
+        {
+          "id": "done",
+          "type": "end",
+          "label": "Payment Recorded"
+        },
+        {
+          "id": "no_invoice",
+          "type": "end",
+          "label": "No Invoice",
+          "config": {
+            "outcome": "refused",
+            "message": "That invoice was not found."
+          }
+        },
+        {
+          "id": "too_much",
+          "type": "end",
+          "label": "Exceeds Balance",
+          "config": {
+            "outcome": "refused",
+            "message": "A payment must be more than zero and may not exceed the open balance of {{ inv.balance }}."
+          }
+        }
+      ],
+      "edges": [
+        {
+          "id": "e1",
+          "source": "start",
+          "target": "get_invoice",
+          "type": "default",
+          "isDefault": false
+        },
+        {
+          "id": "e2",
+          "source": "get_invoice",
+          "target": "fits",
+          "type": "default",
+          "isDefault": false
+        },
+        {
+          "id": "e3",
+          "source": "fits",
+          "target": "write",
+          "condition": {
+            "dialect": "cel",
+            "source": "inv != null && amount != null && double(amount) > 0.0 && double(amount) <= double(coalesce(inv.balance, 0)) + 0.005"
+          },
+          "type": "default",
+          "isDefault": false
+        },
+        {
+          "id": "e4",
+          "source": "fits",
+          "target": "no_invoice",
+          "condition": {
+            "dialect": "cel",
+            "source": "inv == null"
+          },
+          "type": "default",
+          "isDefault": false
+        },
+        {
+          "id": "e5",
+          "source": "fits",
+          "target": "too_much",
+          "condition": {
+            "dialect": "cel",
+            "source": "inv != null && (amount == null || double(amount) <= 0.0 || double(amount) > double(coalesce(inv.balance, 0)) + 0.005)"
+          },
+          "type": "default",
+          "isDefault": false
+        },
+        {
+          "id": "e6",
+          "source": "write",
+          "target": "set_output",
+          "type": "default",
+          "isDefault": false
+        },
+        {
+          "id": "e7",
+          "source": "set_output",
+          "target": "done",
+          "type": "default",
+          "isDefault": false
+        }
+      ],
+      "runAs": "user",
+      "requiredPermissions": [
+        "demoorder.record_payment"
+      ]
+    },
+    {
+      "name": "refresh_invoice_aging",
+      "label": "Refresh Invoice Aging",
+      "description": "Re-judge the aging bucket of every past-due invoice with an open balance, daily.",
+      "version": 1,
+      "status": "active",
+      "type": "schedule",
+      "nodes": [
+        {
+          "id": "start",
+          "type": "start",
+          "label": "Daily Sweep: Past-Due Invoices",
+          "config": {
+            "timeRelative": {
+              "object": "demoorder_invoice",
+              "dateField": "due_date",
+              "withinDays": -400,
+              "filter": {
+                "balance": {
+                  "$gt": 0
+                }
+              },
+              "maxRecords": 10000
+            },
+            "schedule": {
+              "type": "cron",
+              "expression": "0 6 * * *",
+              "timezone": "UTC"
+            }
+          }
+        },
+        {
+          "id": "reage",
+          "type": "update_record",
+          "label": "Age As Of Today",
+          "config": {
+            "objectName": "demoorder_invoice",
+            "filter": {
+              "id": {
+                "dialect": "cel",
+                "source": "record.id"
+              }
+            },
+            "fields": {
+              "aging_as_of": {
+                "dialect": "cel",
+                "source": "isoDate(today())"
+              }
+            }
+          }
+        },
+        {
+          "id": "done",
+          "type": "end",
+          "label": "Done"
+        }
+      ],
+      "edges": [
+        {
+          "id": "e1",
+          "source": "start",
+          "target": "reage",
+          "type": "default",
+          "isDefault": false
+        },
+        {
+          "id": "e2",
+          "source": "reage",
+          "target": "done",
+          "type": "default",
+          "isDefault": false
+        }
+      ],
+      "runAs": "system"
+    },
+    {
+      "name": "resync_account_rep",
+      "label": "Re-sync Account Rep",
+      "description": "Recompute the copied account rep on an account's invoices, payments and activities when the account changes rep.",
+      "version": 1,
+      "status": "active",
+      "type": "record_change",
+      "nodes": [
+        {
+          "id": "start",
+          "type": "start",
+          "label": "Account Rep Changed",
+          "config": {
+            "objectName": "demoorder_account",
+            "triggerType": "record-after-update",
+            "condition": {
+              "dialect": "cel",
+              "source": "previous.owner != record.owner"
+            }
+          }
+        },
+        {
+          "id": "get_activities",
+          "type": "get_record",
+          "label": "Read Activities",
+          "config": {
+            "objectName": "demoorder_activity",
+            "filter": {
+              "account": {
+                "dialect": "cel",
+                "source": "record.id"
+              }
+            },
+            "limit": 10000,
+            "outputVariable": "activities"
+          }
+        },
+        {
+          "id": "each_activity",
+          "type": "loop",
+          "label": "Each Activity",
+          "config": {
+            "collection": {
+              "dialect": "cel",
+              "source": "activities"
+            },
+            "iteratorVariable": "act",
+            "body": {
+              "nodes": [
+                {
+                  "id": "activity_guard",
+                  "type": "try_catch",
+                  "label": "Re-stamp One Activity",
+                  "config": {
+                    "try": {
+                      "nodes": [
+                        {
+                          "id": "restamp_activity",
+                          "type": "update_record",
+                          "label": "Re-stamp Activity",
+                          "config": {
+                            "objectName": "demoorder_activity",
+                            "filter": {
+                              "id": {
+                                "dialect": "cel",
+                                "source": "act.id"
+                              }
+                            },
+                            "fields": {
+                              "account": {
+                                "dialect": "cel",
+                                "source": "act.account"
+                              }
+                            }
+                          }
+                        }
+                      ],
+                      "edges": []
+                    },
+                    "catch": {
+                      "nodes": [
+                        {
+                          "id": "activity_handled",
+                          "type": "assignment",
+                          "label": "Handled"
+                        }
+                      ],
+                      "edges": []
+                    }
+                  }
+                }
+              ],
+              "edges": []
+            }
+          }
+        },
+        {
+          "id": "get_invoices",
+          "type": "get_record",
+          "label": "Read Invoices",
+          "config": {
+            "objectName": "demoorder_invoice",
+            "filter": {
+              "account": {
+                "dialect": "cel",
+                "source": "record.id"
+              }
+            },
+            "limit": 10000,
+            "outputVariable": "invoices"
+          }
+        },
+        {
+          "id": "each_invoice",
+          "type": "loop",
+          "label": "Each Invoice",
+          "config": {
+            "collection": {
+              "dialect": "cel",
+              "source": "invoices"
+            },
+            "iteratorVariable": "inv",
+            "body": {
+              "nodes": [
+                {
+                  "id": "invoice_guard",
+                  "type": "try_catch",
+                  "label": "Re-stamp One Invoice",
+                  "config": {
+                    "try": {
+                      "nodes": [
+                        {
+                          "id": "restamp_invoice",
+                          "type": "update_record",
+                          "label": "Re-stamp Invoice",
+                          "config": {
+                            "objectName": "demoorder_invoice",
+                            "filter": {
+                              "id": {
+                                "dialect": "cel",
+                                "source": "inv.id"
+                              }
+                            },
+                            "fields": {
+                              "order": {
+                                "dialect": "cel",
+                                "source": "inv.order"
+                              }
+                            }
+                          }
+                        },
+                        {
+                          "id": "get_payments",
+                          "type": "get_record",
+                          "label": "Read Payments",
+                          "config": {
+                            "objectName": "demoorder_payment",
+                            "filter": {
+                              "invoice": {
+                                "dialect": "cel",
+                                "source": "inv.id"
+                              }
+                            },
+                            "limit": 10000,
+                            "outputVariable": "payments"
+                          }
+                        }
+                      ],
+                      "edges": [
+                        {
+                          "id": "t1",
+                          "source": "restamp_invoice",
+                          "target": "get_payments",
+                          "type": "default",
+                          "isDefault": false
+                        }
+                      ]
+                    },
+                    "catch": {
+                      "nodes": [
+                        {
+                          "id": "invoice_handled",
+                          "type": "assignment",
+                          "label": "Handled"
+                        }
+                      ],
+                      "edges": []
+                    }
+                  }
+                },
+                {
+                  "id": "each_payment",
+                  "type": "loop",
+                  "label": "Each Payment",
+                  "config": {
+                    "collection": {
+                      "dialect": "cel",
+                      "source": "payments"
+                    },
+                    "iteratorVariable": "pay",
+                    "body": {
+                      "nodes": [
+                        {
+                          "id": "payment_guard",
+                          "type": "try_catch",
+                          "label": "Re-stamp One Payment",
+                          "config": {
+                            "try": {
+                              "nodes": [
+                                {
+                                  "id": "restamp_payment",
+                                  "type": "update_record",
+                                  "label": "Re-stamp Payment",
+                                  "config": {
+                                    "objectName": "demoorder_payment",
+                                    "filter": {
+                                      "id": {
+                                        "dialect": "cel",
+                                        "source": "pay.id"
+                                      }
+                                    },
+                                    "fields": {
+                                      "invoice": {
+                                        "dialect": "cel",
+                                        "source": "pay.invoice"
+                                      }
+                                    }
+                                  }
+                                }
+                              ],
+                              "edges": []
+                            },
+                            "catch": {
+                              "nodes": [
+                                {
+                                  "id": "payment_handled",
+                                  "type": "assignment",
+                                  "label": "Handled"
+                                }
+                              ],
+                              "edges": []
+                            }
+                          }
+                        }
+                      ],
+                      "edges": []
+                    }
+                  }
+                }
+              ],
+              "edges": [
+                {
+                  "id": "l1",
+                  "source": "invoice_guard",
+                  "target": "each_payment",
+                  "type": "default",
+                  "isDefault": false
+                }
+              ]
+            }
+          }
+        },
+        {
+          "id": "done",
+          "type": "end",
+          "label": "Done"
+        }
+      ],
+      "edges": [
+        {
+          "id": "e1",
+          "source": "start",
+          "target": "get_activities",
+          "type": "default",
+          "isDefault": false
+        },
+        {
+          "id": "e2",
+          "source": "get_activities",
+          "target": "each_activity",
+          "type": "default",
+          "isDefault": false
+        },
+        {
+          "id": "e3",
+          "source": "each_activity",
+          "target": "get_invoices",
+          "type": "default",
+          "isDefault": false
+        },
+        {
+          "id": "e4",
+          "source": "get_invoices",
+          "target": "each_invoice",
+          "type": "default",
+          "isDefault": false
+        },
+        {
+          "id": "e5",
+          "source": "each_invoice",
+          "target": "done",
+          "type": "default",
+          "isDefault": false
+        }
+      ],
+      "runAs": "system"
+    },
+    {
+      "name": "resync_manager_user",
+      "label": "Re-sync Manager Sign-in",
+      "description": "Recompute the copied manager sign-in on an employee's reports when the employee's sign-in changes.",
+      "version": 1,
+      "status": "active",
+      "type": "record_change",
+      "nodes": [
+        {
+          "id": "start",
+          "type": "start",
+          "label": "Sign-in Changed",
+          "config": {
+            "objectName": "demoorder_employee",
+            "triggerType": "record-after-update",
+            "condition": {
+              "dialect": "cel",
+              "source": "previous.user != record.user"
+            }
+          }
+        },
+        {
+          "id": "get_reports",
+          "type": "get_record",
+          "label": "Read Reports",
+          "config": {
+            "objectName": "demoorder_employee",
+            "filter": {
+              "manager": {
+                "dialect": "cel",
+                "source": "record.id"
+              }
+            },
+            "limit": 10000,
+            "outputVariable": "reports"
+          }
+        },
+        {
+          "id": "each_report",
+          "type": "loop",
+          "label": "Each Report",
+          "config": {
+            "collection": {
+              "dialect": "cel",
+              "source": "reports"
+            },
+            "iteratorVariable": "rep",
+            "body": {
+              "nodes": [
+                {
+                  "id": "report_guard",
+                  "type": "try_catch",
+                  "label": "Re-stamp One Report",
+                  "config": {
+                    "try": {
+                      "nodes": [
+                        {
+                          "id": "restamp_report",
+                          "type": "update_record",
+                          "label": "Re-stamp Report",
+                          "config": {
+                            "objectName": "demoorder_employee",
+                            "filter": {
+                              "id": {
+                                "dialect": "cel",
+                                "source": "rep.id"
+                              }
+                            },
+                            "fields": {
+                              "manager": {
+                                "dialect": "cel",
+                                "source": "rep.manager"
+                              }
+                            }
+                          }
+                        }
+                      ],
+                      "edges": []
+                    },
+                    "catch": {
+                      "nodes": [
+                        {
+                          "id": "report_handled",
+                          "type": "assignment",
+                          "label": "Handled"
+                        }
+                      ],
+                      "edges": []
+                    }
+                  }
+                }
+              ],
+              "edges": []
+            }
+          }
+        },
+        {
+          "id": "done",
+          "type": "end",
+          "label": "Done"
+        }
+      ],
+      "edges": [
+        {
+          "id": "e1",
+          "source": "start",
+          "target": "get_reports",
+          "type": "default",
+          "isDefault": false
+        },
+        {
+          "id": "e2",
+          "source": "get_reports",
+          "target": "each_report",
+          "type": "default",
+          "isDefault": false
+        },
+        {
+          "id": "e3",
+          "source": "each_report",
+          "target": "done",
+          "type": "default",
+          "isDefault": false
+        }
+      ],
+      "runAs": "system"
+    },
+    {
+      "name": "submit_for_discount_approval",
+      "label": "Submit For Discount Approval",
+      "description": "Send an order with a line discounted above 10% to the owner's sales manager.",
+      "version": 1,
+      "status": "active",
+      "type": "autolaunched",
+      "nodes": [
+        {
+          "id": "start",
+          "type": "start",
+          "label": "Start"
+        },
+        {
+          "id": "needs_approval",
+          "type": "decision",
+          "label": "Needs Approval?"
+        },
+        {
+          "id": "get_owner",
+          "type": "get_record",
+          "label": "Read Order Owner",
+          "config": {
+            "objectName": "demoorder_employee",
+            "filter": {
+              "id": {
+                "dialect": "cel",
+                "source": "record.owner"
+              }
+            },
+            "outputVariable": "owner_emp"
+          }
+        },
+        {
+          "id": "has_manager",
+          "type": "decision",
+          "label": "Owner Has A Manager?"
+        },
+        {
+          "id": "send",
+          "type": "update_record",
+          "label": "Send To Manager",
+          "config": {
+            "objectName": "demoorder_sales_order",
+            "filter": {
+              "id": {
+                "dialect": "cel",
+                "source": "record.id"
+              }
+            },
+            "fields": {
+              "approver": {
+                "dialect": "cel",
+                "source": "owner_emp.manager"
+              },
+              "status": "pending_approval"
+            }
+          }
+        },
+        {
+          "id": "get_manager",
+          "type": "get_record",
+          "label": "Read Manager",
+          "config": {
+            "objectName": "demoorder_employee",
+            "filter": {
+              "id": {
+                "dialect": "cel",
+                "source": "owner_emp.manager"
+              }
+            },
+            "outputVariable": "mgr"
+          }
+        },
+        {
+          "id": "manager_signs_in",
+          "type": "decision",
+          "label": "Manager Signs In?"
+        },
+        {
+          "id": "tell_manager",
+          "type": "notify",
+          "label": "Tell The Manager",
+          "config": {
+            "recipients": {
+              "dialect": "cel",
+              "source": "mgr.user"
+            },
+            "title": "Discount approval needed: {{ record.name }}",
+            "message": "An order has a line discounted above 10% and waits for your approval.",
+            "topic": "discount_approval",
+            "severity": "info"
+          }
+        },
+        {
+          "id": "done",
+          "type": "end",
+          "label": "Sent"
+        },
+        {
+          "id": "not_needed",
+          "type": "end",
+          "label": "Not Applicable",
+          "config": {
+            "outcome": "refused",
+            "message": "Only a draft order with a line discounted above 10% is sent for approval."
+          }
+        },
+        {
+          "id": "no_manager",
+          "type": "end",
+          "label": "No Manager",
+          "config": {
+            "outcome": "refused",
+            "message": "The order's rep has no sales manager to approve it."
+          }
+        }
+      ],
+      "edges": [
+        {
+          "id": "e1",
+          "source": "start",
+          "target": "needs_approval",
+          "type": "default",
+          "isDefault": false
+        },
+        {
+          "id": "e2",
+          "source": "needs_approval",
+          "target": "get_owner",
+          "condition": {
+            "dialect": "cel",
+            "source": "record.status == 'draft' && record.max_discount_pct != null && record.max_discount_pct > 10"
+          },
+          "type": "default",
+          "isDefault": false
+        },
+        {
+          "id": "e3",
+          "source": "needs_approval",
+          "target": "not_needed",
+          "condition": {
+            "dialect": "cel",
+            "source": "record.status != 'draft' || record.max_discount_pct == null || record.max_discount_pct <= 10"
+          },
+          "type": "default",
+          "isDefault": false
+        },
+        {
+          "id": "e4",
+          "source": "get_owner",
+          "target": "has_manager",
+          "type": "default",
+          "isDefault": false
+        },
+        {
+          "id": "e5",
+          "source": "has_manager",
+          "target": "send",
+          "condition": {
+            "dialect": "cel",
+            "source": "owner_emp != null && owner_emp.manager != null"
+          },
+          "type": "default",
+          "isDefault": false
+        },
+        {
+          "id": "e6",
+          "source": "has_manager",
+          "target": "no_manager",
+          "condition": {
+            "dialect": "cel",
+            "source": "owner_emp == null || owner_emp.manager == null"
+          },
+          "type": "default",
+          "isDefault": false
+        },
+        {
+          "id": "e7",
+          "source": "send",
+          "target": "get_manager",
+          "type": "default",
+          "isDefault": false
+        },
+        {
+          "id": "e8",
+          "source": "get_manager",
+          "target": "manager_signs_in",
+          "type": "default",
+          "isDefault": false
+        },
+        {
+          "id": "e9",
+          "source": "manager_signs_in",
+          "target": "tell_manager",
+          "condition": {
+            "dialect": "cel",
+            "source": "mgr != null && mgr.user != null"
+          },
+          "type": "default",
+          "isDefault": false
+        },
+        {
+          "id": "e10",
+          "source": "manager_signs_in",
+          "target": "done",
+          "condition": {
+            "dialect": "cel",
+            "source": "mgr == null || mgr.user == null"
+          },
+          "type": "default",
+          "isDefault": false
+        },
+        {
+          "id": "e11",
+          "source": "tell_manager",
+          "target": "done",
+          "type": "default",
+          "isDefault": false
+        }
+      ],
+      "runAs": "user"
+    },
+    {
+      "name": "write_payment",
+      "label": "Write Payment",
+      "description": "Insert one checked customer payment; called only by Record Payment.",
+      "version": 1,
+      "status": "active",
+      "type": "autolaunched",
+      "variables": [
+        {
+          "name": "invoice",
+          "type": "text",
+          "isInput": true,
+          "isOutput": false
+        },
+        {
+          "name": "amount",
+          "type": "number",
+          "isInput": true,
+          "isOutput": false
+        },
+        {
+          "name": "payment_date",
+          "type": "text",
+          "isInput": true,
+          "isOutput": false
+        },
+        {
+          "name": "method",
+          "type": "text",
+          "isInput": true,
+          "isOutput": false
+        },
+        {
+          "name": "bank_reference",
+          "type": "text",
+          "isInput": true,
+          "isOutput": false,
+          "defaultValue": ""
+        },
+        {
+          "name": "payment_id",
+          "type": "text",
+          "isInput": false,
+          "isOutput": true
+        }
+      ],
+      "nodes": [
+        {
+          "id": "start",
+          "type": "start",
+          "label": "Start"
+        },
+        {
+          "id": "create_payment",
+          "type": "create_record",
+          "label": "Create Payment",
+          "config": {
+            "objectName": "demoorder_payment",
+            "fields": {
+              "invoice": {
+                "dialect": "cel",
+                "source": "invoice"
+              },
+              "amount": {
+                "dialect": "cel",
+                "source": "amount"
+              },
+              "payment_date": {
+                "dialect": "cel",
+                "source": "payment_date"
+              },
+              "method": {
+                "dialect": "cel",
+                "source": "method"
+              },
+              "bank_reference": {
+                "dialect": "cel",
+                "source": "bank_reference != '' ? bank_reference : null"
+              }
+            },
+            "outputVariable": "pay"
+          }
+        },
+        {
+          "id": "set_output",
+          "type": "assignment",
+          "label": "Return Payment Id",
+          "config": {
+            "assignments": {
+              "payment_id": {
+                "dialect": "cel",
+                "source": "pay.id"
+              }
+            }
+          }
+        },
+        {
+          "id": "done",
+          "type": "end",
+          "label": "Written"
+        }
+      ],
+      "edges": [
+        {
+          "id": "e1",
+          "source": "start",
+          "target": "create_payment",
+          "type": "default",
+          "isDefault": false
+        },
+        {
+          "id": "e2",
+          "source": "create_payment",
+          "target": "set_output",
+          "type": "default",
+          "isDefault": false
+        },
+        {
+          "id": "e3",
+          "source": "set_output",
+          "target": "done",
+          "type": "default",
+          "isDefault": false
+        }
+      ],
+      "runAs": "system"
+    }
+  ],
+  "permissions": [
+    {
+      "name": "demoorder_ar_clerk",
+      "label": "AR Clerk",
+      "description": "Accounts receivable (Finance), organization-wide: invoices, payments and collections; writes off bad debt. No product costs.",
+      "isDefault": false,
+      "objects": {
+        "demoorder_employee": {
+          "allowCreate": false,
+          "allowRead": true,
+          "allowEdit": false,
+          "allowDelete": false,
+          "allowTransfer": false,
+          "viewAllRecords": false,
+          "modifyAllRecords": false
+        },
+        "demoorder_account": {
+          "allowCreate": false,
+          "allowRead": true,
+          "allowEdit": false,
+          "allowDelete": false,
+          "allowTransfer": false,
+          "viewAllRecords": false,
+          "modifyAllRecords": false
+        },
+        "demoorder_product": {
+          "allowCreate": false,
+          "allowRead": true,
+          "allowEdit": false,
+          "allowDelete": false,
+          "allowTransfer": false,
+          "viewAllRecords": false,
+          "modifyAllRecords": false
+        },
+        "demoorder_sales_order": {
+          "allowCreate": false,
+          "allowRead": true,
+          "allowEdit": false,
+          "allowDelete": false,
+          "allowTransfer": false,
+          "viewAllRecords": false,
+          "modifyAllRecords": false
+        },
+        "demoorder_order_line": {
+          "allowCreate": false,
+          "allowRead": true,
+          "allowEdit": false,
+          "allowDelete": false,
+          "allowTransfer": false,
+          "viewAllRecords": false,
+          "modifyAllRecords": false
+        },
+        "demoorder_invoice": {
+          "allowCreate": true,
+          "allowRead": true,
+          "allowEdit": true,
+          "allowDelete": false,
+          "allowTransfer": false,
+          "viewAllRecords": false,
+          "modifyAllRecords": false
+        },
+        "demoorder_payment": {
+          "allowCreate": false,
+          "allowRead": true,
+          "allowEdit": true,
+          "allowDelete": false,
+          "allowTransfer": false,
+          "viewAllRecords": false,
+          "modifyAllRecords": false
+        },
+        "demoorder_activity": {
+          "allowCreate": true,
+          "allowRead": true,
+          "allowEdit": true,
+          "allowDelete": true,
+          "allowTransfer": false,
+          "viewAllRecords": false,
+          "modifyAllRecords": false
+        }
+      },
+      "fields": {
+        "demoorder_product.unit_cost": {
+          "readable": false,
+          "editable": false
+        },
+        "demoorder_payment.invoice": {
+          "readable": true,
+          "editable": false
+        },
+        "demoorder_payment.amount": {
+          "readable": true,
+          "editable": false
+        },
+        "demoorder_invoice.write_off_amount": {
+          "readable": true,
+          "editable": false,
+          "when": "status in ['open', 'partially_paid']"
+        },
+        "demoorder_invoice.written_off_on": {
+          "readable": true,
+          "editable": false,
+          "when": "status in ['open', 'partially_paid']"
+        }
+      },
+      "systemPermissions": [
+        "demoorder.record_payment",
+        "demoorder.write_off"
+      ]
+    },
+    {
+      "name": "demoorder_sales_manager",
+      "label": "Sales Manager",
+      "description": "A sales manager: the whole team's accounts, orders, invoices, payments and activities; approves discounts.",
+      "isDefault": false,
+      "objects": {
+        "demoorder_employee": {
+          "allowCreate": false,
+          "allowRead": true,
+          "allowEdit": false,
+          "allowDelete": false,
+          "allowTransfer": false,
+          "viewAllRecords": false,
+          "modifyAllRecords": false
+        },
+        "demoorder_account": {
+          "allowCreate": false,
+          "allowRead": true,
+          "allowEdit": true,
+          "allowDelete": false,
+          "allowTransfer": false,
+          "viewAllRecords": false,
+          "modifyAllRecords": false
+        },
+        "demoorder_product": {
+          "allowCreate": false,
+          "allowRead": true,
+          "allowEdit": false,
+          "allowDelete": false,
+          "allowTransfer": false,
+          "viewAllRecords": false,
+          "modifyAllRecords": false
+        },
+        "demoorder_sales_order": {
+          "allowCreate": true,
+          "allowRead": true,
+          "allowEdit": true,
+          "allowDelete": false,
+          "allowTransfer": false,
+          "viewAllRecords": false,
+          "modifyAllRecords": false
+        },
+        "demoorder_order_line": {
+          "allowCreate": true,
+          "allowRead": true,
+          "allowEdit": true,
+          "allowDelete": true,
+          "allowTransfer": false,
+          "viewAllRecords": false,
+          "modifyAllRecords": false
+        },
+        "demoorder_invoice": {
+          "allowCreate": false,
+          "allowRead": true,
+          "allowEdit": false,
+          "allowDelete": false,
+          "allowTransfer": false,
+          "viewAllRecords": false,
+          "modifyAllRecords": false
+        },
+        "demoorder_payment": {
+          "allowCreate": false,
+          "allowRead": true,
+          "allowEdit": false,
+          "allowDelete": false,
+          "allowTransfer": false,
+          "viewAllRecords": false,
+          "modifyAllRecords": false
+        },
+        "demoorder_activity": {
+          "allowCreate": true,
+          "allowRead": true,
+          "allowEdit": true,
+          "allowDelete": true,
+          "allowTransfer": false,
+          "viewAllRecords": false,
+          "modifyAllRecords": false
+        }
+      },
+      "fields": {
+        "demoorder_payment.bank_reference": {
+          "readable": false,
+          "editable": false
+        }
+      },
+      "systemPermissions": [
+        "demoorder.approve_discount"
+      ],
+      "rowLevelSecurity": [
+        {
+          "name": "mgr_team_accounts",
+          "object": "demoorder_account",
+          "operation": "all",
+          "using": "owner in current_user.team_employee_ids || owner in current_user.my_employee_ids",
+          "enabled": true
+        },
+        {
+          "name": "mgr_team_orders",
+          "object": "demoorder_sales_order",
+          "operation": "all",
+          "using": "owner in current_user.team_employee_ids || owner in current_user.my_employee_ids",
+          "enabled": true
+        },
+        {
+          "name": "mgr_team_invoices",
+          "object": "demoorder_invoice",
+          "operation": "select",
+          "using": "account_owner in current_user.team_employee_ids || account_owner in current_user.my_employee_ids",
+          "enabled": true
+        },
+        {
+          "name": "mgr_team_payments",
+          "object": "demoorder_payment",
+          "operation": "select",
+          "using": "account_owner in current_user.team_employee_ids || account_owner in current_user.my_employee_ids",
+          "enabled": true
+        },
+        {
+          "name": "mgr_team_activities",
+          "object": "demoorder_activity",
+          "operation": "all",
+          "using": "account_owner in current_user.team_employee_ids || account_owner in current_user.my_employee_ids",
+          "enabled": true
+        }
+      ]
+    },
+    {
+      "name": "demoorder_sales_rep",
+      "label": "Sales Rep",
+      "description": "A sales rep: their own accounts' orders, invoices and activities. No payment records, no product costs.",
+      "isDefault": false,
+      "objects": {
+        "demoorder_employee": {
+          "allowCreate": false,
+          "allowRead": true,
+          "allowEdit": false,
+          "allowDelete": false,
+          "allowTransfer": false,
+          "viewAllRecords": false,
+          "modifyAllRecords": false
+        },
+        "demoorder_account": {
+          "allowCreate": false,
+          "allowRead": true,
+          "allowEdit": true,
+          "allowDelete": false,
+          "allowTransfer": false,
+          "viewAllRecords": false,
+          "modifyAllRecords": false
+        },
+        "demoorder_product": {
+          "allowCreate": false,
+          "allowRead": true,
+          "allowEdit": false,
+          "allowDelete": false,
+          "allowTransfer": false,
+          "viewAllRecords": false,
+          "modifyAllRecords": false
+        },
+        "demoorder_sales_order": {
+          "allowCreate": true,
+          "allowRead": true,
+          "allowEdit": true,
+          "allowDelete": true,
+          "allowTransfer": false,
+          "viewAllRecords": false,
+          "modifyAllRecords": false
+        },
+        "demoorder_order_line": {
+          "allowCreate": true,
+          "allowRead": true,
+          "allowEdit": true,
+          "allowDelete": true,
+          "allowTransfer": false,
+          "viewAllRecords": false,
+          "modifyAllRecords": false
+        },
+        "demoorder_invoice": {
+          "allowCreate": false,
+          "allowRead": true,
+          "allowEdit": false,
+          "allowDelete": false,
+          "allowTransfer": false,
+          "viewAllRecords": false,
+          "modifyAllRecords": false
+        },
+        "demoorder_activity": {
+          "allowCreate": true,
+          "allowRead": true,
+          "allowEdit": true,
+          "allowDelete": true,
+          "allowTransfer": false,
+          "viewAllRecords": false,
+          "modifyAllRecords": false
+        }
+      },
+      "fields": {
+        "demoorder_product.unit_cost": {
+          "readable": false,
+          "editable": false
+        },
+        "demoorder_sales_order.approved_on": {
+          "readable": true,
+          "editable": false
+        },
+        "demoorder_sales_order.approver": {
+          "readable": true,
+          "editable": false,
+          "when": "status != 'draft'"
+        },
+        "demoorder_sales_order.status": {
+          "readable": true,
+          "editable": false,
+          "when": "status == 'pending_approval'"
+        },
+        "demoorder_invoice.amount_paid": {
+          "readable": true,
+          "editable": false,
+          "rollupSourceUnreadableReason": "Reps see what was paid on their invoices, not the individual payment records."
+        }
+      },
+      "rowLevelSecurity": [
+        {
+          "name": "rep_own_accounts",
+          "object": "demoorder_account",
+          "operation": "all",
+          "using": "owner in current_user.my_employee_ids",
+          "enabled": true
+        },
+        {
+          "name": "rep_own_orders",
+          "object": "demoorder_sales_order",
+          "operation": "all",
+          "using": "owner in current_user.my_employee_ids",
+          "enabled": true
+        },
+        {
+          "name": "rep_own_invoices",
+          "object": "demoorder_invoice",
+          "operation": "select",
+          "using": "account_owner in current_user.my_employee_ids",
+          "enabled": true
+        },
+        {
+          "name": "rep_own_activities",
+          "object": "demoorder_activity",
+          "operation": "all",
+          "using": "account_owner in current_user.my_employee_ids",
+          "enabled": true
+        }
+      ]
+    }
+  ],
+  "capabilities": [
+    {
+      "name": "demoorder.approve_discount",
+      "label": "Approve Discounts",
+      "description": "Approve or reject a sales order's discount as its approver.",
+      "scope": "org"
+    },
+    {
+      "name": "demoorder.record_payment",
+      "label": "Record Payments",
+      "description": "Record a customer payment against an invoice, up to its open balance.",
+      "scope": "org"
+    },
+    {
+      "name": "demoorder.write_off",
+      "label": "Write Off Bad Debt",
+      "description": "Write off an invoice's open balance as bad debt. Irreversible.",
+      "scope": "org"
+    }
+  ],
+  "skills": [],
+  "requires": [
+    "automation",
+    "triggers"
+  ],
+  "docs": [
+    {
+      "name": "demoorder_guide",
+      "label": "Order to Cash",
+      "description": "How orders, discount approvals, invoices, payments and collections work in this app.",
+      "content": "\n# Order to Cash\n\nThis app follows a sale from the order a rep enters to the cash the customer pays.\n\n## Accounts and activities\n\nEvery account has one owning sales rep and payment terms of 30 or 45 days. Every\nfollow-up with an account (a meeting, a call, an email, a collection call) is its\nown activity on the account's timeline.\n\n## Orders and discount approval\n\nA rep enters orders for their own accounts, with the lines on the order form.\nPicking a product fills the line's unit price from the product's list price; the\nline amount is quantity × unit price less the discount, and the order total adds\nup the lines. No line may be discounted above 30%.\n\nAn order with any line discounted above 10% is confirmed only once the rep's\nsales manager approves it:\n\n1. The rep uses **Submit For Discount Approval**. The order moves to *pending\n   approval* and names the rep's manager as its approver, who is notified.\n2. The approver uses **Decide Discount Approval**. Approving confirms the order\n   and records the approval date; rejecting returns it to draft for the rep to\n   rework. A rep cannot approve their own order.\n\n## Invoices and payments\n\nA fulfilled order is invoiced once, for the order total. The due date is the\ninvoice date plus the account's payment terms.\n\nPayments are recorded with **Record Payment**, which refuses an amount above the\ninvoice's open balance. The invoice's amount paid adds up its payments, its\nbalance is the amount less what was paid (and anything written off), and its\nstatus follows: open, partially paid, paid, or written off.\n\nOnly Finance may **Write Off Balance**: the whole open balance becomes bad debt.\nA write-off asks for confirmation first and cannot be undone.\n\n## Aging and collections\n\nEach invoice with an open balance sits in an aging bucket by how far it is past\ndue: current, 1–30, 31–60, 61–90, or over 90 days. Buckets are re-judged every\nmorning. When an invoice is 15 days past due and not fully paid, a collection\ncall is created for the AR clerk on the account's timeline, once per invoice.\n\nThe **Receivables Aging** dashboard shows the open balance by aging bucket and by\naccount.\n\n## Who sees what\n\n- A **sales rep** sees their own accounts and the orders, invoices and activities\n  on them, including what was paid on each invoice, but not the payment records\n  themselves or product costs.\n- A **sales manager** sees everything of their team, payments included, except a\n  payment's bank reference, and approves discounts.\n- The **AR clerk** sees everything except product costs, records payments, and\n  writes off bad debt.\n"
+    }
+  ]
+}
