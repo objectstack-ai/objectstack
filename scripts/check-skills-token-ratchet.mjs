@@ -422,6 +422,9 @@ export const BODY_PIN_REPIN = Object.freeze({
 // shrunk 9 tokens there with its row left standing — the red this re-lock
 // exists to raise, raised by the merge queue on its first run. The next
 // merge (`origin/main` 247382446) did the same to `context-packs.md`, -1.
+// `objectstack-ai/SKILL.md` went the other way: lowered here 6801 -> 6799,
+// then #37765 (9862d636) grew the file to 6801 on main's own row, so the row
+// is main's 6801 again — the measurement, not a raise by this re-lock.
 
 /**
  * Measured counts, in the convention above. SHRINK-ONLY: lower freely, and see
@@ -436,7 +439,7 @@ export const CEILINGS = new Map([
   // CEILING_BASIS.strippedInternalIds. `(was N)` is the ceiling this replaced.
   // Every SKILL.md row was later lowered by exactly 5 when its release-stamp
   // line left the count (A2′, see STAMP_LINE_REPIN) — its headroom did not move.
-  ['skills/objectstack-ai/SKILL.md', 6799], //          -18 (was 6824), then -5 A2′ (was 6806), then -2 to the measurement (was 6801)
+  ['skills/objectstack-ai/SKILL.md', 6801], //          -18 (was 6824), then -5 A2′ (was 6806)
   // -12 (was 6331): the `http.server` decision-table row dropped a trailing
   // clause that taught `contributes.routes` as a key that "parses but serves
   // nothing". The key is retired — an authored entry is now REFUSED, carrying
