@@ -155,7 +155,8 @@
         "hidden": {
           "objects": ["account"],
           "fields": [{"object": "invoice_line", "field": "amount"}, {"object": "invoice_line", "field": "unit_price"}]
-        }
+        },
+        "withheldRollups": [{"object": "invoice", "field": "total"}]
       }
     ],
     "operations": [

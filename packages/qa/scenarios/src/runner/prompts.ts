@@ -321,9 +321,15 @@ function personaLine(card: Card, p: Persona): string {
     ...(p.hidden.objects ?? []).map((o) => `the object \`${o}\``),
     ...(p.hidden.fields ?? []).map((f) => `the field \`${f.object}.${f.field}\``),
   ];
+  const rollups = (p.withheldRollups ?? []).map((r) => `\`${r.object}.${r.field}\``);
   const scope = (p.scope ?? []).map((s) => `\`${s.object}\` rows whose \`${s.field}\` is ${JSON.stringify(s.value)}`);
   return (
     `- \`${permissionSetName(card, p.id)}\` for \`${p.id}\` (${p.role}): must not read ${hides.join(' or ')}` +
+    (rollups.length
+      ? rollups.length > 1
+        ? `; the roll-up fields ${rollups.join(' and ')} summarise what it must not read, so they are withheld too: its set must not read them either`
+        : `; the roll-up field ${rollups[0]} summarises what it must not read, so it is withheld too: its set must not read it either`
+      : '') +
     (scope.length ? `; sees only ${scope.join(' and ')}` : '') +
     '.'
   );

@@ -423,6 +423,17 @@ export const PersonaSchema = z
      */
     allowedRollups: z.array(FieldRefSchema).min(1).optional(),
     /**
+     * The roll-ups (summary fields, `project.task_count`) on objects the
+     * persona reads that summarise the rows or fields its `hidden` withholds,
+     * named so the build prompt can say they are withheld too: a client who
+     * may not see the tasks sees neither their count nor their total hours.
+     * Prompt text only (`personaLine` in `runner/prompts.ts`): the Build
+     * charge (`rollupSourceCharges`) already charges every such roll-up the
+     * persona's set reads, named here or not, and the leak grader does not
+     * read this key.
+     */
+    withheldRollups: z.array(FieldRefSchema).min(1).optional(),
+    /**
      * ROW scope: of each named object the persona sees only the rows whose
      * `field` (a field or relation path) equals `value` — a rep sees their own
      * rows (`owner`), a manager their department's (`owner.department`). The
@@ -452,6 +463,14 @@ export const PersonaSchema = z
     (p.allowedRollups ?? []).forEach((r, i) => {
       const hidden = (p.hidden.objects ?? []).includes(r.object) || (p.hidden.fields ?? []).some((h) => h.object === r.object && h.field === r.field);
       if (hidden) ctx.addIssue({ code: 'custom', path: ['allowedRollups', i], message: `\`${r.object}.${r.field}\` is in the persona's hidden: an allowed roll-up is one the persona reads` });
+    });
+    (p.withheldRollups ?? []).forEach((r, i) => {
+      const at = ['withheldRollups', i];
+      const hidden = (p.hidden.objects ?? []).includes(r.object) || (p.hidden.fields ?? []).some((h) => h.object === r.object && h.field === r.field);
+      if (hidden) ctx.addIssue({ code: 'custom', path: at, message: `\`${r.object}.${r.field}\` is in the persona's hidden already: a withheld roll-up lives on an object the persona reads` });
+      else if ((p.allowedRollups ?? []).some((a) => a.object === r.object && a.field === r.field)) {
+        ctx.addIssue({ code: 'custom', path: at, message: `\`${r.object}.${r.field}\` is in the persona's allowedRollups too: a roll-up is either withheld or allowed` });
+      }
     });
   });
 
