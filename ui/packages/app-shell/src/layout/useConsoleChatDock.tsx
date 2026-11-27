@@ -254,6 +254,16 @@ export function useConsoleChatDock({
     }
     // A phone host's first render: `isMobile` is not measured yet.
     if (!isMobile) return;
+    // ui ADR-0057 Amendment A4 — arriving on the AI inquiry page with the
+    // sheet stored open closes it: the page hides it, and a phone sheet
+    // closes on any move away anyway (above), so the next page must not
+    // bring it back over itself. The desktop rail keeps its stored state.
+    if (askPageActive && storedExpanded && !expanded) {
+      movedAwayRef.current = false;
+      writeSheetShownAt(null);
+      collapse();
+      return;
+    }
     if (!expanded) {
       movedAwayRef.current = false;
       writeSheetShownAt(null);
@@ -266,7 +276,7 @@ export function useConsoleChatDock({
       return;
     }
     writeSheetShownAt(location.key);
-  }, [enabled, isMobile, expanded, location.key, navigationType, collapse]);
+  }, [enabled, isMobile, expanded, storedExpanded, askPageActive, location.key, navigationType, collapse]);
 
   // A designer surface can ask the assistant to open through the assistant bus
   // (e.g. an "Ask AI" button).

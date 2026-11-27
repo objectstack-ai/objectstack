@@ -313,7 +313,7 @@ const LIST_PAGE = '/apps/crm/account';
 function AskPageHost() {
   const location = useLocation();
   const navigate = useNavigate();
-  const { control, rail } = useConsoleChatDock({
+  const { control, rail, sheet } = useConsoleChatDock({
     enabled: true,
     appPackageId: 'crm',
     askPageActive: isAppAskPagePath(location.pathname),
@@ -327,6 +327,7 @@ function AskPageHost() {
       <button data-testid="to-ask-page" onClick={() => navigate(ASK_PAGE)} />
       <button data-testid="to-list" onClick={() => navigate(LIST_PAGE)} />
       {rail}
+      {sheet}
     </ChatDockControlProvider>
   );
 }
@@ -384,6 +385,26 @@ describe('the AI inquiry page holds the one ask conversation on its screen (obje
     mountAskPageHost(LIST_PAGE);
     pressToggleChord();
     expect(rail()).toBeInTheDocument();
+  });
+
+  it('on a phone, a sheet open on arrival is closed by the page and stays closed on the next page (objectstack#37556 kept)', () => {
+    setWidth(375);
+    mountAskPageHost(LIST_PAGE);
+    click('open-ask');
+    expect(sheet()).toHaveAttribute('data-open', 'true');
+
+    click('to-ask-page');
+    expect(sheet()).toHaveAttribute('data-open', 'false');
+
+    click('to-list');
+    expect(sheet()).toHaveAttribute('data-open', 'false');
+  });
+
+  it('on a phone, a build hand-off from the page still opens the sheet', () => {
+    setWidth(375);
+    mountAskPageHost(ASK_PAGE);
+    click('open-build');
+    expect(sheet()).toHaveAttribute('data-open', 'true');
   });
 
   it('a build hand-off from the page still opens the drawer', () => {
