@@ -5615,6 +5615,7 @@ const pt = {
       toggleFailed: "Falha ao alterar o status do aplicativo: {{reason}}",
       setDefaultDone: "{{name}} definido como padrão",
       setDefaultFailed: "Falha ao definir o aplicativo padrão: {{reason}}",
+      restoreDefaultFailed: "Não foi possível restaurar {{name}} como aplicativo padrão, então ele não é mais o padrão: {{reason}}",
       appDeleted: "{{name}} excluído",
       deleteFailed: "Falha ao excluir o aplicativo: {{reason}}",
       nothingToDelete: "Nada a excluir para {{name}}: {{reason}}",

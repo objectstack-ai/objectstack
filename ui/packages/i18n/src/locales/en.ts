@@ -6311,6 +6311,7 @@ const en = {
       toggleFailed: 'Failed to toggle app status: {{reason}}',
       setDefaultDone: '{{name}} set as default',
       setDefaultFailed: 'Failed to set default app: {{reason}}',
+      restoreDefaultFailed: 'Could not restore {{name}} as the default app, so it is no longer the default: {{reason}}',
       appDeleted: '{{name}} deleted',
       deleteFailed: 'Failed to delete app: {{reason}}',
       // A `reset: false` answer: no customization row existed, so nothing was

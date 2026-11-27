@@ -5515,6 +5515,7 @@ const zh = {
       toggleFailed: '切换应用状态失败：{{reason}}',
       setDefaultDone: '{{name}} 已设为默认',
       setDefaultFailed: '设置默认应用失败：{{reason}}',
+      restoreDefaultFailed: '无法将 {{name}} 恢复为默认应用，因此它已不再是默认应用：{{reason}}',
       appDeleted: '{{name}} 已删除',
       deleteFailed: '删除应用失败：{{reason}}',
       nothingToDelete: '{{name}} 无可删除：{{reason}}',

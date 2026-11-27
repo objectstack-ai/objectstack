@@ -36,7 +36,7 @@
  * is the pair the stub was able to satisfy before.
  */
 
-import { describe, expect, it, vi, beforeEach } from 'vitest';
+import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter } from 'react-router-dom';
@@ -179,6 +179,138 @@ describe('Set as default — issues a real mutation', () => {
     await waitFor(() => expect(toastError).toHaveBeenCalled());
     expect(toastSuccess).not.toHaveBeenCalled();
     expect(toastError.mock.calls[0][0]).toContain('manage_metadata');
+  });
+});
+
+/**
+ * objectstack#34860 — a refused set-default leaves the default where it was.
+ *
+ * The outgoing default lives in a writable package; the target lives in a
+ * read-only one, whose promote the server refuses with 403. Demote-first means
+ * the demotion has already landed by then, so the page must put it back, in the
+ * same package scope, or the deployment is left with no default app.
+ */
+describe('Set as default — a refused promote restores the previous default (objectstack#34860)', () => {
+  const MTHREE = {
+    name: 'mthree_app',
+    label: 'MThree',
+    isDefault: true,
+    _packageId: 'com.objectstack.qa.mthree',
+  };
+  const SHOWCASE = { name: 'showcase_app', label: 'Showcase', _packageId: 'com.example.showcase' };
+  const READ_ONLY =
+    "Cannot overlay 'app' in package 'com.example.showcase': that package is read-only";
+
+  /** Every write the page sent, with the package scope it named (the 4th argument). */
+  const writes = () =>
+    (saveItem.mock.calls as unknown[][]).map(([, name, body, options]) => [
+      name,
+      (body as { isDefault?: boolean }).isDefault,
+      (options as { packageId?: string } | undefined)?.packageId,
+    ]);
+
+  /** The `isDefault` each app holds after the writes that LANDED, over the listed state. */
+  const landedDefaults = async () => {
+    const state: Record<string, boolean> = Object.fromEntries(
+      apps.value.map((a: any) => [a.name, a.isDefault === true]),
+    );
+    for (const [i, call] of (saveItem.mock.calls as unknown[][]).entries()) {
+      const outcome = saveItem.mock.results[i];
+      // A rejected write is a settled promise that throws; only fulfilled ones landed.
+      const landed = await Promise.resolve(outcome?.value).then(() => true, () => false);
+      if (landed) state[call[1] as string] = (call[2] as { isDefault?: boolean }).isDefault === true;
+    }
+    return Object.keys(state).filter((name) => state[name]);
+  };
+
+  beforeEach(() => {
+    apps.value = [MTHREE, SHOWCASE];
+  });
+
+  // `clearAllMocks` keeps an implementation, so the refusals below are undone
+  // here rather than leaking into the describes that follow.
+  afterEach(() => {
+    saveItem.mockImplementation(async () => ({}));
+  });
+
+  it('re-promotes the demoted default in its own package, and the final writes leave the same default', async () => {
+    saveItem.mockImplementation(async (_type, name, item) => {
+      if (name === 'showcase_app' && item.isDefault === true) throw new Error(READ_ONLY);
+      return {};
+    });
+    const user = userEvent.setup();
+    renderPage();
+
+    await user.click(screen.getByLabelText('Set Showcase as default'));
+
+    await waitFor(() => expect(refresh).toHaveBeenCalled());
+    expect(writes()).toEqual([
+      ['mthree_app', false, 'com.objectstack.qa.mthree'],
+      ['showcase_app', true, 'com.example.showcase'],
+      ['mthree_app', true, 'com.objectstack.qa.mthree'],
+    ]);
+    expect(await landedDefaults()).toEqual(['mthree_app']);
+    // The original refusal is what the operator is told, in the server's words.
+    expect(toastError).toHaveBeenCalledTimes(1);
+    expect(toastError.mock.calls[0][0]).toContain(READ_ONLY);
+    expect(toastSuccess).not.toHaveBeenCalled();
+  });
+
+  it('⛔ says so when the restore is refused too — the lost default is never hidden', async () => {
+    saveItem.mockImplementation(async (_type, name, item) => {
+      if (name === 'showcase_app' && item.isDefault === true) throw new Error(READ_ONLY);
+      if (name === 'mthree_app' && item.isDefault === true) throw new Error('restore refused');
+      return {};
+    });
+    const user = userEvent.setup();
+    renderPage();
+
+    await user.click(screen.getByLabelText('Set Showcase as default'));
+
+    await waitFor(() => expect(refresh).toHaveBeenCalled());
+    expect(writes()).toEqual([
+      ['mthree_app', false, 'com.objectstack.qa.mthree'],
+      ['showcase_app', true, 'com.example.showcase'],
+      ['mthree_app', true, 'com.objectstack.qa.mthree'],
+    ]);
+    expect(await landedDefaults()).toEqual([]);
+    expect(toastError).toHaveBeenCalledTimes(2);
+    expect(toastError.mock.calls[0][0]).toContain(READ_ONLY);
+    // The second error names the app that is no longer the default, and why.
+    expect(toastError.mock.calls[1][0]).toContain('MThree');
+    expect(toastError.mock.calls[1][0]).toContain('restore refused');
+    expect(toastSuccess).not.toHaveBeenCalled();
+  });
+
+  it('a refused demotion writes nothing more — there is nothing to restore', async () => {
+    saveItem.mockImplementation(async (_type, name) => {
+      if (name === 'mthree_app') throw new Error('forbidden');
+      return {};
+    });
+    const user = userEvent.setup();
+    renderPage();
+
+    await user.click(screen.getByLabelText('Set Showcase as default'));
+
+    await waitFor(() => expect(refresh).toHaveBeenCalled());
+    expect(writes()).toEqual([['mthree_app', false, 'com.objectstack.qa.mthree']]);
+    expect(await landedDefaults()).toEqual(['mthree_app']);
+    expect(toastError).toHaveBeenCalledTimes(1);
+  });
+
+  it('CONTROL: an accepted promote keeps the order demote → promote, with no restore write', async () => {
+    const user = userEvent.setup();
+    renderPage();
+
+    await user.click(screen.getByLabelText('Set Showcase as default'));
+
+    await waitFor(() => expect(toastSuccess).toHaveBeenCalled());
+    expect(writes()).toEqual([
+      ['mthree_app', false, 'com.objectstack.qa.mthree'],
+      ['showcase_app', true, 'com.example.showcase'],
+    ]);
+    expect(await landedDefaults()).toEqual(['showcase_app']);
+    expect(toastError).not.toHaveBeenCalled();
   });
 });
 

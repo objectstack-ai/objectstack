@@ -6076,6 +6076,7 @@ const ar = {
       toggleFailed: "فشل تغيير حالة التطبيق: {{reason}}",
       setDefaultDone: "تم تعيين {{name}} كافتراضي",
       setDefaultFailed: "فشل تعيين التطبيق الافتراضي: {{reason}}",
+      restoreDefaultFailed: "تعذرت استعادة {{name}} كتطبيق افتراضي، لذا لم يعد هو الافتراضي: {{reason}}",
       appDeleted: "تم حذف {{name}}",
       deleteFailed: "فشل حذف التطبيق: {{reason}}",
       nothingToDelete: "لا يوجد ما يُحذف لـ {{name}}: {{reason}}",

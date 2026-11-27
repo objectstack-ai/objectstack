@@ -5469,6 +5469,7 @@ const de = {
       toggleFailed: "Ändern des App-Status fehlgeschlagen: {{reason}}",
       setDefaultDone: "{{name}} als Standard festgelegt",
       setDefaultFailed: "Festlegen der Standard-App fehlgeschlagen: {{reason}}",
+      restoreDefaultFailed: "{{name}} konnte nicht als Standard-App wiederhergestellt werden und ist daher nicht mehr der Standard: {{reason}}",
       appDeleted: "{{name}} gelöscht",
       deleteFailed: "Löschen der App fehlgeschlagen: {{reason}}",
       nothingToDelete: "Nichts zu löschen für {{name}}: {{reason}}",

@@ -71,6 +71,15 @@
  * row shows the state the server serves. No row is patched locally ahead of
  * that read.
  *
+ * ## A refused set-default leaves the default where it was (objectstack#34860)
+ *
+ * Set default demotes the outgoing default before it promotes the target, so
+ * a failure never leaves two defaults. When the promote is then refused (a
+ * target in a read-only package answers 403), each demotion that landed is
+ * put back in its own package scope before the refusal is shown, so the
+ * deployment keeps the default it had. A restore the server refuses too gets
+ * its own error toast naming the app that is no longer the default.
+ *
  * ## A disabled star says why (ux-conventions.disabled-control-reason)
  *
  * The default app's Set-default star is disabled, and it gives its reason,
@@ -398,14 +407,17 @@ export function AppManagementPage() {
       return;
     }
     setProcessing(true);
+    // The outgoing defaults whose demotion the server ACCEPTED, in order — the
+    // ones a failure further on must put back (objectstack#34860).
+    const demoted: any[] = [];
     try {
       // `isDefault` ROUTES (`resolveLandingPath` rule 1 takes the FIRST match),
       // so it is single-valued in effect but not by construction: leaving the
       // previous holder set would make the landing depend on the order the
       // server happens to list apps in. Demote first, promote second — that
-      // ordering is what makes a failure mid-way leave the deployment with NO
-      // default (falls through to `/home`, the documented rule-3 answer) rather
-      // than with two.
+      // ordering is what makes a failure mid-way never leave the deployment
+      // with two defaults. A failure mid-way is then undone below, so it does
+      // not leave it with NONE either.
       const outgoing = (apps || []).filter(
         (a: any) => a?.isDefault === true && a.name !== app.name,
       );
@@ -413,6 +425,7 @@ export function AppManagementPage() {
       // the incoming one may belong to different packages, or to none.
       for (const prev of outgoing) {
         await saveApp(meta, readAuthored, prev, { isDefault: false });
+        demoted.push(prev);
       }
       await saveApp(meta, readAuthored, app, { isDefault: true });
       toast.success(t('appManagement.toast.setDefaultDone', {
@@ -420,13 +433,37 @@ export function AppManagementPage() {
         name: appTitle(app),
       }));
     } catch (e: unknown) {
+      // objectstack#34860 — the promote (or a later demotion) was refused, e.g.
+      // 403 for a target in a read-only package. Every demotion that already
+      // landed is put back, each in the same package scope it was demoted in,
+      // so a refused set-default leaves the default where it was. The target
+      // was never promoted, so restoring cannot make two.
+      const unrestored: any[] = [];
+      let restoreError: unknown;
+      for (const prev of demoted) {
+        try {
+          await saveApp(meta, readAuthored, prev, { isDefault: true });
+        } catch (restoreFailure: unknown) {
+          unrestored.push(prev);
+          restoreError ??= restoreFailure;
+        }
+      }
       toast.error(t('appManagement.toast.setDefaultFailed', {
         defaultValue: 'Failed to set default app: {{reason}}',
         reason: reason(e, unknownError),
       }));
+      if (unrestored.length > 0) {
+        // The restore was refused too: the deployment is left without the
+        // default it had. Said, never hidden: the operator has to set one.
+        toast.error(t('appManagement.toast.restoreDefaultFailed', {
+          defaultValue: 'Could not restore {{name}} as the default app, so it is no longer the default: {{reason}}',
+          name: unrestored.map((a) => appTitle(a)).join(', '),
+          reason: reason(restoreError, unknownError),
+        }));
+      }
     } finally {
-      // Re-read on failure too: a failure after the demotion has already
-      // changed the server, and the list must show the deployment as it now is.
+      // Re-read on failure too: the list must show the deployment as it now
+      // is, restored or not.
       await refresh();
       setProcessing(false);
     }
