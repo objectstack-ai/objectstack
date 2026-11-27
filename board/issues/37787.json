@@ -1,0 +1,38 @@
+{
+  "number": 37787,
+  "kind": "issue",
+  "title": "AI 问询首页 T1：菜单项 ai:chat 的参数 schema 与校验，链接不再带参数",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:ai",
+    "domain:spec",
+    "enhancement",
+    "pm:dispatched",
+    "priority:p1"
+  ],
+  "assignees": [
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-11-27T03:18:00Z",
+  "updated_at": "2026-11-27T05:59:33Z",
+  "closed_at": "2026-11-27T05:59:33Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/37787",
+  "body": "epic:#5027#1 · hotlong · session_01Q4EjjMUfmNYTem26rXLFUf\n\nFiling gate: ① maintainer-asked. Jack in the seat thread, 2026-11-27: 「立卡派发」 (02:37Z); route ruling 「先内置页面，再做页面积木」 (02:41Z card); 「我们是一个开发平台，你搭的入口页面必须是通用的」 (02:51Z); 「用fable评审一下完整的首页方案，我现在只要考虑这一个页面」 (03:07Z); ADR-0057 conflict ruling 「做首页，本页隐藏机器人」 (03:16Z card).\nPlan: `/mnt/project-files/ai-home/plan-v1.md`, Fable review with file:line evidence `/mnt/project-files/ai-home/fable-review-v1.md` (objectstack `da31daff`, cloud `917f57c`). Mockup: https://claude.ai/artifact/SS7UdUYXethLuvV8f5D7JY.\nParent: objectstack-ai/cloud#5027 (ask experience). Trigger app: brightrule (a policy-inquiry app whose only AI entry today is the top-right robot).\nGrading: area:ai · Task · p1 · size S · reach: every app that puts an `ai:chat` entry on its menu.\nDedupe: searched `ai:chat`, `AiChatNavParams`, `component nav params schema`: none.\n\n## 维护者速读\n- 是什么：AI 问询首页的配置项（欢迎标题、说明、输入提示、推荐问题）挂在应用菜单项 `componentRef: 'ai:chat'` 的 `params` 上，这张卡给它定 schema，保存应用时校验，并让这类菜单链接不再把参数拼进网址。\n- 影响：之后的页面卡（T2）直接读菜单项里的配置。\n- 要你做什么：无。\n\n## Background (verified, see the review §1)\n- `component` nav item `params` is an open `z.record(z.string(), z.unknown())` (`packages/spec/src/ui/app.zod.ts:743-744`), not validated.\n- `NavigationRenderer` serialises a component item's `params` into the querystring (`ui/packages/layout/src/NavigationRenderer.tsx:1192-1200`, non-strings via `JSON.stringify`); `ComponentNavView` passes only querystring strings as props (`ui/packages/app-shell/src/views/ComponentNavView.tsx:53-58`). Arrays and long copy do not belong in a URL.\n\n## What to do\n1. `packages/spec/src/ui/`: export `AiChatNavParamsSchema` (strict): `title?`, `subtitle?`, `placeholder?` (strings, sensible max lengths), `suggestions?` (array of 1–4 non-empty strings). No `agent`, no `scope` in v1 (agent is pinned to `ask`; strict scope is out of this phase). Describe each key for the generated docs.\n2. Validate it where an app is parsed: a `type: 'component'` nav item with `componentRef: 'ai:chat'` has its `params` checked against the schema (issue path `navigation.<i>.params.<key>`). Do this for this one componentRef, not a general per-componentRef registry. Other component items keep the open record.\n3. v1 allows at most ONE `ai:chat` entry per app (navigation and `areas[].navigation`, any depth): refuse a second with a clear message.\n4. `NavigationRenderer`: an `ai:chat` item builds `/apps/<app>/component/ai/chat` with NO querystring from `params`; active-item highlighting still works.\n5. Export the JSON Schema with the other generated artifacts (the design-mode form in a later card uses it). Regenerate spec artifacts; changeset (`@objectstack/spec` minor, Metadata-protocol: added).\n\n## Acceptance\n- Positive and negative parse cases (each key, >4 suggestions, unknown key, wrong type, two `ai:chat` entries); a non-`ai:chat` component item with arbitrary params still parses.\n- Renderer test: the `ai:chat` href has no `?`; another component item's href is unchanged."
+}

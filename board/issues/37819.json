@@ -1,0 +1,37 @@
+{
+  "number": 37819,
+  "kind": "issue",
+  "title": "ADR-0057 Amendment A4: an app may place one AI inquiry page (`ai:chat`) in its menu; the top-bar robot hides on that page",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:ai",
+    "domain:docs",
+    "pm:dispatched",
+    "priority:p1"
+  ],
+  "assignees": [
+    "os-elon-musk"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-11-27T05:00:27Z",
+  "updated_at": "2026-11-27T08:03:35Z",
+  "closed_at": "2026-11-27T08:03:34Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 6,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/37819",
+  "body": "repo:objectstack#1 · os-elon-musk · session_016WV4cwGVgec21LwQTtRY85\n\nFiling gate: ③ maintainer-directed task. Source: maintainer. Carries item 9 of #37788; #37788 keeps items 1–8 and 10.\nSplit ruled by seat repo:objectstack#1 (routing call, 2026-11-27T04:57Z): the ADR text lands first, the page PR for #37788 lands only after this card's PR merges (text-first order).\nGrading: area:ai · Task · priority:p1 (it blocks #37788, p1) · size S · reach: every app with an `ai:chat` menu entry; the governed ADR text that #37788's code would otherwise contradict.\nDedupe: issue search (open and closed) `\"ADR-0057\" \"Amendment A4\"`: 1 hit (#37788, the parent); `\"ai:chat\" page`: 5 hits (#37787 #37788 #37790 #6015 #1878), none an ADR-0057 amendment card.\n\n## 维护者速读\n- 是什么：把「应用可以在菜单里放一个 AI 问询页，这一页隐藏右上角机器人」这条已有裁决写进设计文档 ADR-0057，作为修订 A4。只改文档，不改代码。\n- 为什么先做：ADR-0057 修订 A3 现在写的是「右侧抽屉是唯一的对话容器」，页面代码（#37788）若先合，主干就和受管文档矛盾。所以文档先落，页面后落。\n- 要你做什么：无。PR 由座位交审批人批准。\n\n## Why\n\nADR-0057 Amendment A3 (2026-11-17, Accepted) says: \"In the console shell, Home and every app page, the right-side drawer is the one place the assistant's conversation is drawn\" and \"There is no `/ai` page.\" (`ui/docs/adr/0057-console-ai-chat-one-conversation-docked.md`, section \"Amendment A3\", Decision, bullet \"One container\"). #37788 builds an in-app AI inquiry page, so that sentence must be amended before the page lands.\n\nMaintainer rulings, verbatim, as recorded in #37788's body (Filing gate line), all 2026-11-27:\n- 「先内置页面，再做页面积木」 (02:41Z, route ruling)\n- 「我们是一个开发平台，你搭的入口页面必须是通用的」 (02:51Z)\n- 「做首页，本页隐藏机器人」 (03:16Z, the ADR-0057 conflict ruling)\n\n## What to write\n\nOne new section `## Amendment A4 (2026-11-27, Accepted) — an app's AI inquiry page`, placed after Amendment A3 and before \"Open design questions\", in the same shape as A3 (What it changes · Why · Maintainer ruling verbatim · Decision · Consequences). The Decision records exactly what #37788 rules, and nothing beyond it:\n1. An app may place one AI inquiry page in its navigation, as a menu entry whose component is `ai:chat`; its copy (welcome, placeholder, suggestions) comes from that entry's declared params (#37787), never from the URL. The page is platform-generic: no business wording of its own.\n2. Placed first in the menu, it is the app's home.\n3. While that page is the active route, the top-bar robot (the drawer's entry) is hidden, so one screen never draws two ask conversations; on every other page the robot and the drawer are as A3 says.\n4. The page runs `ask` (a maker gets `ask` there too); a build hand-off from it opens the drawer as today. Its conversation key is `app:<package>:ask`, bound to that app's package; `?c=<conversationId>` restores the conversation, and one that is not the caller's or belongs to another app opens the home state.\n5. A3 stands everywhere else: the drawer is still the one container on Home and on every app page without such an entry; `/ai` addresses still open the drawer; the floating button stays retired.\n6. Consequences: \"Implemented under objectstack#37788.\" Name the spec symbol for the params only if #37787's PR has merged when this PR is written; otherwise name the card.\n\nAlso amend A3's \"One container\" bullet in place with a short pointer in the A3 style (`*(Amendment A4: …)*`), so a reader of A3 finds the exception. No other section changes.\n\n## Acceptance\n- Diff touches `ui/docs/adr/0057-console-ai-chat-one-conversation-docked.md` only (plus an ADR index row only if a generator for `ui/docs/adr` exists and its check fails without it).\n- The three rulings are quoted verbatim, untranslated, with where they are recorded.\n- Nothing in A4 decides beyond #37788's header and items 1–8 (no page builder, no T5/T6 designer behaviour, no hide-for-no-seat rule: those are later cards).\n- Governed surface (`ui/docs/adr/**`): the PR goes to seat repo:objectstack#1 for the ①–④ hand-off; the area does not land it."
+}

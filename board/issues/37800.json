@@ -1,0 +1,32 @@
+{
+  "number": 37800,
+  "kind": "issue",
+  "title": "ADR-0085 Note：记录页两个对象级布局键 pinOverview / fieldTabs 作为裁定例外",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:ux",
+    "domain:docs",
+    "enhancement",
+    "pm:queue",
+    "priority:p1"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-11-27T04:09:11Z",
+  "updated_at": "2026-11-27T04:22:13Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/37800",
+  "body": "epic:#5027#1 · hotlong · session_01Q4EjjMUfmNYTem26rXLFUf\n\nFiling gate: ① maintainer-asked. Jack in the seat thread, 2026-11-27: 「现在记录详情页可以配置不按左右栏显示吗？」 (03:34Z); 「我觉得这个应该是一个元数据的配置项吧，这种应该是常见需求。」 (03:36Z); 「我能够具体配置每一个页签显示哪些分组吗？然后还有一个开关控制第一个页面要不要pin到左侧」 (03:40Z); 「是否建议保留 relatedList 这个语法」 (03:51Z, no rename); 「同意，立卡 p1」 (03:52Z); 「刚才的任务以及你现在的建议用 fable 评审」 (03:55Z); decision card 04:07Z: 「例外 + 新键 fieldTabs」 (ADR-0085 ruled exception; field tabs as a sibling object key, `relatedLists` untouched; three cards S, S–M, M).\nFable review (code-verified at objectstack 3ed97b71): `/mnt/project-files/record-page/fable-review.md`. Trigger app: brightrule policy record (long 正文 in a 276 px value cell).\nGrading: domain:docs · Task · p1 · size S · governed (Tier H: `docs/adr/**`, `skills/**`) — the maintainer lands it.\nDedupe: searched `ADR-0085 exception`, `actionLayout exception`: none open.\n\n## 维护者速读\n- 是什么：ADR-0085 §2 规定\"只是隐藏/重排的键在对象层拒收\"。你 04:07Z 选了开例外，这张卡在 ADR-0085 补一条带日期的 Note，记下 `pinOverview` 和 `fieldTabs` 是裁定例外（同 `actionLayout` 的写法），并同步 skills 里描述记录页布局的规则。\n- 影响：#37792（pinOverview）和 #37802（fieldTabs）等它落地才开工（AGENTS.md 规则 13）。\n- 要你做什么：这个 PR 改受管文件，需要你本人合并。\n\n## What to do\n1. `docs/adr/0085-object-semantic-roles-over-surface-hint-blocks.md`: add a dated Note next to the `actionLayout` exception (~:123) recording the ruling: two object-level record-page keys are admitted as exceptions to §2 (~:61-68), quoting Jack 03:36Z and the 04:07Z card. State each key's scope: `pinOverview` (desktop full standard record page only: whether the overview pins left) and `fieldTabs` (named field groups drawn as tabs right after the overview; `relatedLists` unchanged). Say what stays refused: any other re-arrange-only object key still needs its own ruling.\n2. `skills/**`: wherever the record-page layout is described for authors (grep `pinned`, `left column`, `#35890`, `relatedLists`), add the two keys with one-line semantics, marked as landing with their cards. Keep it short; no new skill.\n3. No code change in this PR (the `recordPageColumns.ts:37-45` header rewrite rides with #37792).\n\n## Acceptance\n- `pnpm check:adr-anchors` and docs checks green; the Note names both keys, both quotes, and the date.\n"
+}

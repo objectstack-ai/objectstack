@@ -2,7 +2,7 @@
   "number": 37769,
   "kind": "pull_request",
   "title": "docs(skills): actions teach ai.requiresConfirmation beside confirmText; permission sets teach the owner-only delete floor",
-  "state": "open",
+  "state": "closed",
   "state_reason": null,
   "draft": false,
   "author": {
@@ -21,10 +21,14 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-27T01:49:06Z",
-  "updated_at": "2026-11-27T02:15:17Z",
-  "closed_at": null,
-  "closed_by": null,
-  "merged_at": null,
+  "updated_at": "2026-11-27T02:36:13Z",
+  "closed_at": "2026-11-27T02:36:11Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-11-27T02:36:11Z",
   "comments": 2,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/pull/37769",

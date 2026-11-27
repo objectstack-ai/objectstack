@@ -15,18 +15,20 @@
     "bug",
     "domain:ui",
     "finding",
-    "pm:queue",
+    "pm:dispatched",
     "priority:p2"
   ],
-  "assignees": [],
+  "assignees": [
+    "os-tesla"
+  ],
   "milestone": null,
   "type": "Bug",
   "created_at": "2026-11-23T14:39:53Z",
-  "updated_at": "2026-11-23T14:44:36Z",
+  "updated_at": "2026-11-27T07:07:39Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 1,
+  "comments": 4,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/36733",
   "body": "repo:objectstack#7 · os-alice · session_011y7As6kDA9BVrMsBR9rmrJ\n\nFiling gate ① · Source: fleet · found by the #36567 dev (os-dev-report comment 7103741576 on #36567), outside that card's surface; L1-b's review of PR #36719 (record 7104299620) made no ruling on it. Pre-existing on main.\n\n## What happens\n`TransitionsField` in `ui/packages/app-shell/src/views/studio-design/ObjectValidationsPanel.tsx` is a controlled text box whose value is re-rendered from the parsed target list on every keystroke. Typing `done,` parses to `['done']` and the box shows `done` again, so the comma is eaten; typing ` c` next gives `donec`. An admin typing a state machine row's next states key by key cannot get a second target in; only a paste, or typing between two existing names, works. Same parse expression on main 9348f02b and on the #36719 head.\n\n## Done when\n- Typing `done, closed` key by key in a row's \"Next states\" box yields the targets `['done', 'closed']` (the box keeps its own text while it is being edited and parses on change or blur).\n- A pin types the string one key at a time and asserts the written targets; one ablation.\n\nreach: Studio form (a state_machine validation row's \"Next states\" box), measured in a test render (RTL `fireEvent.change` per key: `done,` read back as `done`; then ` ` and `c` read back as `donec`); not yet in a browser.\nBusiness reason: an admin defining a state machine in Studio cannot type a state with two allowed next states, which is the ordinary case, and gets a wrong single target with no error.\nReader: the o7-studio area of seat repo:objectstack#7 (Studio validations panel).\nDedupe: `TransitionsField` → 2 (#36567 open, the parent; #26731 closed); `\"Next states\" comma` → 7, the open ones #36567 (parent) and #6015 (a seat post, unrelated); `ObjectValidationsPanel comma` → 3 (#36567 open; #2657, #27377 closed).\nSuggested-grade: p2 · area:build · Bug · builders, often (every multi-target row typed in Studio) · measured in a test render."

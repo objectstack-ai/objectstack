@@ -1,0 +1,34 @@
+{
+  "number": 37790,
+  "kind": "issue",
+  "title": "AI 问询首页 T3：首页列出本应用的最近对话",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:ai",
+    "domain:ui",
+    "enhancement",
+    "pm:blocked",
+    "priority:p2"
+  ],
+  "assignees": [
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": "Feature",
+  "created_at": "2026-11-27T03:19:48Z",
+  "updated_at": "2026-11-27T04:21:58Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/37790",
+  "body": "epic:#5027#1 · hotlong · session_01Q4EjjMUfmNYTem26rXLFUf\n\nFiling gate: ① maintainer-asked. Jack in the seat thread, 2026-11-27: 「立卡派发」 (02:37Z); route ruling 「先内置页面，再做页面积木」 (02:41Z card); 「我们是一个开发平台，你搭的入口页面必须是通用的」 (02:51Z); 「用fable评审一下完整的首页方案，我现在只要考虑这一个页面」 (03:07Z); ADR-0057 conflict ruling 「做首页，本页隐藏机器人」 (03:16Z card).\nPlan: `/mnt/project-files/ai-home/plan-v1.md`, Fable review with file:line evidence `/mnt/project-files/ai-home/fable-review-v1.md` (objectstack `da31daff`, cloud `917f57c`). Mockup: https://claude.ai/artifact/SS7UdUYXethLuvV8f5D7JY.\nParent: objectstack-ai/cloud#5027 (ask experience). Trigger app: brightrule (a policy-inquiry app whose only AI entry today is the top-right robot).\nGrading: area:ai · Task · p2 · size S · reach: the `ai:chat` page.\nDedupe: searched `recent conversations activePackageId`: none.\nBlocked-by: #37788\n\n## 维护者速读\n- 是什么：AI 问询页首页态下方列\"最近的对话\"，只列本应用、从这一页发起的对话（最多 5 条），另有\"全部对话\"打开右侧抽屉的历史。\n- 已定：只算本页发起的，抽屉里的不算（Jack 未反对的默认，03:14Z）。\n- 要你做什么：无。\n\n## Background\n- The conversation list filters only by `userId` / `agentId`; `metadata` is a JSON string column (cloud `packages/service-ai/src/conversation/objectql-conversation-service.ts:296,356-364`); list rows carry `metadata` (`:767`). #37788 makes this page write `metadata.activePackageId`.\n\n## What to do\n1. On the home state, fetch the caller's latest 50 conversations (existing list call), keep those whose `metadata.activePackageId` is this app's package, show the newest 5 (title + relative time); click opens it in the page (`?c=`).\n2. \"全部对话\" opens the drawer's history (`useOpenAssistant` or the existing opener), not a full page.\n3. Extend the client conversation type to carry `metadata`. No server change in this card (a server-side package filter is a later card if 50 proves too few).\n\n## Acceptance\n- A conversation of another app, or one started in the drawer, does not appear; empty state when none.\n- Tests for the filter and the empty state."
+}

@@ -1,0 +1,32 @@
+{
+  "number": 37789,
+  "kind": "issue",
+  "title": "review follow-ups of PR #37743",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:ux",
+    "bug",
+    "domain:ui",
+    "pm:queue",
+    "priority:p3"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-11-27T03:19:35Z",
+  "updated_at": "2026-11-27T04:22:01Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/37789",
+  "body": "repo:objectstack#2 · os-sales · session_01L6bhgV6i8jfWwSXjpWJrjA\n\nFiling gate: ① (review follow-ups, one card per PR) · Source: fleet (Contract review records 7207845228 and 7208869311 on PR #37743, nits N2, N3 and N4 and an out-of-diff note, adopted at ACCEPT)\n\n## What happens\n\nPR #37743 (Fixes #37677) made a `repeater` field on `span: 'auto'` take the whole row on the record form, on `/forms/NAME` and on the form designer canvas. It reads the object field's declared type through `WIDE_DECLARED_FIELD_TYPES` in `ui/packages/plugin-form/src/autoLayout.ts`. Its review left these open:\n\n- [ ] **The parity pin cannot see the declared rule** (N2). app-shell's `richtextSurfaceParity` compares only the type-only wide sets of the form and the detail view. It stays green now that the two differ for a repeater (wide on the form, one cell on the detail view, by design). The multi-file rule has a plugin-detail twin, and this rule has none. Expected: the pin names the declared leg and asserts the intended difference, so a future drift in either direction goes red.\n- [ ] **The designer canvas drops `multiple`** (N4). `ObjectFormDesigner.tsx` passes `{ type }` to `resolveColSpan` without `multiple`, so a file or image field that declares `multiple: true` takes one cell on the canvas but the whole row on the runtime form. This predates #37743, and the \"cannot drift\" comment in `ObjectFormDesigner.test.tsx` is not true of the multi-file rule. Expected: the canvas passes `multiple`, with a pin and a single-file control.\n- [ ] **Docblock example** (N3). The `WIDE_DECLARED_FIELD_TYPES` docblock gives the designer as its example of a bare name on `FormField.type`, but the designer reaches the rule through the stash leg. The plugin-form test titled \"the form designer passes one\" exercises the `type` leg. Expected: name the right caller, or retitle the test.\n- [ ] **The metadata-form renderer ignores `span`** (out of the diff). `ui/packages/app-shell/src/views/metadata-admin/SchemaForm.tsx` renders metadata forms from the same `FormFieldSchema` and sizes a row from `colSpan` alone. It reads neither `span` nor any wide default, so the spec's \"the renderer sizes the field…\" is not true there, before or after #37743. This was read, not run. Expected: either SchemaForm honours `span` through the shared resolver, or the spec `span` describe names the renderers it binds. Reproduce first.\n\nPriority: p3. These are layout and pin-accuracy gaps. Nothing loses data, and an author can set `colSpan` or `span: 'full'` today.\nBusiness reason: designers see a different layout on the canvas than users get at runtime, and the guard that should catch form/detail drift is blind to one rule.\nReader: the ux lane thread that next edits `ui/packages/plugin-form/src/autoLayout.ts` or the form designer.\nDedupe: searched open issues for `\"PR #37743\"` (0 hits) and `SchemaForm span colSpan` (no match).\nRelated: #37677, PR #37743.\n\n## Grade\n\narea:ux · Bug · minor · reach: read · evidence: read → p3"
+}

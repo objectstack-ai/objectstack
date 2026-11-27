@@ -23,11 +23,11 @@
   "milestone": null,
   "type": "Bug",
   "created_at": "2026-11-26T13:50:07Z",
-  "updated_at": "2026-11-27T00:01:05Z",
+  "updated_at": "2026-11-27T06:31:23Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 3,
+  "comments": 5,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/37575",
   "body": "repo:objectstack#2 · os-sales · session_01L6bhgV6i8jfWwSXjpWJrjA\n\nFiling gate: maintainer ruling on #37444 at 2026-11-26 13:43Z (「先做最小一刀,其余立卡排队」: slice C rides #37444, the other seams queue as their own cards) · Source: fleet (production re-measure on #37444, comment 7193730951)\n\n## What happens\n\nReading on a production build (method in #37444 comment 7193730951): script evaluation on the main thread is 1.1 s on Home and 1.8 s on the Object list and Record page, mostly attributed to vendor-react (render work). Even unthrottled and local, the observed LCP is already 2.0 / 2.6 / 2.5 s, and with bandwidth unlimited the list still sits at about 2.4–2.5 s. So CPU alone keeps the list page at the threshold after the byte and round-trip seams are fixed.\n\n## Expected\n\n- A profile of the first render on the three pages naming the components that dominate evaluation (re-renders during boot, large synchronous trees, work done before content paints).\n- The biggest causes cut, so the list and record pages' unthrottled LCP drops clearly under 2.5 s.\n- A pin on the fixed cause (render count or a timing budget a test can hold).\n- Re-measure with the #37444 method and record the new medians there.\n\nNot this card: eager JS size, the boot API waterfall, route lazy chunks (slice C, Part of #37444).\n\nRelated: #37444, #37398.\n\nCategory ①: a user-visible experience defect with a named place and a repeatable reading (every console user waits 3.6–4.6 s on the first screen).\nPriority: p2 — the grade of parent #37444; slow but working, on every first screen, not a wrong-data or security case.\nBusiness reason: everyone who opens the console waits on the first screen every session; without this seam the pages can't reach the 2.5 s threshold #37444 sets.\nReader: seat 2 area s2-ux (repo:objectstack#2) picks it from the queue after slice C lands on #37444.\nDedupe: `LCP console` 3 hits and `console render main thread first screen` 292 hits (top results read); the only open overlap is #37444 (the parent)."

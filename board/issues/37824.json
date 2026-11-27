@@ -1,0 +1,36 @@
+{
+  "number": 37824,
+  "kind": "pull_request",
+  "title": "fix(components): a long unbroken token keeps the alert dialog inside max-w-lg, with its buttons on screen",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tooling"
+  ],
+  "assignees": [
+    "os-sales"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-27T05:17:11Z",
+  "updated_at": "2026-11-27T06:15:22Z",
+  "closed_at": "2026-11-27T06:15:20Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-11-27T06:15:20Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/37824",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-sales\"} -->\n_Requested by **Sales** · [project thread](https://claude.ai/code/project/chan_01D5bWFY3rFzgJcytD5gD4Uu?thread=cmsg_01D5bWFY3rFzgJcytD5gD4UuDJAbBe3iTrFcF7GZrucZ32)_\n\nFixes #37761\n\nThe record delete confirm puts the record's title into the alert dialog's title. A title holding one long token with no spaces (a pasted URL, a file name, a hash) stretched the dialog past the viewport, and Cancel and Delete went off-screen, reachable only from the keyboard.\n\n## Premise, measured\n\n`AlertDialogContent` is `grid w-full max-w-lg … p-6` with one `auto` column track; `AlertDialogTitle` (`text-lg font-semibold`) and `AlertDialogDescription` (`text-sm text-muted-foreground`) carry no wrap rule, and nothing sets `min-w-0`. So the token's min-content width became the track's width.\n\nChromium at 1440 px, the component's own class strings compiled by Tailwind 4.3.3, a 5,000-character token in the title:\n\n| | dialog client width | dialog scroll width | title `overflow-wrap` | Cancel x | Delete right edge |\n|---|---|---|---|---|---|\n| `main` | 510 px | 51,248 px | `normal` | 51,540 | 51,713 |\n| this PR | 510 px | 510 px | `anywhere` | 778 | 951 |\n\n## What changes\n\n- **`@object-ui/components` (`ui/alert-dialog.tsx`), the shared component, so every alert dialog is covered:**\n  - `AlertDialogContent` adds `[&>*]:min-w-0`: each grid item may shrink below its min-content width, so no child can widen the track past `max-w-lg`.\n  - `AlertDialogTitle` and `AlertDialogDescription` add `[overflow-wrap:anywhere]`: a token wider than the dialog breaks instead of overflowing. The full text stays in the dialog, wrapped.\n\n## Decisions made here\n\n- **Wrap, not truncate.** The acceptance allows either; wrapping keeps the whole title readable with no tooltip, and a confirm is read before a destructive click.\n- **`overflow-wrap: anywhere`, not `break-words`.** `break-word` does not lower an element's min-content width, so in an `auto` grid track the token would still set the width; `anywhere` does.\n- **Declared as shadcn local patches.** `src/ui/alert-dialog.tsx` is vendored; the three edits are declared in `ui/scripts/shadcn-local-patches.mjs` (`alertDialogLongTokenPatches`, anchored on `alert-dialog.registry.txt`) so the file still regenerates from registry bytes. The first head (`6e50306d80`) edited the file without them and went red on Test UI 1/16 (`shadcn-local-patches`: \"alert-dialog.tsx no longer regenerates from registry bytes\"); the second commit declares them and moves the reasons out of inline comments into the declarations.\n- **Arbitrary-value classes** (`[overflow-wrap:anywhere]`, `[&>*]:min-w-0`) rather than v4-only named utilities, as the repo has no precedent for `wrap-anywhere` yet.\n- **`Dialog` is not changed.** The card and its measurement are the alert dialog; no regular dialog was measured.\n\n## Verification\n\n- `components/src/__tests__/alert-dialog-long-token-37761.test.tsx` (4): the content carries `[&>*]:min-w-0` beside `grid w-full max-w-lg`; the title and description carry `[overflow-wrap:anywhere]` with a 5,000-character token rendered; a caller's own classes still merge (tailwind-merge drops `text-lg` for `text-xl`) and the wrap rule stays; both buttons render. 3 of 4 are red with `alert-dialog.tsx` reverted (the button control is green on both). jsdom does no layout, so the pixel numbers above come from the Chromium measurement, not this test.\n- `vitest` over all of `@object-ui/components` (512 files, 4,969 passed, including the critical snapshots): green. `eslint` on the changed files: 0 errors.\n- `scripts/__tests__/shadcn-local-patches.test.ts`: 87 passed after the second commit.\n- `overlap-check`: exit 0.\n\nClause-②: no\nMetadata-protocol: none\nSkills-docs: none\n\n## Human Minimum\n\n- [x] 1. Schemas start as Zod; `packages/spec` holds no runtime logic. (No spec change.)\n- [x] 2. Every name I added uses the casing for its kind.\n- [x] 3. No formatter ran; `eslint` on the changed files passes (the full `pnpm lint` runs in CI).\n- [x] 4. One issue, one branch off an up-to-date `main`, one pull request.\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01L6bhgUuauSMJu1nVSQRQri)_\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01L6bhgUuauSMJu1nVSQRQri\n\n<!-- signed: repo:objectstack#2 · os-sales · session_01L6bhgUuauSMJu1nVSQRQri -->\n"
+}

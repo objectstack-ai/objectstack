@@ -2,8 +2,8 @@
   "number": 37664,
   "kind": "issue",
   "title": "37562 跟进：引用定位用渲染后的标题文字与原文标题比对时，带格式的标题对不上",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -13,7 +13,6 @@
   "labels": [
     "area:ai",
     "domain:ui",
-    "pm:dispatched",
     "priority:p3"
   ],
   "assignees": [
@@ -22,11 +21,15 @@
   "milestone": null,
   "type": "Task",
   "created_at": "2026-11-26T18:28:14Z",
-  "updated_at": "2026-11-27T02:00:59Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-27T02:28:21Z",
+  "closed_at": "2026-11-27T02:27:40Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 4,
+  "comments": 5,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/37664",
   "body": "repo:objectstack#5 · os-bill · session_01Utp6CbeF2saT6wUBV4E9uc\n\nFiling gate: ② follow-up out of #37562. The source is seat 5's REWORK 7200445298 on PR #37646 (nit N2), which asks for this p3 card under #37562. The owning area files it under the source card, per the maintainer's standing permission for areas to file their own follow-up cards.\nGrading: area:ai · Task · p3 · reach: a citation whose heading text differs between the body source and the rendered page (inline markup, entities, escapes) · evidence: read.\n\n## 维护者速读\n- 做什么：AI 引用里的段落标题取自正文原文，而页面上比对的是渲染后的文字。标题里有加粗、转义字符等时两边可能对不上，引用就打开到字段而不是那一段。让两边用同一种文字比对。\n- 谁受益：点引用查看出处的用户。\n- 不做会怎样：少数带格式的标题点开后定位不到具体段落。\n- 需要你做的：无。\n\n## What\nThe outline's heading entries (`get_record_context` body outline, `headingsOf` in `@objectstack/spec` `record-body-anchor.ts`) carry the heading as source text; the record page locates the cited heading (`ui/packages/app-shell/src/views/recordSectionAnchor.ts`) against the rendered text. A heading with inline markup (`**x**`, `` `x` ``, links), entities or escapes can then match on one side only.\n- Decide one comparison form and apply it on the page side: normalise the rendered heading and the cited title the same way (strip inline markup, decode entities, collapse whitespace), or derive the page's comparison text from the same parse the field renders with (as PR #37646 does for counting).\n- Do not change the anchor or the outline wire shape.\n\n## Acceptance\n- Tests: a cited heading with bold, inline code, a link, an entity and an escape each opens its section; a control with plain text still does.\n- `Clause-②: no`, `Metadata-protocol: none`.\n\nBlocked-by: #37562 (PR #37646)\nParent: #37562\nSize: XS\nDedupe (objectstack, is:issue): `cited heading rendered text source text` 0 · `recordSectionAnchor inline markup heading` 0.\n"

@@ -1,0 +1,32 @@
+{
+  "number": 37793,
+  "kind": "issue",
+  "title": "review follow-ups of PR #37731",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:ux",
+    "bug",
+    "domain:spec",
+    "pm:queue",
+    "priority:p3"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-11-27T03:41:54Z",
+  "updated_at": "2026-11-27T04:22:04Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/37793",
+  "body": "repo:objectstack#2 · os-sales · session_01L6bhgV6i8jfWwSXjpWJrjA\n\nFiling gate: ① (review follow-ups, one card per PR) · Source: fleet (Contract review record 7209186281 on PR #37731, nits N1–N5, adopted at ACCEPT)\n\n## What happens\n\nPR #37731 (Fixes #37635) makes a milestone activity summary fall back to its stored sentence whenever a translated template would leave a hole. The writer now stores the template's token names (`names`) in `sys_activity.metadata.summary_message`. Its review left these nits:\n\n- [ ] **The `names` property has no pin through the writer** (N3). The design rests on `names` holding every token of the authored template, including tokens that were not interpolated. A writer that stored only the interpolated names would pass every test. Expected: a writer-level pin where a template token has no value, asserting it is still listed in `names`.\n- [ ] **The cache pin is blind to one map** (N4). The cache test counts packaged-base reads only, so it stays green with the `milestoneTemplates` map removed. Expected: the pin also counts template lookups per read.\n- [ ] **A translation-only token is silent** (N2). A translation that names a token its authored template lacks is never served for any row, and nothing reports it. `@objectstack/lint` has no token-parity rule for `_milestones`, and the row in `content/docs/ui/translations.mdx` does not mention the fallback. Expected: a lint rule, or at least a docs sentence.\n- [ ] **Callers outside the spec ask more through a cast** (N1). The two jsdoc sentences in `packages/spec/src/system/i18n-resolver.ts` are exact for the declared five-key union. `displayKeyOverridesPackagedBase` (`packages/objectql/src/registry-top-level.ts`) and `sourceOf` (`packages/metadata-protocol/src/protocol-translated-echo.ts`) pass other keys through a cast. Expected: widen the union, or drop the casts.\n- [ ] **Stale module header** (N5). The `[#37524]` paragraph in the header of `packages/plugins/plugin-audit/src/activity-summary-message.ts` still names two outcomes and omits the stored-sentence fallback.\n\nCategory ①: pin and wording gaps around a shipped fallback.\nPriority: p3. Nothing is composed with a hole today, and these only weaken the guards.\nBusiness reason: if a later change breaks the token list, a non-English reader sees a blank in a timeline line and no test catches it.\nReader: the ux i18n area, or the next thread that touches plugin-audit's activity summaries.\nDedupe: searched open issues for `\"PR #37731\"`: 0 hits.\nRelated: #37635, PR #37731, #37582.\n\n## Grade\n\narea:ux · Bug · minor · reach: read · evidence: read → p3"
+}

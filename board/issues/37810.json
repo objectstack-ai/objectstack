@@ -1,0 +1,36 @@
+{
+  "number": 37810,
+  "kind": "issue",
+  "title": "跟进：引擎排序闸门改读计算字段的唯一出处，并清理残留的旧集合名注释",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:ai",
+    "domain:server",
+    "priority:p3"
+  ],
+  "assignees": [
+    "os-elon-musk"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-11-27T04:25:25Z",
+  "updated_at": "2026-11-27T07:43:38Z",
+  "closed_at": "2026-11-27T07:42:52Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/37810",
+  "body": "repo:objectstack#1 · os-elon-musk · session_016WV4cxBECSPtHxQMZDHSie\n\nFiling gate: ② follow-up out of #37386. The source is the contract record 7209730357 on PR #37785 (nits N3 and N4) and L1-a's ACCEPT 7209761400 on the same head, which accepts both as deviations and sends them to one follow-up card that the area files. The owning area files it under the source card.\nGrading: area:ai · Task · p3 · reach: the engine's own `orderBy` door in `@objectstack/objectql` and six comments across lint, driver-sql and ui tests · evidence: read.\n\n## 维护者速读\n- 做什么：#37386 把 HTTP 数据接口的排序闸门和可排序投影改成读同一个「哪些字段类型没有列可排序」的来源；引擎自己的排序闸门还在自己写死 `formula`，这张卡把它也改成读那个来源，并把六处还提旧集合名的注释改对。\n- 谁受益：以后新增一种计算字段类型时，引擎内部调用（钩子、流程）和 HTTP 调用的排序判断会同时跟上，不会一个拒绝一个静默丢掉排序。\n- 不做会怎样：今天两边结果一样；等计算类型扩充的那天，进程内调用 `ObjectQL.find` 的排序会被悄悄丢掉。\n- 需要你做的：无。\n\n## What\n1. **N3, the engine door spells its own `formula`.** `assertOrderByIsMaterializable` in `packages/objectql/src/engine-top-level.ts` tests `type === 'formula'`. Make it read `isVirtualSearchField` from `@objectstack/spec` (the package already imports it in `aggregate-query-shape-door.ts` and `filter-comparand-shape.ts`), and pin it beside the engine's own tests so the engine door, the Data API door and the projection agree for every member of `FieldType.options`.\n2. **N4, the retired name lives on in comments.** `UNMATERIALIZED_SORT_TYPES` was removed with its docblock in PR #37785. Update the comments that still name it: `packages/lint/src/validate-sortable-fields.ts` (around lines 105 and 217; line 105 points at a note that is gone), `packages/drivers/driver-sql/src/sql-driver-external-unprovisioned-sort-anchor.test.ts` (around lines 47 and 258), and `ui/packages/plugin-list/src/__tests__/ListView.sortFieldFallback.test.tsx` and `ListView.relationalSort.test.tsx`. CHANGELOG entries stay as written.\n3. The removed docblock also listed the other places that spell this fact (`fieldHasColumn`, `createColumn`, `remote-transport`, `planFormulaProjection`, `search-companion`, `plugin-audit`). Record where that list now lives (a comment beside `isVirtualSearchField` or the engine door), without changing those sites.\n\n## Acceptance\n- The engine door judges computed types through `isVirtualSearchField`; a pin test reds if it and the Data API door part on any `FieldType` member.\n- No comment outside CHANGELOG files names `UNMATERIALIZED_SORT_TYPES`; the lint docblock no longer points at a removed note.\n- No verdict changes for any schema-valid field today. `Clause-②: no`, `Metadata-protocol: none`.\n\nBlocked-by: #37386 (PR #37785)\nParent: #37386\nSize: S\nDedupe (objectstack, is:issue is:open): `\"assertOrderByIsMaterializable\"` → only #37386 (source) · `\"UNMATERIALIZED_SORT_TYPES\"` → only #37386 (source). No duplicate."
+}

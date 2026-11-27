@@ -1,0 +1,37 @@
+{
+  "number": 37821,
+  "kind": "pull_request",
+  "title": "fix(runtime): save_metadata_draft's clientSpecVersion example names the server's own spec version",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/s",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-27T05:04:13Z",
+  "updated_at": "2026-11-27T05:59:34Z",
+  "closed_at": "2026-11-27T05:59:31Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-11-27T05:59:31Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/37821",
+  "body": "Fixes #37755\n\nClause-②: no\nMetadata-protocol: none\n\n## 维护者速读\n- 用户能看到什么变化：智能体通过 MCP 保存元数据草稿时，工具说明和格式错误提示里的版本号示例，从写死的 18.6.0 变成服务端自己的版本号。\n- 为什么做：属于 MCP 智能体编写能力；服务端已是 19，智能体照抄旧示例会被当作跨大版本而拒绝保存。\n- 出错会怎样：只影响一句说明文字，版本判定逻辑不变；有问题可直接撤回这个改动。\n- 要你做什么：无。\n\n## What changes\n\n- `packages/runtime/src/domains/mcp-authoring.ts`: a new `specVersionExample()` builds the SemVer example from `SERVER_SPEC_VERSION`. Both agent-facing strings now use it: the `clientSpecVersion` parameter description of `save_metadata_draft`, and the refusal for a value that is not in SemVer form (`clientSpecVersionVerdict`, which passes its own `server` argument through). When the server cannot read its own spec version, the text names the form (`MAJOR.MINOR.PATCH`) and does not make up a number. The verdict logic is unchanged.\n- One changeset, `@objectstack/runtime` patch.\n\nSweep of hard-coded `18.6.0` under `packages/**` and `skills/**` (origin/main cac93cc6): the two strings above were the only spec-version *examples* that teach an agent a value to declare. The other hits are history or test data, and none needs a change:\n- `packages/spec/src/automation/webhook.zod.ts` and its test: \"removed in 18.6.0\", a historical fact.\n- `packages/spec/src/conversions/entries/**`: `retiredAfter: '18.6.0'`, conversion schedule data.\n- `packages/cli/src/commands/skills/update.ts:26`: a CLI help example for `os skills update --version`. It pins a skills version on purpose and is not a spec version the server judges.\n- Test fixtures and measurement notes in `packages/cli`, `packages/metadata-core`, `packages/qa/scenarios` and `packages/runtime` (`actions-refused-write-sentence-37533.test.ts`).\n- `skills/objectstack-mcp-build/SKILL.md:15` (a compatibility statement, \"none through 18.6.0 does\") and `skills/objectstack-project/evals/project-process.json:74-75` (an eval prompt about an upgrade). Both are facts, not examples to copy, and they sit on a governed path (Prime Directive #14), so they are left alone. No follow-up is needed.\n\n## Tests\n\n- New case in `mcp-authoring.test.ts`: \"the parameter description and the SemVer refusal give this server's own version as the example\". It asserts that both texts contain `e.g. SERVER` (the resolved `@objectstack/spec` version) and do not contain `18.6.0`. No existing test pinned the old literal (the `'v18.6.0'` input in the SemVer-form case is an input value, and it is kept).\n- Ablation: with `mcp-authoring.ts` restored from cac93cc6 on disk, the new case fails (`description: expected 'Recommended: …' to contain 'e.g. 19.0.0-next.0'`). With the fix restored, it passes.\n\n<details><summary>Readings at de8f60aa</summary>\n\n- `pnpm --filter @objectstack/runtime exec vitest run src/domains/mcp-authoring.test.ts`: Test Files 1 passed, Tests 58 passed.\n- `pnpm --filter @objectstack/runtime typecheck`: exit 0.\n- `pnpm --filter @objectstack/runtime exec vitest run src/domains/`: Test Files 242 passed, Tests 7072 passed, 4 skipped.\n- `pnpm --filter @objectstack/mcp exec vitest run src/mcp-server-runtime.authoring-scope.test.ts` (consumer of the door, after a runtime build): Tests 32 passed.\n- Full `pnpm --filter @objectstack/runtime test` was narrowed to `src/domains/` because the whole package ran past the container's 10-minute foreground limit. CI's Test Core runs all of it.\n- `dispatch-gates --commands`: 66 derived commands run, 64 exit 0. `check-plugin-teardown-shape --self-test` (shallow clone, positive-control commit not reachable) and `check:dual-build-cjs-loads` (PREREQUISITE NOT MET, unbuilt dist) are NOT MEASURED locally and left to CI. `--ran` reconciliation: 66 derived, 66 run, 0 UNRUN.\n</details>\n\n## Acceptance notes\n\n- `packages/spec/src/system/restriction-profile.zod.ts:249,253` describe the environment's reported spec and skills versions with \"e.g. 18.4.0\". That is spec prose for a field the environment reports, not a value an agent declares to this door, and editing it means regenerating the spec artifacts. It is noted here and not changed.\n\n## Verification\n\nRead first: `packages/runtime/src/domains/mcp-authoring.ts`, the `specVersionExample` helper and the two call sites (the template-literal escaping of the backticks is the riskiest part).\n\nTwo-minute check: `pnpm --filter @objectstack/runtime exec vitest run src/domains/mcp-authoring.test.ts -t \"own version as the example\"` should show 1 passed.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01Q4EjjQkY5yXZrN9BEA3rEK\n<!-- signed: repo:objectstack#6 · hotlong · session_01Q4EjjQkY5yXZrN9BEA3rEK -->\n"
+}

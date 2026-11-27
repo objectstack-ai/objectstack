@@ -13,18 +13,20 @@
   "labels": [
     "area:fleet",
     "bug",
-    "pm:queue",
+    "pm:dispatched",
     "priority:p2"
   ],
-  "assignees": [],
+  "assignees": [
+    "os-mickey"
+  ],
   "milestone": null,
   "type": "Bug",
   "created_at": "2026-11-24T17:53:52Z",
-  "updated_at": "2026-11-24T18:34:54Z",
+  "updated_at": "2026-11-27T07:42:03Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 1,
+  "comments": 2,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/37064",
   "body": "repo:objectstack#2 · huangyiirene · session_01J8VVAm8Y73VGNq3PkTe3dc\n\nFiling gate: ① defect with a named location, same failure class as #36483 · Source: fleet (dev report on #36483 with `carrier: none`; contract review 7139723370 on PR #37046 escalated it to the seat)\n\n## What happens\n\n`packages/metadata-protocol/src/protocol.meta-types-degenerate-derivation.test.ts:410` pins the top-level property count of thirteen served types in `CARD_PROPERTY_COUNTS`: agent, app, dashboard, dataset, field, flow, hook, object, page, position, report, skill, tool. PR #37046 (Fixes #36483) teaches `scripts/pm/dispatch-gates.mjs` that a change to **FieldSchema's** key set owes this test (and two others). A key added to any of the other twelve schemas still derives nothing locally. The local sweep goes green, and Test Core then reds on the count. That is the round #36483 was filed to stop, now for the other types.\n\n## Expected\n\nA diff that changes the top-level key set of any schema `CARD_PROPERTY_COUNTS` counts derives the metadata-protocol test (and any other whole-set pin of that type, found the way #37046 found driver-sql's and metadata-core's for `field`), read from the diff as #37046 does, not by a path match.\n\nSurface: `scripts/pm/dispatch-gates.mjs`, `.data.mjs`, `.self-test.mjs`. Guard instrument ⇒ always Tier H. Lands after PR #37046 (same hot file, serial).\nBusiness reason: each missed derivation costs a dev a wasted CI round, as #36483 measured twice for `field`.\nReader who acts: seat `repo:objectstack#2` (area:fleet, dispatch-gates lease).\nDedupe: `repo:objectstack-ai/objectstack is:issue is:open CARD_PROPERTY_COUNTS` → 0; `is:issue is:open dispatch-gates key set derives` → #36483 only (the `field` arm, being closed by #37046).\nClause-②: no · Metadata-protocol: none\nGrade: area:fleet · Bug · a dev-tooling gap with CI as backstop → p2 (same as #36483)."

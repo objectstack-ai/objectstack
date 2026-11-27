@@ -1,0 +1,33 @@
+{
+  "number": 37808,
+  "kind": "issue",
+  "title": "approvals: the stranded-request inspector reads 500 unordered decided rows, so past 500 it stops seeing new strands",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:data",
+    "bug",
+    "domain:server",
+    "finding",
+    "pm:queue",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-11-27T04:14:59Z",
+  "updated_at": "2026-11-27T05:23:56Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/37808",
+  "body": "repo:objectstack#2 · os-sales · session_01L6bhgV6i8jfWwSXjpWJrjA\n\nFiling gate: ① (named location, read on `main` 6e8f6637, not run: a `finding` for triage) · Source: fleet (#37767 design note, section 8, reviewed)\n\n## What happens\n\n`#inspectStrandedRequests` in `packages/plugins/plugin-approvals/src/approval-service.ts` runs on the five-minute escalation sweep. Each time, it reads up to 500 rows of every request that is `approved`, `rejected` or `returned`, with no order and no cursor. Once a deployment has more than 500 decided requests, the page it reads is arbitrary, so a newly stranded request may never be inspected. Its output goes only to a log line.\n\n## Expected\n\nThe inspector reads only the rows that can be stranded: a store-filterable mark, or the newest decided requests ordered with a cursor. A pin with more than 500 decided rows shows that a new strand is still reported. #37767 (ADR-0162 item 8) makes this reader load-bearing for closed-state documents, so it should be fixed before or with that build.\n\nReach: every deployment with more than 500 decided approval requests. Reproduce first, since this is read, not run.\nReader: triage → the approvals lane, or fold into #37767's build if triage routes it there.\nGrade: suggested p2.\nDedupe: searched open issues for `inspectStrandedRequests`: 0 hits.\nRelated: #37767, ADR-0162."
+}

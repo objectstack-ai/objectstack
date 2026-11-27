@@ -1,0 +1,37 @@
+{
+  "number": 37809,
+  "kind": "pull_request",
+  "title": "fix(core): a list bulk Delete with refused records says why, not only \"0 deleted, 4 failed\"",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [
+    "os-sales"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-27T04:17:19Z",
+  "updated_at": "2026-11-27T05:16:08Z",
+  "closed_at": "2026-11-27T05:16:06Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-11-27T05:16:06Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/37809",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-sales\"} -->\n_Requested by **Sales** · [project thread](https://claude.ai/code/project/chan_01D5bWFY3rFzgJcytD5gD4Uu?thread=cmsg_01D5bWFY3rFzgJcytD5gD4UuDJAbBe3iTrFcF7GZrucZ32)_\n\nFixes #37758\n\nA list bulk Delete whose records were refused said only 「成功 0 条，失败 4 条」 (\"0 deleted, 4 failed\"). The server gives every refused record a readable, localized reason (a restrict delete says which child records still reference it), and the one-record Delete shows it; the batch summary dropped it.\n\n## What changes\n\n- **`@object-ui/core` (`actions/recordDelete.ts`).** The bulk branch of `run` keeps each rejected result's reason. The summary toast keeps its count title (`objectActions.bulkDeletePartial`) and gains a description:\n  - one line per distinct reason, in the order the records were handed in;\n  - each line led by the names of the records that reason refused (the same ADR-0079 resolver the success toast uses), up to three names and then `+N`;\n  - a reason whose records have no name reads alone (the title already counts them);\n  - at most three reasons, then \"And N more\";\n  - an external datasource's refusal reads as the read-only sentence, as the one-record toast reads it;\n  - a refusal with no message adds no line, so a batch with no reason at all keeps today's bare count toast.\n  The one-record toast is unchanged.\n- **`@object-ui/i18n`.** Two keys in all 11 packs: `objectActions.bulkDeleteRefusedNamed` (`{{names}}: {{reason}}`, with each pack's own colon) and `objectActions.bulkDeleteMoreReasons`. The name/reason join is allowlisted in `untranslated-identity-4376` as a format string, as `detail.fieldChangeLabel` is.\n- **`@object-ui/plugin-view`.** The two keys join `ObjectView`'s `objectActions.*` fallback table.\n\n## Decisions made here\n\n- **Grouped by the exact reason text, named by record.** The card's own restrict example carries each record's dependent count in its sentence (\"referenced by 3 records\" / \"by 1 record\"), so records rarely share a byte-identical reason. Naming the records under each reason answers \"which\", which the acceptance allows (\"reason, then how many records or which\"); records that do share a reason are one line.\n- **No counted noun in either new key.** \"And {{more}} more\" and the name list carry no plural noun, so no pack needs a CLDR plural family for them (`plural-categories-11432`). The option is `more`, not `count`, so i18next does not go looking for one.\n- **The description is joined with `\\n`,** as `writeWarningToast` and `studioSaveBar` do. Each reason the server sends ends in its own punctuation.\n- **Not in this PR:** the related list's inline bulk-delete outcome line (`plugin-detail` `RelatedList.tsx`, `bulkDeleteOutcome`) has the same count-only shape, and a view-declared `operation: 'delete'` bulk action (the card's \"also seen\") was not measured. Both are for the seat to file or fold.\n\n## Verification\n\n- `core/src/actions/__tests__/recordDelete.test.ts`: 6 new or changed cases, red on `main` and green here (6 red with `recordDelete.ts` reverted): an all-refused batch for one reason (names, `+1`), a mixed batch (two reasons, order kept, the deleted record not named), nameless records (reason alone), five reasons (three listed, \"And 2 more\"), an external-datasource refusal (read-only sentence), and the existing partial-failure case now with its description. Controls: refusals with no message keep the bare count with no description; the one-record refusal toast is unchanged.\n- `plugin-view` `ObjectView.gridDelete-10383`: the registered object-view bulk Delete's partial-failure pin now also asserts the refusal reason rides in the description.\n- `vitest` over `core/src/actions`, all `plugin-view` tests, `app-shell` `useObjectActions*` and all of `i18n` (1,867 passed, including key parity, plural categories and the untranslated-identity gate): green. `tsc -p tsconfig.test.json` for `core`: clean. `eslint` on the changed files: 0 errors.\n- `overlap-check`: exit 0 (#37676 and #37366 share the locale packs and merge cleanly).\n- Premise: static read on `main` cac93cc627 (the bulk branch reads no rejected `reason`), and the red tests above.\n\nClause-②: no\nMetadata-protocol: none\nSkills-docs: none\n\n## Human Minimum\n\n- [x] 1. Schemas start as Zod; `packages/spec` holds no runtime logic. (No spec change.)\n- [x] 2. Every name I added uses the casing for its kind.\n- [x] 3. No formatter ran; `eslint` on the changed files passes (the full `pnpm lint` runs in CI).\n- [x] 4. One issue, one branch off an up-to-date `main`, one pull request.\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01L6bhgUuauSMJu1nVSQRQri)_\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01L6bhgUuauSMJu1nVSQRQri\n"
+}

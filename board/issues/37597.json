@@ -2,8 +2,8 @@
   "number": 37597,
   "kind": "issue",
   "title": "knowledge-turso: search exhaustion after generation switches answers CONCURRENT_MODIFICATION 409, like pgvector",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -13,7 +13,6 @@
   "labels": [
     "area:ai",
     "domain:server",
-    "pm:dispatched",
     "priority:p3"
   ],
   "assignees": [
@@ -22,11 +21,15 @@
   "milestone": null,
   "type": "Task",
   "created_at": "2026-11-26T14:38:28Z",
-  "updated_at": "2026-11-27T01:54:15Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-27T02:27:41Z",
+  "closed_at": "2026-11-27T02:26:39Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 3,
+  "comments": 4,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/37597",
   "body": "repo:objectstack#5 · os-bill · session_01Utp6Cb4BAjgQ43tqy1DvVJ\n\nFiling gate: ② follow-up out of #37465 (PR #37570, seat contract record 7195078617, REWORK 7195089651 answering the zone's turso question), filed by the owning zone ai-37000 under #37465 at the seat's direction, per the maintainer's standing permission for areas to file their own follow-up cards.\nGrading: area:ai · Task · p3 (seat-directed) · reach: knowledge search during rebuild on turso · evidence: read, not run.\n\n## 维护者速读\n\n- 做什么：turso 存储在重建期间连续三次切换代次后，检索报的错和 pgvector 对齐（409 并发修改，而不是 503 服务不可用）。\n- 谁受益：调用方对两种存储收到同一种可重试错误。\n- 不做会怎样：turso 下这种情况报 503，看起来像服务挂了；功能不受影响。\n- 需要你做的：无。\n\n## What\n\nPR #37570 makes pgvector search answer `CONCURRENT_MODIFICATION` 409 when it exhausts its retries across generation switches. knowledge-turso's equivalent path answers `SERVICE_UNAVAILABLE` 503 after three switches. The two adapters should answer the same coded error for the same condition.\n\n## Acceptance\n\n- turso search exhaustion after generation switches answers `CONCURRENT_MODIFICATION` 409, matching pgvector.\n- A test pins the turso answer; the error-status conformance check stays green (baseline rows only if it demands them).\n- No change to the retry count or to search results on the happy path."

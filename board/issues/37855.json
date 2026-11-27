@@ -1,0 +1,34 @@
+{
+  "number": 37855,
+  "kind": "issue",
+  "title": "入口专题 C0b：ui ADR-0057 A5（哪些打开方式开新会话、build 例外、抽屉页头）",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:ai",
+    "domain:docs",
+    "enhancement",
+    "pm:blocked",
+    "pm:epic",
+    "priority:p1",
+    "size/s"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-27T07:19:10Z",
+  "updated_at": "2026-11-27T08:13:24Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/37855",
+  "body": "epic:#5027#1 · hotlong · session_01Q4EjjMUfmNYTem26rXLFUf\n\nFiling gate: ④ topic child. Source: topic #37853 (Jack: 「\"页面里加按钮\"的需求 作废」 06:28Z; card 「撤掉 ask_ai」 06:30Z; 「问 AI」 06:33Z; 「同意，立专题卡，非 cloud 的任务，让 objectstack #3 座位接手」 07:12Z, all 2026-11-27). Business reason: carried by the parent.\nParent: objectstack-ai/objectstack#37853 (rulings, target experience, card table, topic acceptance). Evidence: an independent Fable review of objectstack and cloud `main` (2026-11-27) checked every file:line below.\nOwner: **repo:objectstack#3** (Jack 07:12Z 「非 cloud 的任务，让 objectstack #3 座位接手」). Reserved under topic #37853 (`pm:epic`), not `pm:queue`: other seats leave it.\n\nGrading: area:ai · Task · p1 · size S · governed surface `ui/docs/adr/**` (Tier H): needs Jack or os-zhuang approval.\nBlocked-by: #37819 (ADR-0057 A4 must merge first; A5 overturns A3's \"What the drawer shows is kept per tab\").\nDedupe: searched `ADR-0057 A5`, `drawer open new conversation`: none.\n\n## 维护者速读\n- 是什么：ui ADR-0057 第 A5 修订：哪些打开方式开新会话、哪些回到原会话，build 例外，抽屉页头。\n- 影响：C4 照这张表实现。\n- 要你做什么：批准这个受管 PR（排在 #37819 之后）。\n\n## What A5 says\nOpen-type table:\n\n| How the drawer opens | Result |\n|---|---|\n| Header / top bar 「问 AI」, ⌘⇧I, Home 「Ask AI」, **and the last close was user-initiated** (×, button again, shortcut) | **new conversation** (`forceNew`) |\n| Last close was the mobile auto-collapse after tapping an answer link (#37556) | the same conversation |\n| A plan or write awaiting approval (the bus records its conversation id) | **that** conversation |\n| `open()` with a target, legacy `/ai/:agent/:id`, share links, history, favourites | the named conversation |\n| Page refresh, legacy-URL \"expand on mount\" | not an open; state kept |\n| Studio canvas `requestOpen()` | unchanged |\n| build threads, targets with `packageId` (`app.defaultAgent:'build'` can still land on build) | not covered; returns to the same conversation |\n| narrow ↔ full screen | not an open; conversation unchanged |\n\n- New conversations use `forceNew` only, never `resumeMode:'fresh'` (it treats \"zero messages on the server\" as empty, and a turn is persisted only when it ends, so a generating conversation would be reused).\n- Drawer header: left = conversation title (「新会话」 before the first send; first-message summary when title generation is off); right = ☆ (from C8), ＋ new conversation, history (clock icon button), ⋯, ×. The mobile sheet header gets the same row.\n\n## Acceptance\n- A5 merged after A4; it names the A3 sentence it supersedes."
+}

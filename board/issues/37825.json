@@ -1,0 +1,36 @@
+{
+  "number": 37825,
+  "kind": "pull_request",
+  "title": "docs(ui-adr): ADR-0057 Amendment A4 — an app's AI inquiry page",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/s",
+    "skip-changeset"
+  ],
+  "assignees": [
+    "os-elon-musk"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-27T05:19:05Z",
+  "updated_at": "2026-11-27T08:04:28Z",
+  "closed_at": "2026-11-27T08:03:33Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-11-27T08:03:32Z",
+  "comments": 16,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/37825",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-elon-musk\"} -->\n_Requested by **Elon** · [project thread](https://claude.ai/code/project/chan_01WedDzV26nniwxv7jC88B9D?thread=cmsg_01WedDzV26nniwxv7jC88B9D3PqTGGb1rgoRqKj4rT4Xjk)_\nFixes #37819\nRefs #37788\nClause-②: no\nMetadata-protocol: none\n\n## 维护者速读\n- 是什么：设计文档补一条修订：应用可以在菜单里放一个通用的 AI 问询页，放在第一位就是首页；在这一页上右上角的机器人隐藏。只改文档，用户无感。\n- 为什么：这是「AI 问询首页」页面卡的前置；现有修订写的是「右侧抽屉是唯一的对话容器」，页面代码若先合，主干就和受管文档矛盾，所以文字先落。\n- 出错会怎样：只动文档，不影响任何用户，写错了可直接撤回这次修改。\n- 要你做的：无，座位交审批人。\n\n## What changes\n\nOne file, `ui/docs/adr/0057-console-ai-chat-one-conversation-docked.md` (+90 / -0):\n\n- New section `## Amendment A4 (2026-11-27, Accepted) — an app's AI inquiry page`, placed after Amendment A3 and before \"Open design questions\", in A3's shape: What it changes · Why · Maintainer ruling (verbatim, not translated, with where it is recorded and the time of each) · Decision · Consequences (\"Implemented under objectstack#37788.\").\n- The Decision records the card's items 1–6 and nothing else: one `ai:chat` page per app (a `type: 'component'` navigation entry), copy from the entry's declared `params` (`AiChatNavParamsSchema` in `@objectstack/spec/ui`, objectstack#37787, merged), never from the URL, platform-generic, a key the entry omits falls back to neutral copy; the page is the app's home by the app's existing landing rule (a declared `AppSchema.landing` first; with none, from 768 px up the first entry shown lands; below 768 px the app root is the menu); on the page the drawer is closed and its triggers (top-bar robot, keyboard toggle) are hidden or inert, and no address stacks a second `ask` conversation there (the invariant of objectstack#37788 item 7, cited); the page runs `ask` (makers too), a build hand-off opens the drawer; conversation key `app:PKG:ask`, `?c=ID` restores, a foreign or other-app `?c=` opens the home state; A3 stands everywhere else. Named open, outside A4 and objectstack#37788: whether a phone's app root should open the page.\n- A3's \"One container\" bullet gains one in-place pointer in A3's own style, `*(Amendment A4: …)*`, so a reader of A3 finds the exception.\n- The header's **Amended** block gains one A4 entry after A3's (area o1-D's call on the round-1 open question): without it the header still said A3 made the drawer the ONLY chat container, contradicting the body.\n\nNothing decides beyond objectstack#37788's header and its items 1–8: no designer entry (T5), no hide-for-no-seat rule (T6); the Consequences say so in one sentence.\n\n## Tests\n\nDocs-only; no tests apply. The three ruling quotes were checked byte-for-byte against objectstack#37788's body: each occurs once there (inside the corner brackets) and once in the ADR as its own blockquote line.\n\n<details><summary>Local gate readings at 2818352d</summary>\n\n`node scripts/pm/dispatch-gates.mjs --commands --repo objectstack-ai/objectstack` derived 16 commands; each run with its exit captured before any pipe:\n\n- `node scripts/check-closing-keyword-parity.mjs` exit 0\n- `node scripts/check-closing-keyword-parity.mjs --self-test` exit 0\n- `node scripts/check-comment-mask-corpus.mjs` exit 0 (24065 files, 0 disagree)\n- `pnpm check:adr-anchors` exit 0\n- `pnpm check:adr-index` exit 0 (report-only; its one warning, a stale root `docs/adr/README.md`, is also present on origin/main ff9ee210; the ui-0057 row reads title, status and date, none of which this diff changes)\n- `pnpm check:driver-memory-census` exit 0\n- `pnpm check:gitlink-declared` exit 0\n- `pnpm check:nul-bytes` exit 0\n- `pnpm check:pm-governed-merges` exit 0\n- `pnpm check:published-files` exit 0\n- `pnpm check:refd-timer-probe` exit 0\n- `pnpm check:registry-log-declared` exit 0\n- `pnpm check:rest-log-spy-declared` exit 0\n- `pnpm check:tier-file-adoption` exit 0\n- `pnpm check:undeclared-dep-imports` exit 0\n- `pnpm check:watch-hint-literal` exit 0\n\n`--ran` reconciliation: 16 derived, 16 run, 0 NOT-MEASURED, 0 UNRUN. Everything else is CI's.\n\n</details>\n\n## Acceptance notes\n\n- `skip-changeset`: `ui/docs/adr/**` ships in no package (`ui/package.json` is private and no `ui/**/package.json` lists `docs`), so nothing publishes.\n- Governed surface (`ui/docs/adr/**`, Tier H): this PR stays draft and is landed by neither the author nor the area; it goes to seat repo:objectstack#1 for the hand-off.\n- Beyond the card's \"No other section changes\", one header entry (three lines) was added on area o1-D's answer (option B): the **Amended** block names A4. Open design questions are untouched.\n- No ADR index row: the only index generator (`scripts/adr-index.mjs`) derives the ui-0057 row from title, status and date, which are unchanged.\n\n## Verification\n\nRead first:\n1. The new `## Amendment A4` section (risk: the Decision saying more than the card's items 1–6).\n2. The pointer added under A3's \"One container\" bullet.\n3. The A4 entry in the header's **Amended** block.\n\nTwo-minute check: `git diff origin/main...HEAD -- ui/docs/adr/0057-console-ai-chat-one-conversation-docked.md` shows the A4 entry in the header's **Amended** block, one pointer inside A3's \"One container\" bullet and one new A4 section between A3's Consequences and \"Open design questions\", with nothing removed (+90 / -0). Round 3 answered L1-a's REWORK 7211260420 (S1, S2, N1, N2, N4 of record 7211253615); the sentence-by-sentence list is in the dev's delta report on #37819 (comment 7211453346).\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_016WV4cwGVgec21LwQTtRY85\n<!-- signed: repo:objectstack#1 · os-elon-musk · session_016WV4cwGVgec21LwQTtRY85 -->\n"
+}

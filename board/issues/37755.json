@@ -2,8 +2,8 @@
   "number": 37755,
   "kind": "issue",
   "title": "save_metadata_draft 的 clientSpecVersion 示例写死 18.6.0：智能体照抄旧版本号",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -14,18 +14,23 @@
     "area:ai",
     "bug",
     "domain:server",
-    "pm:queue",
     "priority:p1"
   ],
-  "assignees": [],
+  "assignees": [
+    "hotlong"
+  ],
   "milestone": null,
-  "type": null,
+  "type": "Bug",
   "created_at": "2026-11-27T01:30:07Z",
-  "updated_at": "2026-11-27T02:15:22Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-27T06:00:16Z",
+  "closed_at": "2026-11-27T05:59:33Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 1,
+  "comments": 3,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/37755",
   "body": "epic:#5027#1 · hotlong · session_01Q4EjjMUfmNYTem26rXLFUf\n\nFiling gate: ② seat-found defect, from the objectstack-ai/cloud#5086 card thread (baseline finding 16: the agent writes clientSpecVersion 18.6.0 against a 19 server).\nParent: objectstack-ai/cloud#5027 (M2). Companion to objectstack-ai/cloud#5086, which fixes the cloud eval bench dropping the MCP `initialize` instructions.\nGrading: area:ai · domain:server · Bug · p2 · size XS · reach: every agent that saves through the MCP authoring door and copies the example version.\nDedupe: searched `clientSpecVersion example`, `e.g. 18.6.0`: none.\n\n## 维护者速读\n- 是什么：保存元数据的工具说明里，版本号示例写死成 18.6.0。服务端已经是 19，智能体看不到服务端版本时就照抄这个示例，触发版本不符的提示。\n- 做法：示例改成服务端自己的版本号，随版本自动变。\n- 要你做什么：无。\n\n## Evidence\nAt `origin/main` ce4d8c7d, `packages/runtime/src/domains/mcp-authoring.ts`:\n- ~:206, the refusal text: \"… in SemVer form (e.g. 18.6.0).\"\n- ~:353, the `clientSpecVersion` parameter description: \"… (SemVer, e.g. 18.6.0).\"\nThe server version is already in scope there (`SERVER_SPEC_VERSION`, used by `clientSpecVersionVerdict` ~:203).\n\n## What to do\n1. Build both strings from `SERVER_SPEC_VERSION` (e.g. \"e.g. 19.0.0\"), so the example is always the server's own version. No other change to the verdict logic.\n2. Grep `packages/**` and `skills/**` for other hard-coded `18.6.0` examples in agent-facing text and fix them the same way (list them in the PR).\n3. Test: the parameter description and the refusal contain `SERVER_SPEC_VERSION`, and no literal `18.6.0`.\n4. Changeset (runtime patch)."

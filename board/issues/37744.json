@@ -2,8 +2,8 @@
   "number": 37744,
   "kind": "issue",
   "title": "37658 跟进：原因链三份拷贝的漂移守卫改为双向，并补空堆栈与非 Error 对象原因的比对用例",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -13,18 +13,23 @@
   "labels": [
     "area:ai",
     "domain:server",
-    "pm:blocked",
     "priority:p3"
   ],
-  "assignees": [],
+  "assignees": [
+    "os-elon-musk"
+  ],
   "milestone": null,
   "type": "Task",
   "created_at": "2026-11-27T01:00:41Z",
-  "updated_at": "2026-11-27T01:22:15Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-27T04:42:23Z",
+  "closed_at": "2026-11-27T04:41:21Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 1,
+  "comments": 4,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/37744",
   "body": "repo:objectstack#5 · os-bill · session_01Utp6CbeF2saT6wUBV4E9uc\n\nFiling gate: ② follow-up out of #37658. The source is seat 5's contract record 7206884238 on PR #37716: nits N1 and N2, accepted as deviations in ACCEPT 7206892683, which sends both to one follow-up card. The owning area files it under the source card, per the maintainer's standing permission for areas to file their own follow-up cards.\nGrading: area:ai · Task · p3 · reach: the cause-chain parity tests in `@objectstack/types`, `@objectstack/core` and `@objectstack/observability` · evidence: read.\n\n## 维护者速读\n- 做什么：错误原因链的格式化代码在三个包里各有一份，测试用来防止三份走样；现在“某一份新增了词”和两个共用分支（空堆栈、经过非 Error 对象继续往下的原因链）不会被测试发现，补齐。\n- 谁受益：维护日志代码的人，三份代码一旦不一致会立刻有测试变红。\n- 不做会怎样：只改了其中一份时测试仍然全绿，三处日志输出悄悄不一致。\n- 需要你做的：无。\n\n## What\n1. **N1, the drift guard is one-directional.** The parity fixtures are hand-copied lists. A qualifier or default word removed or changed in any copy reds parity, but one added to a single copy (`CONCATENATED_SECRET_QUALIFIERS` or `DEFAULT_REDACTED_WORDS` in `packages/types`, `packages/core` or `packages/observability/src/loggers.ts`) fails nothing. Make the guard two-directional, for example by asserting each copy's list equals the one exported list in `@objectstack/types`, or by deriving the fixture from that list.\n2. **N2, two shared branches have no fixture.** Add parity fixtures, run against `faultCauseChain` and both observability loggers (and `ObjectLogger` where core pins parity), for:\n   - an `Error` cause with an empty `stack` (the stack-omitted branch of `causeLine`);\n   - a chain that continues through a non-`Error` object cause which itself carries `cause`.\n\n## Acceptance\n- Adding one word to any single copy, and nothing else, reds a test. Show it with an ablation in the PR body.\n- Both N2 fixtures are green in every parity block, and an ablation of each branch in one copy reds its case.\n- Test-only: no runtime source line changes. `Clause-②: no`, `Metadata-protocol: none`, no changeset needed beyond what the gate asks.\n\nBlocked-by: #37658 (PR #37716)\nParent: #37658\nSize: XS\nDedupe (objectstack, is:issue is:open): `\"causeLine\"` 0 · `\"GLUED_QUALIFIERS\"` → only #37658 (source). No duplicate.\n"

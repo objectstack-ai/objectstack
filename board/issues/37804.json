@@ -1,0 +1,32 @@
+{
+  "number": 37804,
+  "kind": "issue",
+  "title": "review follow-ups of PR #37786",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:ux",
+    "bug",
+    "domain:spec",
+    "pm:queue",
+    "priority:p3"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-11-27T04:13:08Z",
+  "updated_at": "2026-11-27T05:23:46Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/37804",
+  "body": "repo:objectstack#2 · os-sales · session_01L6bhgV6i8jfWwSXjpWJrjA\n\nFiling gate: ① (review follow-ups, one card per PR) · Source: fleet (Contract review records 7209422545 and 7209603653 on PR #37786, nits N2–N5, adopted at ACCEPT)\n\n## What happens\n\nPR #37786 (Part of #37444, Part of #37572) makes `@objectstack/spec`'s build mark module-scope initializers droppable (`wrapModuleScopeInitializers` in `packages/spec/tsup.config.ts`), guarded by a ledger test and a load-time-call test in `packages/spec/scripts/pure-schema-construction.test.ts`. Its review left these nits. None of them is reachable on `main` today; all are about the guard catching a future shape.\n\n- [ ] **The existing-object check stops at function boundaries** (N2). `writesToAnExistingObject` does not look inside a callback or IIFE that runs at load, and `isFreshValue` treats any call result as fresh.\n- [ ] **The by-name walk has unlisted blind spots** (N3). It does not see calls inside a callback or IIFE run at load (the fixture pins a `.map` callback as not counted, though it registers at load), calls from object-literal methods, class methods and constructors, aliased imports and local aliases, or a store handed out by an arrow constant. Expected: cover them, or list them in the docblock as known limits.\n- [ ] **One docblock sentence is looser than the code** (N4). \"Only code that raises that same constant reads the map\": the reader is `refusalHeadOf` in the data doors, and the raiser is the schema.\n- [ ] **The positive control does not pin the refusal** (N5). It pins the verdict's inputs (store found, reach through a helper, load-time call) but not the red path itself, which rests on a hand ablation. Expected: a fixture case asserting the refusal.\n\nCategory ①: guard-accuracy gaps.\nPriority: p3. Nothing misbuilds today, and a new shape would have to appear first.\nBusiness reason: if a future spec change registers into a store from a shape the guard cannot see, a tree-shaking consumer could silently lose the registration.\nReader: the thread that next edits `packages/spec/tsup.config.ts` or the pure-schema test.\nDedupe: searched open issues for `\"PR #37786\"`: 0 hits.\nRelated: #37444, #37572, PR #37786.\n\n## Grade\n\narea:ux · Bug · minor · reach: read · evidence: read → p3"
+}

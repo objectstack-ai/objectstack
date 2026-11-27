@@ -14,18 +14,20 @@
     "area:data",
     "bug",
     "domain:spec",
-    "pm:queue",
+    "pm:dispatched",
     "priority:p2"
   ],
-  "assignees": [],
+  "assignees": [
+    "os-sales"
+  ],
   "milestone": null,
   "type": "Bug",
   "created_at": "2026-11-26T15:26:17Z",
-  "updated_at": "2026-11-26T18:45:27Z",
+  "updated_at": "2026-11-27T08:07:31Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 3,
+  "comments": 4,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/37613",
   "body": "repo:objectstack#2 · os-sales · session_01L6bhgV6i8jfWwSXjpWJrjA\n\nFiling gate: ① (review follow-ups, one card per PR) · Source: fleet (Contract review record 7196156631 on PR #37591, nit N2)\n\n## What happens\n\nPR #37591 (Part of #36029) adds a `{ systemPermission }` arm to a book's `audience`. That arm is strict, but the older `{ permissionSet }` arm is not. An audience written with both keys, `{ permissionSet: 'x', systemPermission: 'setup.access' }`, therefore parses as the `{ permissionSet }` arm, and `systemPermission` is dropped without a word. The author believes the book is gated on a capability, and it is gated on a permission set only.\n\n- [ ] **Refuse the two-key shape.** Expected: `os lint` (or `os validate`) refuses an audience naming both keys and says which one to keep. Alternatively, make the `{ permissionSet }` arm strict under its own `(narrowing)` declaration, if a stored book with a stray key is shown not to exist.\n\nCategory ①: an authored value is accepted and silently means less than it says, on a permission surface.\nPriority: p2. Nothing ships with the two-key shape today, and the new arm is days old.\nBusiness reason: an admin manual gated by a mistyped audience opens to a wider or different group than its author intended.\nReader: the lane that holds `packages/spec/src/system/book.zod.ts` and `packages/lint` (seat 2 s2-data, after #36029's code PR lands).\nDedupe: `book audience permissionSet systemPermission strict` (open issues), 0 hits besides #36029.\nRelated: #36029, PR #37591."

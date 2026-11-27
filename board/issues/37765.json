@@ -2,9 +2,9 @@
   "number": 37765,
   "kind": "pull_request",
   "title": "docs(skills): an agent's model name and provider are optional",
-  "state": "open",
+  "state": "closed",
   "state_reason": null,
-  "draft": true,
+  "draft": false,
   "author": {
     "login": "objectstack-fleet[bot]",
     "id": 332303061,
@@ -21,11 +21,15 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-27T01:44:19Z",
-  "updated_at": "2026-11-27T02:06:19Z",
-  "closed_at": null,
-  "closed_by": null,
-  "merged_at": null,
-  "comments": 0,
+  "updated_at": "2026-11-27T02:53:23Z",
+  "closed_at": "2026-11-27T02:53:21Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-11-27T02:53:21Z",
+  "comments": 3,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/pull/37765",
   "body": "<!-- claude-projects-attribution: {\"github_login\":\"hotlong\"} -->\n_Requested by **Jack** · [project thread](https://claude.ai/code/project/chan_01EF41AQooqveF2DGD8nqPzS?thread=cmsg_01EF41AQooqveF2DGD8nqPzSVqcTHLLFPjviMwGsR87vDC)_\n\nepic:#5055#1 · hotlong · session_01Q4EjjPtiBXJZAqMqBPe3UD\n\nFixes #37711\n\nClause-②: no\nMetadata-protocol: none\n\n## What\n\nThe `objectstack-ai` skill still taught that an agent names its model and that `provider` defaults to `openai`. Since #37697 (merge `3e87d7b6`) both are optional and `provider` has no default. This PR brings the published text and its eval in line.\n\n- `skills/objectstack-ai/SKILL.md`, Model Configuration:\n  - `model` is an optional free-string name; absent means the host's default model for the environment.\n  - `provider` is optional with no default (the deployment's choice, see #37712). The inline enum list is unchanged and still accurate: `openai | azure_openai | anthropic | local`.\n  - The schema citation moves from the stale `agent.zod.ts:36-40` to `:37-45`, the `AIModelConfigSchema` key list on main.\n- `skills/objectstack-ai/evals/skills-tools-knowledge.json`, case 2: accepts an omitted `model` and states the provider has no default. Assertions unchanged.\n- One `@objectstack/skills` patch changeset.\n\nNo tier or sentinel wording (phase 2, not in the framework).\n\n## Premise (on `origin/main` `cbc353ed`)\n\n`packages/spec/src/ai/agent.zod.ts`:\n\n```ts\n37  provider: z.enum(['openai', 'azure_openai', 'anthropic', 'local']).optional(),\n38  model: z.string().optional().describe(\n39    'Model name (e.g. gpt-4, claude-3-opus). Optional: when absent, the agent runs on the '\n40    + 'host\\'s default model for this environment, so an agent that only tunes sampling '\n41    + '(e.g. `temperature`) need not name a model.',\n42  ),\n43  temperature: z.number().min(0).max(2).default(0.7),\n44  maxTokens: z.number().optional(),\n45  topP: z.number().optional(),\n```\n\n## Token budget\n\n`skills/objectstack-ai/SKILL.md` sat at zero headroom (ceiling 6801). The new words are paid for by tightening the same section (shorter intro sentence, shorter registry and `maxTokens` rows); no fact is removed. The file now measures 6801 / 6801.\n\n## Local gates\n\n- `node scripts/check-skills-token-ratchet.mjs` exit 0 (61 authored files within ceilings)\n- `pnpm check:skill-identifier-liveness` exit 0\n- `pnpm check:skill-frame-sync` exit 0\n- `pnpm check:skill-compatibility` exit 0\n- `pnpm check:skill-top-level-keys` exit 0 (14 self-test cases)\n- `pnpm check:skill-links` exit 0 (272 links, 22 self-test cases)\n- `pnpm --filter @objectstack/spec check:skill-docs` exit 0\n- `pnpm --filter @objectstack/spec check:skill-refs` exit 0 (10 generated files in sync)\n- `pnpm --filter @objectstack/spec check:skill-served-sections` exit 0 (33 self-test cases)\n- `pnpm --filter @objectstack/spec check:skill-examples` NOT MEASURED, exit 3: `@objectstack/client-react` dist not built in this container (spec was built). The diff touches no marked example block.\n- eval JSON parses.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01Q4EjjPtiBXJZAqMqBPe3UD\n"

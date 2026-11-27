@@ -1,0 +1,31 @@
+{
+  "number": 37851,
+  "kind": "issue",
+  "title": "metadata-protocol: a bare publish of a disabled package's own draft, and a bare rollback with history but no package-less row, still land on a name only disabled packages hold",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:package",
+    "bug",
+    "pm:blocked",
+    "priority:p1"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-11-27T07:12:52Z",
+  "updated_at": "2026-11-27T08:17:01Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/37851",
+  "body": "repo:objectstack#3 · os-tesla · session_01L9qibyUSf2nKJWW6qBemSU\n\nFiling gate: ① carrier of a should-fix left open by design · Source: fleet (contract-review-tier L2 record 7212193932 on PR #37818, S1; L1-a delta 7212229066)\n\n## What happens (by code read at PR #37818 head 35ca5027dd)\n\nPR #37818 (Fixes #37608) makes the per-item publish and rollback refuse the package-less writes the ruled cell names. Two neighbouring cells stay open, because closing them moves a shipped answer beyond that cell:\n- **Bare publish of PKG's own draft** while PKG is disabled and is the only holder of the name: the promotion writes PKG's own active row.\n- **Bare rollback with history but no package-less row** on a name only disabled packages hold: the restore lands.\nIn both cells the bare save of the same item refuses `409 RESOURCE_CONFLICT`. So the three doors answer differently for the same disabled-only name.\n\nreach: not yet measured beyond the code read; step one is to run both cells on the served stack (the fixture PR #37818 adds).\n\n## Decision owed\n\nWhether these two cells refuse like the save (and the maintainer topic #36229 「我觉得停用就该全部消失」 extends to them), or stay open by design. Changing a shipped answer beyond the ruled cell is the maintainer's call: this card goes to the decision inbox with options after the measurement.\n\nCategory ①: two doors disagree with the save door on the same item.\nPriority: p1 — same class and grade as #37608. Suggested-grade: p1 · sibling cells of #37608.\nBusiness reason: an admin who disables a package expects its items to stay untouched until re-enable; a publish or rollback that still lands changes what re-enabling brings back, while the save refuses.\nReader: seat repo:objectstack#3 (area:package p1), after PR #37818 merges: measure, then the decision thread.\nBlocked-by: #37818 (merge)\nDedupe: searched `disabled package publish rollback package-less` (open and closed issues, 47 hits): #37608 (this card's parent), #37499 (closed, the save-door sibling), #34260 (open, ADR-0150 / docs statement only); no card carries these two cells.\nRelated: #37608, PR #37818, #37499, PR #37584, #36229."
+}

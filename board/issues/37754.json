@@ -2,8 +2,8 @@
   "number": 37754,
   "kind": "issue",
   "title": "场景卡评分器读不到英文数字词：「Two invoices」被判漏数字",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -21,13 +21,17 @@
     "hotlong"
   ],
   "milestone": null,
-  "type": null,
+  "type": "Bug",
   "created_at": "2026-11-27T01:29:39Z",
-  "updated_at": "2026-11-27T02:21:50Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-27T03:08:10Z",
+  "closed_at": "2026-11-27T03:08:10Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 2,
+  "comments": 3,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/37754",
   "body": "epic:#5027#1 · hotlong · session_01Q4EjjMUfmNYTem26rXLFUf\n\nFiling gate: ② seat-found defect, from the objectstack-ai/cloud#5082 card thread (root cause of that card). Not a maintainer decision: the grader misreads a correct answer.\nParent: objectstack-ai/cloud#5027 (M2). Replaces objectstack-ai/cloud#5082, which closes pointing here.\nGrading: area:ai · domain:devx · Bug · p2 · size S · reach: every scenario-card round that grades a figure (all models, all cards); today it marks right answers wrong whenever the model spells a count as a word.\nDedupe: searched `readingsIn number word`, `missing figure Two`: none.\n\n## 维护者速读\n- 是什么：评测打分时只认阿拉伯数字。智能体答「Two invoices are no longer drafts」是对的，却被判「漏了数字 2」。\n- 影响：invoice 卡的「改前 0/3、改后 3/3 漏数字」其实是措辞随机，答案 13/13 都对。\n- 要你做什么：无。\n\n## Evidence\n- Full write-up: `/mnt/project-files/pm-orders/cloud/epic-5027/5082-findings.md` (project files). 13 ask-phase invoice runs from the cloud#5031 baseline recordings: the answer (2 not draft: 1 Sent, 1 Paid) is right in 13/13. All 7 graded fails open with \"Two invoices …\"; all 6 passes write \"2 invoices\".\n- `packages/qa/scenarios/src/score/scenario-run-grade.ts` at `origin/main` ce4d8c7d: `readingsIn` (~:215) matches digits only (`/(\\d{1,3}(?:[,，]\\d{3})+…|\\d+(?:\\.\\d+)?)…/g`); `meets` (~:280) then finds no reading equal to the truth value.\n\n## What to do\n1. `readingsIn` also yields integer readings for number words: English zero–twenty (case-insensitive, whole words), and Chinese 零/一…十/两 when standing alone as a count (e.g. 「两张」, not inside a longer word such as 「一些」「统一」). Keep the existing digit path unchanged.\n2. Leak and supported-number checks: a word reading must not raise a new leak or \"unsupported number\" verdict on answers that pass today. Either mark word readings so those checks skip them, or show by test that they cannot misfire (e.g. \"one of them is Sent\" next to a withheld figure).\n3. Tests: \"Two invoices are no longer drafts\" meets truth 2; \"2 invoices\" unchanged; 「两张发票」 meets 2; \"someone\" / 「一些」 yield no reading; an existing leak fixture's verdict is unchanged.\n4. Cosmetic, same file (~:1132): the problem label says `persona` for an admin question whose persona is null; label it by the actual asker.\n5. Changeset if `packages/qa` is versioned; otherwise none.\n\n## Done when\nRe-grading the cloud#5031 invoice recordings with the new grader gives 13/13 for `invoices_not_draft` (state the command and the commit in the PR), and the existing grader tests pass."

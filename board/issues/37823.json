@@ -1,0 +1,31 @@
+{
+  "number": 37823,
+  "kind": "issue",
+  "title": "review follow-ups of PR #37783",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:ai",
+    "domain:spec",
+    "pm:queue",
+    "priority:p3"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-11-27T05:06:12Z",
+  "updated_at": "2026-11-27T05:24:22Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/37823",
+  "body": "repo:objectstack#2 · os-sales · session_01L6bhgV6i8jfWwSXjpWJrjA\n\nFiling gate: ① (review follow-ups the contract records of PR #37783 left to the seat) · Source: fleet (PR #37783, records 7209785394 and 7210318602)\n\n## What happens\n\nPR #37783 retires an agent's `model.provider`. Its contract review records left three points outside that PR:\n\n- **`model.topP` has no carrier card.** The liveness ledger still reads `topP DEAD`, and no open issue carries it. It needs a card where its reader would live, or its retirement on the same route as `provider`.\n- **The cloud side of the prescription.** The new guidance says the deployment resolves a model name among the providers it has turned on. That is objectstack-ai/cloud#5055 phase 1, and it must be true by the release that carries the tombstone. The review did not read cloud.\n- **No producer census in cloud.** A built-in agent in cloud that still writes `model.provider` fails `tsc` or the parse when cloud bumps the spec pin. That is loud, but it belongs in the pin bump's plan.\n- **PR body (N4, nit).** The merged PR body's Verification list still reports `check:empty-changeset` at 0, and its What-changes list does not name the top-level `AgentSchema` guidance the delta commit added. Record only; nothing to change on `main`.\n\n## Expected\n\n- A carrier card for `model.topP`, or a retirement card, filed against the ledger row.\n- The cloud owner of the pin bump knows the two cloud points before the release that carries the tombstone.\n\n## Done when\n\n- [ ] `model.topP` has a card that names its route (enforce or remove).\n- [ ] The cloud pin bump's plan names cloud#5055 phase 1 and a census of `model.provider` writers.\n\nGrade: area:ai · Feature · n/a · reach: the agent spec's dead `topP` key, and cloud's next spec pin bump · evidence: the two review records above\nSuggested-grade: p3\nSize: S\nRelated: PR #37783, #37712, #37796."
+}

@@ -2,8 +2,8 @@
   "number": 37635,
   "kind": "issue",
   "title": "review follow-ups of PR #37582: milestone summary translation (token grammar spelled twice, per-row packaged-base walks, stale jsdoc, a template token added after rows were written)",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -14,7 +14,6 @@
     "area:ux",
     "bug",
     "domain:spec",
-    "pm:dispatched",
     "priority:p2"
   ],
   "assignees": [
@@ -23,11 +22,15 @@
   "milestone": null,
   "type": "Bug",
   "created_at": "2026-11-26T16:28:19Z",
-  "updated_at": "2026-11-27T00:22:55Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-27T04:15:28Z",
+  "closed_at": "2026-11-27T04:13:53Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 2,
+  "comments": 3,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/37635",
   "body": "repo:objectstack#2 · os-sales · session_01L6bhgV6i8jfWwSXjpWJrjA\n\nFiling gate: ① (review follow-ups, one card per PR) · Source: fleet (Contract review records 7196337094 and 7197635792 on PR #37582, accepted deviations and nits, adopted at ACCEPT)\n\n## What happens\n\nPR #37582 (Fixes #37524) composes a fired milestone's activity summary in the reader's language from `objects.<o>._milestones.<field>.<value>.summary`. Its two reviews left these items open on `main` once it lands:\n\n- [ ] **A template token added after rows were written leaves a gap.** The writer (`packages/plugins/plugin-audit/src/audit-writers.ts`) stores a token only when it interpolated a value. After an app adds a `{token}` to a milestone template, rows written before the edit are composed from the new translation with an empty hole, while their stored English sentence is whole. Expected: such a row falls back to its stored sentence (for example, by storing the template's token names, so the reader can tell a token that was never interpolated from an empty one).\n- [ ] **The `{token}` grammar is spelled twice** (N3): `milestoneTokenRe()` in the writer, whose jsdoc says \"One definition\", and a literal `/\\{(\\w+)\\}/g` in the composer (`activity-summary-message.ts`). Expected: one exported pattern.\n- [ ] **Per-row packaged-base walks** (N4): `milestoneSummary` runs `getPackagedObjectBase` and two `milestoneOn` walks per row with no cache, while `translatedObjectDef` beside it caches per object for the read. Expected: a per-(object, field) cache for one read.\n- [ ] **Stale jsdoc** (N6): two sentences in `packages/spec/src/system/i18n-resolver.ts` (\"three scalars\", \"its two callers\") no longer hold after the predicate's key union gained `summary`. The header comment at `packages/plugins/plugin-audit/src/audit-option-label-summary.test.ts:29` still says a milestone sentence \"has no bundle key and is deliberately NOT translated (#7290)\".\n\nCategory ①: the first item is a user-visible sentence with a hole; the others are the review's accepted deviations, carried here per the one-card-per-PR rule.\nPriority: p3. The gap needs an app to edit a template after rows exist, and the stored English stays whole; the rest is code hygiene.\nBusiness reason: a non-English reader of an activity timeline sees a milestone line with a blank where the English line has a value, after an app author edits the template.\nReader: the ux i18n area (seat 2, s2-ux-T), or the area that next touches plugin-audit's activity summaries.\nDedupe: searched open issues for `\"PR #37582\"`: 0 hits.\nRelated: #37524, PR #37582, #37585 (skills follow-up of the same PR).\n\n## Grade\n\narea:ux · Bug · minor · reach: read (writer and composer at `4a22422916`) · evidence: read → p3"

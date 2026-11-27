@@ -1,0 +1,36 @@
+{
+  "number": 37836,
+  "kind": "pull_request",
+  "title": "fix(plugin-detail): a related list's bulk delete with refused rows says why, not only how many",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tooling"
+  ],
+  "assignees": [
+    "os-sales"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-27T06:16:53Z",
+  "updated_at": "2026-11-27T07:06:00Z",
+  "closed_at": "2026-11-27T07:05:58Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-11-27T07:05:57Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/37836",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-sales\"} -->\n_Requested by **Sales** · [project thread](https://claude.ai/code/project/chan_01D5bWFY3rFzgJcytD5gD4Uu?thread=cmsg_01D5bWFY3rFzgJcytD5gD4UuDJAbBe3iTrFcF7GZrucZ32)_\n\nFixes #37816\n\nPR #37809 made the list page's bulk Delete say why records were refused. The related list on a record page has its own bulk delete, and its outcome line still gave only \"2 deleted, 1 failed\". The user could not tell which rows were refused or why.\n\n## Premise, measured\n\n- **Item 1 (related list): holds.** On `main`, `handleConfirmBulkDelete` in `RelatedList.tsx` kept `{ succeeded, failed }` only. When the batch call answered with named errors, they were dropped. A batch call that threw only went to `console.error`. A rejected row delete counted as one failure and nothing more. `RelatedList.tab-35892.test.tsx` pinned `2 deleted, 1 failed` for a batch answer that names `q3` with the reason `refused`.\n- **Item 2 (view-declared `operation: 'delete'`): does not hold.** A `bulkActionDefs[]` entry with `operation: 'delete'` does not go through `recordDelete`. It runs in `BulkActionDialog`, through `useBulkExecutor` and `executeBulkBatch`. That dialog's result panel already lists every refused record by its title, with its own reason (`userMessage ?? error`). This holds on the batch path (the ids the data source names, objectui#13442) and on the row-by-row fallback. A new pin on the real `ObjectGrid` measures both paths; it passes on `main` unchanged. No fix is needed there.\n\n## What changes\n\n- **`@object-ui/core`:**\n  - The grouping rule behind the list page's `refusalSummary` is exported as `bulkDeleteRefusalLines(deps, refused)`. It returns the lines: one per distinct reason, led by up to three row names and then `+N`, at most three reasons and then \"And N more\". An external-datasource refusal reads as the read-only sentence. `refusalSummary` now joins these lines, so the list page's toast is byte-identical.\n  - `err` may be the reason's text itself, because a batch call names each failed id's error as a string.\n- **`@object-ui/plugin-detail` (`RelatedList`):**\n  - The outcome now keeps each refused row's reason, from one of three sources:\n    - the ids the batch call names (a plain count names none);\n    - a batch call that throws, whose error is given for every row;\n    - each rejected row delete.\n  - Under the count it lists the grouped lines (`data-related-bulk-delete-reasons`), inside the same `role=\"status\"` region. The count keeps its own `<p>`. A long reason wraps (`[overflow-wrap:anywhere]`).\n  - The two line keys join the plugin's fallback table. They already exist in every locale pack (#37809).\n\n## Decisions made here\n\n- **Reuse the rule, not copy it.** The related list calls core's export, so the two surfaces cannot drift.\n- **Lines inline, not a toast.** The related list's outcome is an on-screen status line that stays after the re-read (objectstack#35892). The reasons go under it rather than into a new toast.\n- **A thrown batch call is a reason for every row.** On `main` that path showed \"0 deleted, N failed\" with nothing else. Its error is the one answer the user has. The rows are named because the whole batch was refused.\n- **Item 2 gets a pin, not a change.** It already does what the card asks. The pin keeps that measured.\n\n## Verification\n\n- `RelatedList.tab-35892.test.tsx` gains three cases, and the existing partial-failure case reads the count's `<p>`:\n  - A refused batch names three rows with two reasons. Expected: `Quote 2, Quote 4: <restrict>` and `Quote 3: Record is locked`, in input order.\n  - Row by row, two rejections with the same reason make one line. A batch call that throws lists `Quote 1, Quote 2: Service unavailable` under `0 deleted, 2 failed`.\n  - **CONTROL:** a batch that answers with a plain count (2 of 3) keeps the bare `2 deleted, 1 failed`, with no reason list.\n- `plugin-grid/src/__tests__/declaredBulkDeleteReasons-37816.test.tsx` (2) is the item 2 measurement: batch path with named errors, and row by row.\n- `vitest` over `@object-ui/plugin-detail`, `@object-ui/i18n`, `core/src/actions`, app-shell's `defaults-maps-mirror-en-pack`, and the new grid pin: 591 files, 6,679 passed. The core `recordDelete` tests are unchanged and green.\n- `tsc -p tsconfig.test.json` for core, plugin-detail and plugin-grid: clean. `eslint` on the changed files: 0 errors.\n- `overlap-check`: exit 0.\n\nClause-②: no\nMetadata-protocol: none\nSkills-docs: none\n\n## Human Minimum\n\n- [x] 1. Schemas start as Zod; `packages/spec` holds no runtime logic. (No spec change.)\n- [x] 2. Every name I added uses the casing for its kind.\n- [x] 3. No formatter ran; `eslint` on the changed files passes (the full `pnpm lint` runs in CI).\n- [x] 4. One issue, one branch off an up-to-date `main`, one pull request.\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01L6bhgUuauSMJu1nVSQRQri)_\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01L6bhgUuauSMJu1nVSQRQri\n\n<!-- signed: repo:objectstack#2 · os-sales · session_01L6bhgUuauSMJu1nVSQRQri -->\n"
+}

@@ -1,0 +1,33 @@
+{
+  "number": 37872,
+  "kind": "issue",
+  "title": "问题卡专题 Q1：spec 问题信封（AskQuestionEnvelope、兼容旧 asked_which、parseAskQuestionEnvelope）",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:ai",
+    "domain:spec",
+    "enhancement",
+    "pm:epic",
+    "priority:p1",
+    "size/s"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-27T08:09:39Z",
+  "updated_at": "2026-11-27T08:09:39Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/37872",
+  "body": "epic:#5027#1 · hotlong · session_01Q4EjjMUfmNYTem26rXLFUf\n\nFiling gate: ④ topic child. Source: topic #37871 (Jack 2026-11-27: 「用户体验相关的非常关键，要启动」 06:56Z; card 「按 v2 立卡，顶替输入框」 08:05Z; 「交给 objectstack #3」 08:06Z). Business reason: carried by the parent.\nParent: objectstack-ai/objectstack#37871 (decisions D1–D6, relations, topic acceptance). Evidence: an independent Fable review of objectstack `main` adb65d16 and cloud `main` 9729319 (2026-11-27) checked every file:line below.\nOwner: **repo:objectstack#3** (Jack 08:06Z 「交给 objectstack #3」; 07:51Z 「你只处理 cloud 的任务，其他任务都交给 objectstack 座位哦」). Reserved under topic #37871 (`pm:epic`), not `pm:queue`: other seats leave it.\n\nGrading: area:ai · Task · p1 · size S · reach: every console conversation where the AI asks a question.\nDedupe: searched `AskQuestion`, `question envelope`: none.\n\n## 维护者速读\n- 是什么：在 spec 里定义\"问题信封\"：云端工具写、控制台读，画问题卡用。兼容现在 `ask_which` 的旧格式。\n\n## What to do\n1. New `packages/spec/src/ai/ask-question.zod.ts`:\n```\nAskQuestionEnvelope = {\n  success: true,\n  status: 'asked',\n  reply: string,            // the text that ended the turn; the console checks the question took effect\n  preface?: string,         // stage 2: one lead-in sentence, ≤ 80 chars\n  questions: [              // 1–2\n    { header?: string,      // ≤ 16, used to compose a two-question answer\n      question: string,     // ≤ 120\n      options: [            // 2–4, mutually exclusive, labels unique\n        { label: string,          // ≤ 24\n          description?: string,   // ≤ 60\n          recommended?: boolean } // at most one\n      ] }\n  ]\n}\n```\n   \"Type something else\" is not in the envelope (the console always offers it). No multi-select in v1.\n2. Legacy compatibility, the only real producer in stage 1: `{ success, status:'asked_which', question, readings: string[], reply }` (cloud `ask-which.tool.ts:116`) reads as one question whose options have no description. Tests must cover it.\n3. `parseAskQuestionEnvelope(obj)`: takes an already-unwrapped object (unwrapping `{type:'text', value}` stays in the console's `toolResultParsers.ts:76-109`); a bad envelope returns `null` (the console falls back to text).\n4. Export publicly; regenerate api-surface and generated docs; changeset (`@objectstack/spec` minor, Metadata-protocol: added).\n\n## Acceptance\n- Positive and negative parse cases: limits, 1 vs 3 questions, 1 vs 5 options, duplicate labels, two `recommended`, legacy `asked_which`, garbage → `null`."
+}

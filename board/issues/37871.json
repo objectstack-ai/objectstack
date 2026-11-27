@@ -1,0 +1,31 @@
+{
+  "number": 37871,
+  "kind": "issue",
+  "title": "专题：AI 问题卡（AI 需要澄清时输入框位置换成可点的问题卡；问题结束回合、回答是下一条消息；第二段扩到模糊请求）",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:ai",
+    "pm:epic",
+    "priority:p1",
+    "tracking"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-27T08:08:58Z",
+  "updated_at": "2026-11-27T08:12:54Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/37871",
+  "body": "epic:#5027#1 · hotlong · session_01Q4EjjMUfmNYTem26rXLFUf\n\nFiling gate: ④ cross-repo topic parent (tracking). Source: maintainer. Jack, 2026-11-27, verbatim: 「我们有这个问题确认的流程吗」 (06:54Z, Attio screenshot); 「用户体验相关的非常关键，要启动，也要参考一下 tweety 的代码」 and 「我知道，这个是一个单独的专题」 (06:56Z); 「你只处理 cloud 的任务，其他任务都交给 objectstack 座位哦」 (07:51Z); decision card 「按 v2 立卡，顶替输入框」 (08:05Z); 「交给 objectstack #3」 (08:06Z).\nOwner: the objectstack children go to **repo:objectstack#3**; the cloud children (Q3, Q4) stay with seat epic:#5027#1 (objectstack-ai/cloud#5027).\nBusiness reason: when the AI needs a clarification today it writes the question as plain text and the user must type the answer. A clickable question card (as in Attio and Twenty) turns that into one click, so ambiguous asks get answered instead of abandoned.\nGrading: area:ai · tracking · p1 (stage 1 children p1, stage 2 p2).\nDedupe: searched `question card`, `ask_which`, `AskQuestion`: #37690 segment 3 item 3 「ask_which 选项卡」 is taken over by this topic (linked there); #34578 (ask_which label) unrelated. No duplicate.\n\n## 维护者速读\n- **是什么**：AI 需要你澄清时，输入框的位置换成一张可点的问题卡：问题加粗，选项带一行说明，最后一项「自己输入…」，底部 跳过 / 上一题 / 下一题·发送。单题点一下就发。\n- **关键判断**：不做服务端暂停，不改 ADR-0013。问题照现在 `ask_which` 的方式结束回合，回答是下一条普通消息。代价：问和答各算一次按天配额回合。\n- **分两段**：第一段只做卡片（现有问数歧义提问马上有卡，AI 行为和评测不变），p1；第二段让 AI 对\"帮我分析一下\"这类模糊请求也问，要过评测门槛，p2。\n- **要你做什么**：无。\n\n## Decisions\n- **D1 No server-side pause.** The question tool ends the turn as `ask_which` does today (`ctx.requestTurnEnd(reply)`, cloud `service-ai-studio/src/tools/ask-which.tool.ts:99-119`); reply = question + bullet list (for model history, conversation list and evals). The tool result carries a structured envelope; the console draws the card from it. The answer is an ordinary user message (new turnId) sent through `onSendMessage`. No new turn state, no answer endpoint, no rewrite of stored tool results, no ADR-0013 change. Accepted costs: question and answer each count as a daily-quota turn; the server does not know which question a message answers; two tabs can both answer; the local-cache fallback shows the question as text.\n- **D2 Envelope in spec** (Q1). **D3 When a card shows** (pure function, Q2b). **D4 Card and interaction** (Q2a/Q2b): the card takes the composer's place (Attio layout, Jack 08:05Z). **D5 Tool**: keep `ask_which`; stage 2 extends its input (Q3) and adds a separate \"ask for direction\" skill (Q4). **D6 Eval gates** (Q3, Q4).\n- Learn from Twenty's design only; never copy its code (AGPL).\n\n## Children\n| Card | Repo · owner | What | Size | Prio | Depends on |\n|---|---|---|---|---|---|\n| Q1 | objectstack · repo:objectstack#3 | spec envelope, legacy compatibility, parser, limits, tests, api-surface and docs | S | p1 | — |\n| Q2a | objectstack · repo:objectstack#3 | `QuestionCard` pure component | M | p1 | — (start now) |\n| Q2b | objectstack · repo:objectstack#3 | wiring: envelope detection, `findPendingQuestion`, composer gate, in-thread summary, no regenerate, skip marks; brightrule smoke after release | M | p1 | Q1, Q2a, #37799; soft order with #37729, #37861 |\n| Q3 | cloud · epic:#5027#1 | `ask_which` new input and envelope, preface, no-number rule; eval gate | M | p2 | Q1 in the cloud pin |\n| Q4 | cloud · epic:#5027#1 | \"ask for direction\" skill; eval additions; gate | M–L | p2 | Q3; entry topic #37853 `context.focus` behaviour |\n\nStage 1 = Q1 + Q2a + Q2b; stage 2 = Q3 + Q4. Q2a, Q1 and Q3 can start in parallel. Card numbers are in the audit comment below.\n\n## Relations\n- #37799 (split A): Q2b Blocked-by (adds a field to the split-out `chat/types.ts`).\n- #37803 (split C): no dependency (sending uses `onSendMessage`; both message mappers already carry the tool `result`: `AiChatPage.tsx:249-250,284-288`, `mapMessages.ts:490,523`).\n- #37729 (split B): soft order; the summary is drawn in the message layer, not in `renderToolDetail`.\n- #37861 (entry C5): soft order, whoever lands later rebases. Joint acceptance: with the card shown the answer still sends `context.focus`; after the card closes the chip is still there.\n- #37860 / #37855 (entry C4 / A5): a pending question is not an exception: a user-initiated close then 「问 AI」 opens a new conversation; the old question stays in history as past (row added on #37855).\n- #37690 segment 3: item 3 taken over here; item 4 (approval card in the composer's place) reuses this topic's composer gate.\n\n## Topic acceptance\n1. An ambiguous data question shows the card in the console; one click gets the number; full screen, narrow drawer and mobile drawer all work.\n2. A half-typed draft from during the turn survives the card appearing and a skip.\n3. A message queued during the turn: no card, the queued message is sent.\n4. Unanswered then refresh / reopen: the card is still there; answered ones show the collapsed summary and the answer.\n5. The pending-question message has no \"regenerate\"; shared read-only pages show no card.\n6. Old conversations' text `ask_which` answers render as before, no error.\n7. 「帮我分析一下」 on a blank page shows a card; after answering the AI analyses as chosen (stage 2).\n8. Q3 and Q4 eval gates pass.\n9. Keyboard works end to end without stealing composer focus; Arabic is right-to-left; screen readers read the question number, options and \"a question is waiting\".\n\n## Risks\n1. More clarifying questions (stage 2): covered by the D6 gates and by the new skill being removable on its own.\n2. Quota doubles for asked turns; accepted.\n3. Single-click send mis-taps: single question only; two questions stop on 「发送」.\n4. Two tabs answering twice: no server state to prevent it; low harm."
+}

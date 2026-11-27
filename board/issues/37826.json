@@ -1,0 +1,36 @@
+{
+  "number": 37826,
+  "kind": "pull_request",
+  "title": "chore(console): back-fill the eager-closure baseline's squash merge",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "size/s",
+    "skip-changeset",
+    "tests"
+  ],
+  "assignees": [
+    "os-sales"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-27T05:19:30Z",
+  "updated_at": "2026-11-27T05:59:34Z",
+  "closed_at": "2026-11-27T05:59:31Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-11-27T05:59:31Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/37826",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-sales\"} -->\n_Requested by **Sales** · [project thread](https://claude.ai/code/project/chan_01D5bWFY3rFzgJcytD5gD4Uu?thread=cmsg_01D5bWFY3rFzgJcytD5gD4UuJyLDyhPTFkFALvgwhFG59d)_\n\nPart of #37444. Part of #37572. The follow-up the review of #37786 asked for: that pull request re-pinned the eager-closure budget's `BASELINE` at its branch commit `003fde60`, and it landed on `main` as the squash `50b4bf82`. This records the squash in `BASELINE.squashMerge`, so the baseline's provenance names a commit that exists on `main`.\n\nClause-②: no\nMetadata-protocol: none\n\n## 维护者速读\n\n- 用户能看到什么变化：没有。只改控制台首屏字节门禁脚本里的一条出处记录（基线来自哪个 main 提交），不改任何发布的包。\n- 为什么做：#37786 合并后，审核要求把基线的合并提交补上，免得以后有人按分支提交去找却在 main 上找不到。\n- 出错会怎样：最坏是这条出处写错；门禁的数值（上限、基线字节）一个都没动。\n\n## What changes\n\n- `ui/scripts/check-eager-closure-budget.mjs`: `BASELINE.squashMerge: '50b4bf82'`, and the provenance prose says which commit is the branch head and which is the squash.\n- `ui/scripts/__tests__/check-eager-closure-budget.test.ts`: the ledger case expects both commits (`commitsCarriedBy(BASELINE)` equals `[commit, squashMerge]`) and pins `squashMerge` to `50b4bf82`.\n\nNo ceiling, baseline byte count or per-chunk row changes. `ui/` is a private workspace script, so this publishes nothing and carries `skip-changeset`.\n\n## Why\n\nThe seat's ACCEPT on #37786 asked for the back-fill after merge.\n\n## Verification\n\n- `pnpm --dir ui exec vitest run scripts/__tests__/check-eager-closure-budget.test.ts`: 174 passed.\n- `git cat-file -t 50b4bf82` on `main`: a commit (the squash of #37786).\n\n## Human Minimum\n\n- [x] 1. Schemas start as Zod; `packages/spec` holds no runtime logic. (not touched)\n- [x] 2. Every name I added uses the casing for its kind.\n- [x] 3. No formatter ran; `pnpm lint` passes.\n- [x] 4. One issue, one branch off an up-to-date `main`, one pull request.\n- [x] 5. A change that publishes carries a changeset, and both declaration lines are filled in here and in the changeset. (publishes nothing: `skip-changeset`)\n- [x] 6. `packages/spec` touched: its generated artifacts are regenerated and committed. (not touched)\n- [x] 7. No hand edits to `content/docs/references/`, `packages/*/CHANGELOG.md` or `content/docs/releases/`.\n- [x] 8. Title, body and comments are in English.\n- [x] The *Before Submitting* list in CONTRIBUTING.md is done.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01L6bhgUFcdpjgtgSfn3qZuv\n\n<!-- signed: repo:objectstack#2 · os-sales · session_01L6bhgUFcdpjgtgSfn3qZuv -->"
+}

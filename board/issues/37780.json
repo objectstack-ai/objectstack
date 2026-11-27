@@ -2,26 +2,35 @@
   "number": 37780,
   "kind": "pull_request",
   "title": "fix(lint): warn at the permission save door when a set reads a roll-up over a child it cannot read",
-  "state": "open",
+  "state": "closed",
   "state_reason": null,
-  "draft": true,
+  "draft": false,
   "author": {
     "login": "objectstack-fleet[bot]",
     "id": 332303061,
     "type": "Bot"
   },
-  "labels": [],
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
   "assignees": [
     "hotlong"
   ],
   "milestone": null,
   "type": null,
   "created_at": "2026-11-27T02:23:43Z",
-  "updated_at": "2026-11-27T02:23:46Z",
-  "closed_at": null,
-  "closed_by": null,
-  "merged_at": null,
-  "comments": 0,
+  "updated_at": "2026-11-27T03:29:58Z",
+  "closed_at": "2026-11-27T03:29:56Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-11-27T03:29:56Z",
+  "comments": 1,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/pull/37780",
   "body": "<!-- claude-projects-attribution: {\"github_login\":\"hotlong\"} -->\n_Requested by **Jack** · [project thread](https://claude.ai/code/project/chan_01EF41AQooqveF2DGD8nqPzS?thread=cmsg_01EF41AQooqveF2DGD8nqPzSV2UpnPMRzL7urFJ94XgBty)_\n\nFixes #37757\n\nClause-②: no\nMetadata-protocol: none\n\n## What\n\n`validateRollupSourceVisibility` (`security-rollup-source-unreadable` / `security-rollup-source-row-scoped`) was registered `surfaces: CLI_ONLY`, so an agent that authors through the MCP door (`save_metadata_draft`) never saw it: the save answers with the publish gate's verdict, and the gate did not run the rule. This crosses it onto the runtime publish gate for **`permission` writes only**, at advisory tier (`surfaces: CLI_AND_RUNTIME`, `runtimeTypes: ['permission']`, `surfaceReason` removed).\n\n- A `permission` save/publish that grants a roll-up over a withheld child still succeeds and carries the finding in `advisories[]`; a draft save carries it in `verdict.advisories` (the draft door's `draftPublishJudgement`). `message` and `hint` are byte-equal to what `os lint` prints.\n- **`object` not added.** The card allowed it only if the door's volume fence allows; `RUNTIME_OBJECT_ADVISORY_VOLUME` says an advisory object rule crossing is a separate UX decision, so it stays off. Consequence: a set saved BEFORE its objects is not re-judged when the objects land (door builds save objects first, then sets).\n- CLI commands unchanged (positional `permissions[i]` paths, same severity).\n\n## The measurement the old `surfaceReason` asked for\n\nWhat a `permission` save hands this rule: the written set (in `permissions`), the stored sets (`permissions` context), and `objects` (carried since the security rules' snapshot widening), narrowed to the package closure plus that package's other drafts (the draft verdict's pending declarations). The rule reads only spec-declared keys, and a child the snapshot lacks is left unjudged by the rule's own \"silence, never a guess\" clause, so a narrowed snapshot can drop a finding but never invent one.\n\nShowcase app (`examples/app-showcase`, 24 objects, 9 summary fields, 9 permission sets), objectstack `8b9b9d23` + this branch, each set written once per round through `runRuntimeAuthoringRules({ type: 'permission', item, context: { objects, permissions: others } })` (whole collection, no package narrowing, so the largest snapshot), 30 rounds × 9 sets = 270 saves per phase, phases alternated, shared container (absolutes are shared-box readings; compare the ratio):\n\n| phase | mean ms/save | p50 | p95 | roll-up advisories per 9 writes |\n|---|---|---|---|---|\n| before (entry removed) | 1.94 / 1.66 | 1.81 / 1.51 | 2.68 / 2.28 | 0 |\n| after | 2.10 / 2.09 | 1.98 / 1.93 | 2.81 / 2.80 | 11 |\n\nSo about +0.15–0.4 ms per save. Volume: 11 advisories over the 9 set writes (max 6 on one set, `showcase_member_default`), 0 on objects. Parity: the 11 per-write findings equal `os lint`'s 11 whole-stack findings for the same stack, message for message. Script: kept in the project's files (`37757-measure.mts`), not committed.\n\n## Tests\n\n- `packages/lint/src/validate-rollup-source-visibility.test.ts`: new top-level describe \"at the runtime publish gate, on a `permission` write\" (dispatch on `permission` only; withheld child object ⇒ advisory with the CLI's message/hint, not refused; hidden child field ⇒ sum only; set withholding both ⇒ none; stored sibling set's finding not charged; child absent from the snapshot ⇒ none; CLI paths unchanged), and the registry pin updated. Reverse-checked: with the entry put back to `CLI_ONLY`, 6 of these fail.\n- `packages/metadata-protocol/src/protocol.draft-publish-verdict.test.ts`: new describe, the MCP door's path end to end — stage `project` (count roll-up) and `task` as drafts, then a `client` set as a draft in the same package; `draftPublishJudgement` answers the advisory with the `os lint` message and no refusal; a set masking the count answers none.\n\nLocal:\n- `pnpm --filter @objectstack/lint test` — 239 files / 9725 tests passed\n- `pnpm --filter @objectstack/metadata-protocol test` — 371 files passed (9 skipped) / 23452 tests passed (45 skipped)\n- `pnpm --filter @objectstack/lint typecheck`, `pnpm --filter @objectstack/metadata-protocol typecheck` — exit 0\n- derived gate families (`dispatch-gates --commands`): 65 derived, 60 ran exit 0, 5 not measured locally: `check-plugin-teardown-shape --self-test`, `check:dual-build-cjs-loads`, `check:lean-entry-closure` refused on unbuilt dist (exit 3); `check:query-options-erasure`, `check:type-check-debt` killed by my local 300 s cap (exit 124), left to CI\n\n## Acceptance notes\n\n- The showcase app itself carries 9 `security-rollup-source-unreadable` warnings (e.g. `showcase_client_liaison` reads `showcase_project.task_count` / `total_estimate`), which a re-save of those sets now shows at the door. Pre-existing and already printed by `os lint`; not changed here.\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01Q4EjjMP8e94NCW8GvqUvsy)_\n"

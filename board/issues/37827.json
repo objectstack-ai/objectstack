@@ -1,0 +1,31 @@
+{
+  "number": 37827,
+  "kind": "issue",
+  "title": "Record page hides every `type: 'ask_ai'` action: RecordDetailView's own ActionProvider drops the shell's onAskAi",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "os-bob",
+    "id": 353326562,
+    "type": "User"
+  },
+  "labels": [
+    "area:ai",
+    "domain:ui",
+    "pm:blocked",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-11-27T05:26:16Z",
+  "updated_at": "2026-11-27T07:30:38Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/37827",
+  "body": "## What happens\n\nAn action with `type: 'ask_ai'` (ADR-0160 D7) placed on `record_header` / `record_more` is never drawn on a record page — not inline, not in the ⋯ menu — even where every gate ADR-0160 D7 names is open.\n\nSeen on a deployed console (ObjectStack 19.0.0-next.0, console build `1dbf19a1`):\n- the AI drawer is up (the assistant icon is in the header);\n- `GET /api/v1/ai/agents` answers `{\"name\":\"ask\", …, \"capabilities\":{…,\"focus\":true}}`;\n- the app's object declares `{ name: 'brightrule_policy_ask', type: 'ask_ai', locations: ['record_header', 'list_item'] }`, and the action is in the installed metadata;\n- the record header shows only 编辑 and ⋯ (刷新 / 分享 / 更改负责人 / 删除).\n\n## Cause\n\n`useAskAiHandler()` is wired once, in `useConsoleActionRuntime` → `GlobalActionRuntimeProvider` (`ConsoleShell.tsx`), as `onAskAi` on the shell's `<ActionProvider>`. `RecordDetailView` mounts its **own** `<ActionProvider>` (`ui/packages/app-shell/src/views/RecordDetailView.tsx`, around line 6413), which shadows the shell's for every action on the record page and does not pass `onAskAi`. `ActionContext` does not fall back to a parent's handler (`hasAskAi = onAskAi !== undefined`), so under the record page the runner answers \"no handler\" and the action is absent. Still the case on `main` (44ccf94a).\n\n## Proposed fix\n\nHand the record page's provider the same handler, as it already does for confirm / toast / navigate / param collection:\n\n```diff\n import { useActionModal } from '../hooks/useActionModal.js';\n+import { useAskAiHandler } from '../hooks/useAskAiHandler.js';\n …\n   const { modalHandler, modalElement, resolveModalTarget } = useActionModal(dataSource);\n+  const askAiHandler = useAskAiHandler();\n …\n           onResultDialog={resultDialogHandler}\n+          {...(askAiHandler ? { onAskAi: askAiHandler } : {})}\n           onModal={modalHandler}\n```\n\nChecked locally with a test through the real `RecordDetailView` under a real `ChatDockControlProvider` (only `useAgents` stubbed): with a focus-honouring agent the button is drawn and a click calls `open({ agent: 'ask', fresh: true })` and `setChatFocus({ object, id }, { follow: true })`; with no agent declaring `focus` it stays absent. The first case fails without the change and passes with it. Happy to hand over the test file.\n\nOther providers that shadow the shell's (`ObjectView`, `DeclaredActionsBar`) use `useConsoleActionRuntime`, so they already carry it; `RecordDetailView` is the one that builds its handler set by hand."
+}

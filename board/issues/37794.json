@@ -1,0 +1,38 @@
+{
+  "number": 37794,
+  "kind": "pull_request",
+  "title": "fix(spec): an action's operation: 'delete' refusal names the script and flow routes",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "protocol:ui",
+    "size/s",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-27T03:44:49Z",
+  "updated_at": "2026-11-27T05:24:27Z",
+  "closed_at": "2026-11-27T05:24:25Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-11-27T05:24:25Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/37794",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"hotlong\"} -->\n_Requested by **Jack** · [project thread](https://claude.ai/code/project/chan_01EF41AQooqveF2DGD8nqPzS?thread=cmsg_01EF41AQooqveF2DGD8nqPzSEfdkEPm9YGfc3wYraC2vqA)_\n\nFixes #37775\n\nClause-②: no\nMetadata-protocol: none\n\n## 维护者速读\n- 用户能看到什么变化：搭建者（智能体或人）给动作写「删除当前记录」被拒时，拒绝信息里会说清该怎么做：用以操作者本人身份运行的流程动作。\n- 为什么做：云端智能体效果专题的搭建线，发票场景里智能体被拒两次后放弃了「删明细行」动作，丢了分。\n- 出错会怎样：只改了拒绝文字，拒绝本身和错误种类不变，可直接撤回。\n- 要你做什么：无。\n\n## What changes\n`operation: 'delete'` on an action stays refused with the same issue code (`invalid_value`). The message now ends with the working route: a `type: 'flow'` action naming an autolaunched flow that deletes the record. The flow runs as the caller, so the caller's delete permission applies. The script route is deliberately not named: a script action body runs elevated (`isSystem`, see `packages/runtime/src/sandbox/script-runner.ts` and `body-doors.ts`), so a delete there would skip the caller's delete permission and sharing (L1 review).\n\nPremise check on `origin/main` 56c9cae6: the refusal is at `packages/spec/src/ui/action.zod.ts:1698` and its assertion at `action-row-update.test.ts:287`, as the card says. No other file pins the sentence.\n\nFiles to read first: `packages/spec/src/ui/action.zod.ts` (the `operation` error map), then the test.\n\n## Tests\n- `pnpm --filter @objectstack/spec exec vitest run --maxWorkers=2 src/ui/action-row-update.test.ts`: 32 passed. The existing case keeps its `code` + first-sentence assertions, adds a `toContain` check for the flow route and a `not.toContain` check that no script route is suggested.\n- `pnpm --filter @objectstack/spec typecheck`: exit 0.\n- Whole `@objectstack/spec` suite on a fresh `--ignore-scripts` install: the first run had 117 files fail to load because the generated `src/migrations/registry.ts` did not exist yet (it is generated mid-run); re-running those 116 test files after `pnpm gen:migration-registry`: 115 passed, 1 failed. The one is `scripts/def-key-collisions.test.ts` (`Cannot find module …/restored-limb/node_modules/.pnpm/tsx…/cli.mjs`, a copied tree without tsx), unrelated to this diff; CI's `Test Core` is the verdict.\n\n## Acceptance notes\n- The semantic upgrade entry `18.ui-page-action-row-operation-declared.ts` still says \"A row delete is the object's own delete affordance\" without the route. Left as is: it is shipped upgrade text, and this card is the refusal message only.\n\n## Verification\n`node -e \"import('@objectstack/spec').then(m=>console.log(m.ActionSchema.safeParse({name:'x',label:'X',operation:'delete'}).error.issues.find(i=>i.path[0]==='operation').message))\"` after a spec build: the message ends with the flow route and names no script route.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01Q4EjjMuWk2AuaVuFhVepja\n\n<!-- signed: epic:#5027#1 · hotlong · session_01Q4EjjMUfmNYTem26rXLFUf -->\n"
+}

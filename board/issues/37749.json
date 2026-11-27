@@ -2,8 +2,8 @@
   "number": 37749,
   "kind": "issue",
   "title": "选项值允许 1 个字符：「等级 A/B/C」这类选项首存不再被拒",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -21,13 +21,17 @@
     "hotlong"
   ],
   "milestone": null,
-  "type": null,
+  "type": "Task",
   "created_at": "2026-11-27T01:21:33Z",
-  "updated_at": "2026-11-27T02:20:46Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-27T03:21:15Z",
+  "closed_at": "2026-11-27T03:21:15Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 2,
+  "comments": 3,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/37749",
   "body": "epic:#5027#1 · hotlong · session_01Q4EjjMUfmNYTem26rXLFUf\n\nFiling gate: ③ maintainer-directed. Maintainer ruling: objectstack-ai/cloud#5027 next-phase plan v2, decision 3 ①「选项值允许 1 个字符」, approved 2026-11-27 「同意，开工」 (rulings recorded on cloud#5027, latest seat comment).\nParent: objectstack-ai/cloud#5027, M2 (framework row).\nGrading: area:data · domain:spec · Task · p2 · size S · reach: every author (human or agent) who writes a select whose natural values are single letters or digits-with-letter (grade A/B/C, size S/M/L, priority P0 only after a letter).\nDedupe: searched `option value min length`, `select option value \"2 characters\"`, `SystemIdentifierSchema option value`: none open. Related, closed: #19678 (form-face option values as system identifiers), #25013 (shorthand keeps what was written), #31066 (taxonomy respelling). None ruled on the 2-character floor.\n\n## 维护者速读\n- 是什么：选项值现在至少 2 个字符，用户说「客户等级 A/B/C」，智能体照写 `a`、`b`、`c` 会被发布拒掉。\n- 做法：只放宽选项值这一处，允许 1 个小写字母开头的字符；其它标识符的 2 字符下限不动。\n- 要你做什么：无（已在 cloud#5027 计划 v2 决定 3 里批了）。\n\n## Evidence\n- cloud#5027 M1 baseline, finding 2 (Haiku 5.5 through the light door, 3 repetitions): the user asked for options A/B/C; 3/3 first saves were refused with `options.value too_small`. Haiku recovered by writing `level_a` etc., labels still A/B/C. The refusal costs one save round per such field and leaves odd stored values.\n- At `origin/main` ce4d8c7d: `SelectOptionSchema.value` (`packages/spec/src/data/field.zod.ts` ~:382) is `SystemIdentifierSchema` (`packages/spec/src/shared/identifiers.zod.ts` ~:102, `.min(2)`, regex `^[a-z][a-z0-9_.]*$`).\n\n## What to do\n1. Give the select option value its own schema (or a local refinement) that accepts length 1: same character rule as today (lowercase, starts with a letter, letters/digits/underscore/dot), minimum 1. ⛔ Do not change `SystemIdentifierSchema` or `SnakeCaseIdentifierSchema`: they guard object, field and other machine names.\n2. Find every other place that re-checks an option value with the 2-character floor and align it in the same PR: the form-face option shape (`FormSelectOptionSchema`, see #19678), the `Field.select` shorthand, picklist value schemas, runtime select validation in the data layer, the Setup option editor's client-side check, and generated JSON schemas / baselines. List each one in the PR with file:line.\n3. Tests: a select with options `a`, `b`, `c` parses and publishes; `''` and `A` (uppercase) are still refused; a translation key `picklists.<name>.options.a` resolves.\n4. Skill text: if `skills/**` states the 2-character floor anywhere, update that line (net 0 lines).\n5. Changeset (spec patch).\n\n## Done when\n- The three tests above pass, and the PR lists every option-value check it touched.\n- No other identifier's minimum length changed (show the grep)."

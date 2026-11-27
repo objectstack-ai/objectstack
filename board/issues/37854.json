@@ -1,0 +1,36 @@
+{
+  "number": 37854,
+  "kind": "issue",
+  "title": "入口专题 C0a：ADR-0160 第七次修订（默认带当前记录、取消钉住与「改为问」、撤 ask_ai 的退役路线、预读改为用到再读）",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:ai",
+    "domain:docs",
+    "enhancement",
+    "pm:dispatched",
+    "pm:epic",
+    "priority:p1",
+    "size/s"
+  ],
+  "assignees": [
+    "os-tesla"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-27T07:18:40Z",
+  "updated_at": "2026-11-27T07:37:11Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/37854",
+  "body": "epic:#5027#1 · hotlong · session_01Q4EjjMUfmNYTem26rXLFUf\n\nFiling gate: ④ topic child. Source: topic #37853 (Jack: 「\"页面里加按钮\"的需求 作废」 06:28Z; card 「撤掉 ask_ai」 06:30Z; 「问 AI」 06:33Z; 「同意，立专题卡，非 cloud 的任务，让 objectstack #3 座位接手」 07:12Z, all 2026-11-27). Business reason: carried by the parent.\nParent: objectstack-ai/objectstack#37853 (rulings, target experience, card table, topic acceptance). Evidence: an independent Fable review of objectstack and cloud `main` (2026-11-27) checked every file:line below.\nOwner: **repo:objectstack#3** (Jack 07:12Z 「非 cloud 的任务，让 objectstack #3 座位接手」). Reserved under topic #37853 (`pm:epic`), not `pm:queue`: other seats leave it.\n\nGrading: area:ai · Task · p1 · size S · governed surface `docs/adr/**` (Tier H): needs Jack or os-zhuang approval, no seat arms auto-merge.\nDedupe: searched `ADR-0160 amendment`, `ask_ai`: #37834 is the decision this amendment records; no other card.\n\n## 维护者速读\n- 是什么：ADR-0160（记录范围 AI 问询）第七次修订，把 11-27 的裁定写进去：入口默认带当前记录、取消钉住和「改为问」、撤掉 ask_ai 及旧元数据怎么处理、预读改为用到再读。\n- 影响：C1、C5、C6 都按这份修订实现。\n- 要你做什么：批准这个受管 PR。\n\n## What to change in `docs/adr/0160-*.md`\n1. Title and TL;DR: the entry is the shell's 「问 AI」 button; no page-level `ask_ai`.\n2. D6 (conversation focus):\n   - Default focus: an unsent conversation's effective focus is the current page record (`surfaceRecord()`), unless the user dismissed it with ×.\n   - State is `{ focus, dismissed }`; the first send fixes both; afterwards focus persists across navigation (unchanged).\n   - Remove pinning and the 「改为问《X》？」 switch prompt (Jack 07:12Z, 「全部按建议」). The page chip 「正在看：X」 stays when there is no focus.\n   - Rewrite the \"Entry point\" bullet.\n3. D7 (`ask_ai` action type): mark the whole section retired, with the date and the ruling.\n4. Implementation table rows 6 and 9: the first-turn pre-read becomes read-on-demand (a pointer block; the model calls `get_record_context` only when the user refers to the record; fallback `get_record`).\n5. Retirement route for `ask_ai` (ADR-0087):\n   - `ActionType` uses `enumWithRetiredValues()` with the prescription on the enum (precedent `packages/spec/src/ai/agent.zod.ts:161,173`); conversion in `conversions/entries/19/`, a D3 semantic entry, a disposition marker in the changeset.\n   - **Source files** with `type:'ask_ai'`: parse refusal with the prescription \"Delete this action and its references; use the shell's 「问 AI」 entry\".\n   - **Conversion**: auto-delete only when no reference to the action exists; otherwise keep the refusal (pages reference actions by name, e.g. showcase `task-detail.page.ts`).\n   - **Installed / stored metadata**: decide and write the exact behaviour (recommended: skip the action at load with a warning, the page does not break).\n6. Sync the \"Done when\" of topic #36996.\n\n## Acceptance\n- The amendment states each point above unambiguously enough that C1, C5 and C6 need no further ruling.\n- `check-governed-prose` and the ADR lint pass."
+}

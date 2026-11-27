@@ -1,0 +1,34 @@
+{
+  "number": 37862,
+  "kind": "issue",
+  "title": "入口专题 C7：空会话界面组件（AI 首页、全屏新会话、窄抽屉三处共用），19.1",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:ux",
+    "domain:ui",
+    "enhancement",
+    "pm:blocked",
+    "pm:epic",
+    "priority:p2",
+    "size/m"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-27T07:24:04Z",
+  "updated_at": "2026-11-27T07:24:04Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/37862",
+  "body": "epic:#5027#1 · hotlong · session_01Q4EjjMUfmNYTem26rXLFUf\n\nFiling gate: ④ topic child. Source: topic #37853 (Jack: 「\"页面里加按钮\"的需求 作废」 06:28Z; card 「撤掉 ask_ai」 06:30Z; 「问 AI」 06:33Z; 「同意，立专题卡，非 cloud 的任务，让 objectstack #3 座位接手」 07:12Z, all 2026-11-27). Business reason: carried by the parent.\nParent: objectstack-ai/objectstack#37853 (rulings, target experience, card table, topic acceptance). Evidence: an independent Fable review of objectstack and cloud `main` (2026-11-27) checked every file:line below.\nOwner: **repo:objectstack#3** (Jack 07:12Z 「非 cloud 的任务，让 objectstack #3 座位接手」). Reserved under topic #37853 (`pm:epic`), not `pm:queue`: other seats leave it.\n\nGrading: area:ux · Task · p2 · size M · window 19.1 (Jack 07:12Z).\nBlocked-by: #37788 (AI home page); C4 (#37860).\nDedupe: searched `empty conversation`, `AI home suggestions`: #37788 (open, AI home page) is the first consumer, not a duplicate.\n\n## 维护者速读\n- 是什么：一个空会话界面组件，三处共用：AI 首页（#37788）、全屏新会话、窄抽屉新会话（紧凑版）。问候、大输入框、示例问题、「最近会话 · 标题」。\n\n## What to do\n1. One component, three uses: AI home (#37788), full-screen new chat, narrow drawer (compact).\n2. Resolve the three overlaps with #37788:\n   - Each suggestion carries a mode, \"send\" or \"fill\". App-configured suggestions on the AI home send (as #37788 does); platform per-page suggestions in the drawer that involve the current record fill.\n   - 「最近会话」: on the AI home open on that page (`?c=`), because the drawer is hidden there; in the drawer open in the drawer.\n   - Suggestion source: the AI home uses the app's `ai:chat` nav-item params (#37787); the drawer uses platform suggestions by page type.\n3. Greeting (time of day + name) and per-page suggestions are new strings in eleven locales.\n4. Today's static per-agent suggestions live in `AiChatPage.tsx:1830,2123-2149`.\n\n## Acceptance\n- AI home: 「最近会话」 opens on the page; suggestions send or fill per mode, matching #37788.\n- Full-screen and drawer new chats show the layout; compact in the narrow drawer."
+}

@@ -1,0 +1,38 @@
+{
+  "number": 37813,
+  "kind": "pull_request",
+  "title": "fix(runtime): a 501 answered in the request's language says it varies by Accept-Language, and the inbound automation hooks' Japanese 501 says 自動化",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "protocol:system",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [
+    "os-sales"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-27T04:30:49Z",
+  "updated_at": "2026-11-27T06:14:47Z",
+  "closed_at": "2026-11-27T06:14:45Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-11-27T06:14:45Z",
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/37813",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-sales\"} -->\n_Requested by **Sales** · [project thread](https://claude.ai/code/project/chan_01D5bWFY3rFzgJcytD5gD4Uu?thread=cmsg_01D5bWFY3rFzgJcytD5gD4UuPE7uyDAJyqjwwMzomWv5ff)_\n\nFixes #37737\n\nClause-②: no\nMetadata-protocol: none\nSkills-docs: none (no page under `skills/**` quotes these 501 sentences or their headers)\n\n## 维护者速读\n\n- 用户能看到什么变化：日文环境下，入站自动化钩子未配置时返回的 501 提示改用平台日文包统一的说法「自動化」。另外，所有按请求语言翻译的 501 响应（打印、个人视图、附件、评论、webhook 重新投递、审批操作页、入站自动化钩子）现在都带 `Vary: Accept-Language` 响应头。\n- 为什么做：#37721 的审核发现日文术语不一致；而且 501 在 HTTP 标准里默认可以被缓存，如果前面有共享缓存，可能把一种语言的提示发给说另一种语言的人。\n- 出错会怎样：只影响服务没装好时的 501 提示和一个响应头，状态码、错误码和英文句子都不变。\n- 要你做什么：无。卡里的第 5 项（其余约 26 句固定英文 501）已经移到 #37811，不在这个 PR 里。\n\n## What changes\n\n- **Japanese term (item 1, N1)**: `packages/spec/src/system/operation-message.ts`, both `ja-JP` `automation_hooks_*` sentences say `受信自動化フック` instead of `受信オートメーションフック`, with the two pins in `automation-hooks.test.ts`. No other sentence in the repository used `オートメーション`; `ui/packages/i18n` `ja.ts` and the `platform-objects` ja-JP bundles say `自動化`.\n- **Locale-fallback jsdoc (item 2, N2)**: the `print_*` paragraph and the `comment_doors_*` … `automation_hooks_*` paragraph of the catalog jsdoc now say the request's top tag is matched by language (`resolveBundleLocale`): `es-MX` reads `es-ES`, `zh` and `zh-TW` read `zh-CN`, `ja` reads `ja-JP`, and only a language with no catalog locale answers English (measured against the built catalog).\n- **`requestLocaleOf` reader list (item 3, N3)**: its jsdoc names the four non-bridge families that read it (comments, webhook redelivery, approval action pages, inbound automation hooks).\n- **Walk and pin coverage (item 4)**, `own-door-bridge.test.ts`: the walk also imports a module that calls `handleOwnDoorBridgeRequest(` directly; every bridge noun must end in `door` or `doors` (`/\\bdoors?$/`), and `nounPlural` must equal `/\\bdoors$/`, so a plural noun spelled another way fails instead of passing. The `noun` member's jsdoc states the rule.\n- **`Vary: Accept-Language` (item 6)**, `own-door-bridge.ts`: `localizedNotImplemented(deps, message)` builds the `501` and adds the header; `catalogNotImplemented(deps, context, key, params?)` renders a catalog key in the request's language first. The bridge's two `501`s and the eight sentences of `approvals.ts`, `comments.ts`, `webhooks.ts` and `automation-hooks.ts` answer through them (their now-unused `operationUserMessage` / `requestLocaleOf` imports are dropped). Each family's language test pins the header beside the sentence.\n- **Item 5 moved**: the remaining fixed-English `501`s (auth, i18n, mcp, automation, meta, packages, about 26 sentences) are card #37811, `Blocked-by: #37737`, per the seat's split.\n- **Changeset**: `@objectstack/runtime` and `@objectstack/spec` patch.\n\nSmall calls made here (no card):\n- This PR adds `Vary: Accept-Language` to the ten `501`s localized from the request's language only (the bridge's two and the eight of the comment, webhook-redelivery, approval action-page and inbound-hook doors), not to the whole error envelope, which every refusal shares whether or not its text varies. A `501` is heuristically cacheable (RFC 9111 §4.2.2). The other localized answer that is cacheable by default, the `404 RECORD_NOT_FOUND` of `GET /data/:object/:id` (its `userMessage` follows the caller's language), is not covered here and is tracked by #37828. Agreed with the seat.\n- Item 4 is closed by widening (walk and pin), not by narrowing the claim.\n\n## Why\n\nContract review record 7206602201 on PR #37721 (nits N1–N3 and the record's notes, adopted at ACCEPT), carried here per the one-card-per-PR rule.\n\n## Verification\n\nHead `bcf922153` (the follow-up head `620499a87` only declares the bridge's hand-built `501` in `scripts/check-route-envelope.mjs`, `handBuilt: 1`; `Response-envelope guard` green):\n- `packages/runtime`: `own-door-bridge.test.ts`, `automation-hooks.test.ts`, `comments.test.ts`, `webhooks-redeliver.test.ts`, `approvals-act.test.ts`: 5 files, 129 tests passed, each language case now also asserting `Vary: Accept-Language`.\n- `packages/spec`: `src/system/operation-message.test.ts` 60/60.\n- `tsc --noEmit -p packages/runtime`: exit 0. `eslint` on the 6 touched runtime source and bridge test files: exit 0.\n- `check:changeset-fixed`, `check:test-source-alias`: exit 0.\n- `node scripts/pm/overlap-check.mjs`: clean.\n\n## Human Minimum\n\n- [x] 1. Schemas start as Zod; `packages/spec` holds no runtime logic (catalog strings and comments only).\n- [x] 2. Every name I added uses the casing for its kind.\n- [x] 3. No formatter ran; lint passes.\n- [x] 4. One issue, one branch off an up-to-date `main`, one pull request.\n- [x] 5. A change that publishes carries a changeset, and both declaration lines are filled in here and in the changeset.\n- [x] 6. `packages/spec` touched: no generated artifact depends on these strings or comments.\n- [x] 7. No hand edits to `content/docs/references/`, `packages/*/CHANGELOG.md` or `content/docs/releases/`.\n- [x] 8. Title, body and comments are in English.\n- [x] The *Before Submitting* list in CONTRIBUTING.md is done.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01L6bhgUpnvPnJ1hR74pUrVj\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01L6bhgUpnvPnJ1hR74pUrVj)_\n\n<!-- signed: repo:objectstack#2 · os-sales · session_01L6bhgUpnvPnJ1hR74pUrVj -->\n\n"
+}

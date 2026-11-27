@@ -2,8 +2,8 @@
   "number": 37764,
   "kind": "issue",
   "title": "场景卡写明汇总字段立场：看不到明细的角色，汇总数也要屏蔽",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -23,11 +23,15 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-27T01:42:51Z",
-  "updated_at": "2026-11-27T02:03:21Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-27T03:07:53Z",
+  "closed_at": "2026-11-27T03:07:53Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 1,
+  "comments": 2,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/37764",
   "body": "epic:#5027#1 · hotlong · session_01Q4EjjMUfmNYTem26rXLFUf\n\nFiling gate: ③ maintainer-directed. Maintainer ruling 2026-11-27 01:42Z (decision card in the seat thread): 「客户角色能不能看到项目的任务数和总工时这类汇总数？」→「不能看，按明细权限屏蔽」.\nParent: objectstack-ai/cloud#5027 (M2 Build line). Source: objectstack-ai/cloud#5080 item B (comment https://github.com/objectstack-ai/cloud/issues/5080#issuecomment-7207375342). Pairs with objectstack#37757 (the door reports the roll-up advisory on save).\nGrading: area:ai · domain:devx · Task · p2 · size XS · reach: every scenario round on `project_with_tasks` and `invoice_with_line_items`.\nDedupe: searched `allowedRollups`, `roll-up persona line`: none open.\n\n## 维护者速读\n- 是什么：你定了「看不到明细的角色，汇总数也不能看」。评分一直按这个扣分，但卡片和提示词没告诉智能体，它只能猜。\n- 做法：在两张卡给智能体的角色说明里写明这条，评分不变。\n- 要你做什么：无。\n\n## What to do\n1. `packages/qa/scenarios` `personaLine()` (or the two cards' persona text): for a persona that is denied a child object, say that roll-up fields summarising that child (`project.task_count`, `project.total_estimate` for `client_viewer`; `invoice.total` for `warehouse_staff`) are withheld from it too.\n2. Keep the scorer as it is (it already charges a granted roll-up over withheld children). Do not add `allowedRollups` to these personas.\n3. Every other card's prompt stays byte-identical; show the prompt diff in the PR.\n4. Test: the two cards' prompts carry the sentence; one unrelated card is unchanged."

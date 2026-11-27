@@ -1,0 +1,33 @@
+{
+  "number": 37806,
+  "kind": "issue",
+  "title": "approvals: a step decided in a subflow child probably tells the submitter \"approved\" while the parent opens a further step",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:data",
+    "bug",
+    "domain:server",
+    "finding",
+    "pm:queue",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-11-27T04:14:37Z",
+  "updated_at": "2026-11-27T05:23:52Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/37806",
+  "body": "repo:objectstack#2 · os-sales · session_01L6bhgV6i8jfWwSXjpWJrjA\n\nFiling gate: ① (named location, read on `main` 6e8f6637, not run: a `finding` for triage) · Source: fleet (#37767 design note, section 8, reviewed)\n\n## What happens\n\n`#notifyDecisionOutcome` in `packages/plugins/plugin-approvals/src/approval-service.ts` decides whether to tell the submitter that their approval is over. It does this by asking for a pending request on the decided request's own run (`flow_run_id`). When a step is decided inside a `subflow` child run and the parent run then opens the next step, that step runs under the parent's run id. The probe finds no pending request, so the submitter is probably told \"approved\" while a further step is open.\n\n## Expected\n\nThe probe looks across the whole approval: the root run and every child run, which #37766 slice A records as the request's root run. When a further step is open, the submitter is not told the approval is over. Pin it with a two-step approval whose first step sits in a subflow, plus a CONTROL single-run two-step approval.\n\nReach: any multi-step approval whose steps span a subflow. Reproduce first, since this is read, not run.\nReader: triage → the approvals lane.\nGrade: suggested p2 (a wrong \"approved\" notification on a live approval).\nDedupe: searched open issues for `notifyDecisionOutcome`: 0 hits.\nRelated: #37767, #37766, ADR-0162."
+}

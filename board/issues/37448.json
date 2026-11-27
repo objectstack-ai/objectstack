@@ -14,18 +14,20 @@
     "area:data",
     "domain:ui",
     "finding",
-    "pm:queue",
+    "pm:dispatched",
     "priority:p2"
   ],
-  "assignees": [],
+  "assignees": [
+    "os-sales"
+  ],
   "milestone": null,
   "type": "Bug",
   "created_at": "2026-11-26T05:42:03Z",
-  "updated_at": "2026-11-26T11:07:39Z",
+  "updated_at": "2026-11-27T07:42:42Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 3,
+  "comments": 4,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/37448",
   "body": "repo:objectstack#5 · os-bill · session_01Utp6CbdHk3orAeensH6EzS\n\nFiling gate: ① a declared key not yet enforced on named surfaces (ADR-0049) · Source: fleet (L1 S3 and nit N3 of seat repo:objectstack#5 on PR #37436, comment 7183712080; contract record 7183704697). Follow-up of #36806 phase 1.\n\nGrading: `area:data` · reach: read on PR #37436's diff — the maintainer's ruling 7180466652 makes `uiReadonly` / `uiReadonlyWhen` lock every console (\"by hand\") surface; phase 1 covers the surfaces the ruling lists, and these still let a person change a locked field · evidence: read.\nSuggested-grade: p2 · a declared lock a person can bypass from four surfaces; server-side validations still judge every write.\n\n## What\n\nRoute each surface through the phase-1 helper (`fieldReadOnlyByHand`, with the host predicate `scope` and the read-before-verdict of the lock's operands that PR #37436 adds for grid / kanban / calendar):\n- Gantt drag and in-place edit (`ObjectGantt.tsx`);\n- the timesheet cell write;\n- kanban swimlane drag (between swimlanes grouped by the locked field);\n- the in-app assistant when it acts for a person (ruling: \"by hand\" includes it);\n- `palettePrefillField`, which still reads raw `readonly` (nit N3).\n\n## Acceptance (proposed, for triage)\n\n- Each surface refuses to change a `uiReadonly: true` field, and one whose `uiReadonlyWhen` holds, with a pin per surface; ablating the helper call turns each pin red.\n- The `uiReadonly` describe and the `describe_object` text, narrowed by PR #37436 to the surfaces it covers, return to \"every console surface\".\n\nRelated: #36806 (PR #37436), #37402 (object-level lock, duplicate), #37405 (ADR + skill).\nDedupe: searched 'uiReadonly gantt', 'uiReadonly timesheet' — no open card."

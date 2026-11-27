@@ -2,8 +2,8 @@
   "number": 37775,
   "kind": "issue",
   "title": "动作 operation:'delete' 被拒时说明可行做法：用脚本动作或流程动作删除当前记录",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -14,18 +14,24 @@
     "area:ai",
     "domain:spec",
     "enhancement",
-    "pm:queue",
+    "pm:dispatched",
     "priority:p3"
   ],
-  "assignees": [],
+  "assignees": [
+    "hotlong"
+  ],
   "milestone": null,
-  "type": null,
+  "type": "Task",
   "created_at": "2026-11-27T01:53:39Z",
-  "updated_at": "2026-11-27T01:53:39Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-27T05:24:27Z",
+  "closed_at": "2026-11-27T05:24:27Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 0,
+  "comments": 3,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/37775",
   "body": "epic:#5027#1 · hotlong · session_01Q4EjjMUfmNYTem26rXLFUf\n\nFiling gate: ② seat-found, objectstack-ai/cloud#5080 item E (comment https://github.com/objectstack-ai/cloud/issues/5080#issuecomment-7207375342). Seat decides per the maintainer's standing word to the seat's threads (2026-11-27 01:51Z): 「这些问题你可以自己分析和拍板吧？」. No product or contract choice: refusal wording only.\nParent: objectstack-ai/cloud#5027 (M2 Build line).\nGrading: area:ai · domain:spec · Task · p3 · size XS · reach: every author (agent or human) who tries a declarative delete action.\nDedupe: searched `operation: 'delete' refusal route`: none. Distinct from objectstack#37762 (skill text).\n\n## 维护者速读\n- 是什么：智能体想建「删除明细行」动作，写了 `operation: 'delete'` 被拒，拒绝信息没说该怎么做，它试两次就放弃了。\n- 做法：拒绝信息里补一句可行做法：脚本动作删除当前记录，或流程动作。\n- 要你做什么：无。\n\n## Evidence\ninvoice r2 gave up on `delete_invoice_line` after two such refusals (3 pts lost); invoice r1, crm r2 and project ×3 built it as a script or flow action and passed.\n\n## What to do\n1. The `operation: 'delete'` refusal in the action row-update rule (packages/spec, \"a row delete is the object's own delete affordance, not a declarative action\") also names the working route: a `type: 'script'` action whose body deletes `ctx.recordId`, or a `type: 'flow'` action to an autolaunched flow (runs as the caller).\n2. Update the message assertion in `action-row-update.test.ts`. Changeset (spec patch)."
