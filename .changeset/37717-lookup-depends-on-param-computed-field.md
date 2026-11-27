@@ -1,5 +1,5 @@
 ---
-'@objectstack/lint': patch
+'@objectstack/lint': minor
 '@objectstack/core': patch
 '@objectstack/spec': patch
 ---
@@ -7,7 +7,7 @@
 fix(lint,core)!: a lookup `dependsOn` entry whose filter key names a formula of the referenced object is refused at authoring; an import lookup none of whose scoped reads answered is never reported as out of scope
 
 Clause-②: yes (narrowing) — a lookup, master_detail or user field whose `dependsOn` filter key names a field of the referenced object computed on read (a `formula`) publishes today and is now refused at `error` by `object-field-ref-unknown`
-Metadata-protocol: none
+Metadata-protocol: narrowed — a `dependsOn` filter key naming a field of the referenced object computed on read is refused at authoring
 Skills-docs: none — no published skill page teaches a `dependsOn` filter key on a formula
 
 <!-- adr-0087: registered lookup-depends-on-param-computed-field-refused -->
