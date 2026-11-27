@@ -418,6 +418,16 @@ describe('[#16370] record-less and new-record actions keep the stamp behaviour u
         expect(ql.executeAction).not.toHaveBeenCalled();
     });
 
+    it('REST: an object-less FLOW action called with no record still starts its run', async () => {
+        const { response, automation, flowCtx } = await rest(STRANGER, '/global/escalate_global');
+
+        expect(response.status).toBe(200);
+        expect(automation.execute).toHaveBeenCalledTimes(1);
+        expect('recordLoadDenied' in flowCtx).toBe(false);
+        // An object-less key carries no `object` on the flow context.
+        expect('object' in flowCtx).toBe(false);
+    });
+
     it('an object-less action called with no record still dispatches, at both doors', async () => {
         const viaRest = await rest(STRANGER, '/global/log_call');
         expect(viaRest.response.status).toBe(200);

@@ -643,7 +643,7 @@ async function admitResolvedAction(
     // An action not bound to an object accepts no record, on any arm and for
     // any caller: judged on the declaration the call resolved to, never on the
     // object it was routed under, before any record is read or anything runs.
-    const recordKeyFailure = actionExec.objectLessActionRecordKeyFailure(actionDef, actionSchema, actionName, recordId, params);
+    const recordKeyFailure = actionExec.objectLessActionRecordKeyFailure(actionDef, actionSchema, actionName, recordId, params, declaration?.ownerKey);
     if (recordKeyFailure) return invalidBody(`Invalid action body — ${recordKeyFailure.message}`, recordKeyFailure);
     // A selection names records by id, as `recordId` names one: its shape is
     // judged here, beside the record key's, on every arm that reads it.
