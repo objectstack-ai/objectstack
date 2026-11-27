@@ -503,7 +503,7 @@ describe('field gate — the earlier title rule: searched only once the index is
         expect.objectContaining({ sourceId: 's', code: 'KNOWLEDGE_REBUILD_REQUIRED', status: 409 }),
       ]);
       expect(searched()).toEqual([]);
-      expect(String(warn.mock.calls.at(-1)?.[0])).toContain("source 's' not searched (KNOWLEDGE_REBUILD_REQUIRED)");
+      expect(String(warn.mock.calls[warn.mock.calls.length - 1]?.[0])).toContain("source 's' not searched (KNOWLEDGE_REBUILD_REQUIRED)");
       // Preservation: the system context bypasses every gate, this one too.
       expect(ids(await svc.search('q', { executionContext: SYSTEM }))).toEqual(['s']);
     }
