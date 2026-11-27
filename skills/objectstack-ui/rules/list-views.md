@@ -82,6 +82,10 @@ columns: [
 6–8 visible columns is plenty (`hidden` the rest); the name/subject column
 carries `link: true`.
 
+A `select` badge is coloured only when its option declares `color` (`{ value: 'won', label: 'Won',
+color: 'green' }`): `gray`, `red`, `orange`, `yellow`, `green`, `blue`, `indigo`, `purple`, `pink`
+or a `#` hex. Any other option renders neutral.
+
 **Inline editing is on by default**, under the permission gate: a user who may
 `update` the object edits a cell in place. A list whose records are read-only
 by nature — a log, an audit trail, a history, a report roll-up — declares

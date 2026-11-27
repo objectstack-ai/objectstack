@@ -2,7 +2,7 @@
   "card": "travel_expense",
   "cardSha256": "a6ae8aa6b99587408fe141c0cf0a0e9142c93fb243a811dfafb70469fe225ac9",
   "build": "travel_expense.json",
-  "sha256": "cc035a919bf530a6e06bb9770f08e4d78e96c7ff914b0ecd549282058283709d",
+  "sha256": "dba81bc64c769fba994eead99029c553269ce2c262ecd52f6d03483b652faef9",
   "runner": "ec227fc7",
   "packages": "published 18.6.0",
   "built": "2026-11-18",
@@ -40,6 +40,18 @@
       "cardFrom": "212abedb6b59a5ac0c6921c25bdcc4dc057cbc25e866a9cd2ed962920368a00d",
       "what": "`cardSha256` re-pinned to the card as #37781 left it: that card edit marks `claim_line.claim` `\"masterDetail\": true` in `expect.lookups`, and changes nothing else. The build is unchanged (`sha256` as before).",
       "why": "The card's own text moved, so the provenance named a card file that is no longer in the tree (`run --template` warned). `masterDetail` reaches the build prompt and the loader, not the scorer: the build re-scored at runner b620c4b2 reads the same against the card with and without the mark, Build 140/141, no roll-up charge. The one failing check, `master-detail-inline-edit` (\"0 edited inline\"), fails either way, so it comes from a scorer change since the build, not from this card edit; ask rounds do not score Build."
+    },
+    {
+      "on": "2026-11-27",
+      "card": "objectstack-ai/objectstack#37917",
+      "from": "cc035a919bf530a6e06bb9770f08e4d78e96c7ff914b0ecd549282058283709d",
+      "what": "A field group `lines` (\"Expense Lines\", `relatedList: \"demotravel_claim_line\"`) added to `demotravel_expense_claim.fieldGroups`, between `claim` and `status`. Nothing else changed: `demotravel_claim_line.claim` keeps its `inlineEdit: \"grid\"` and `inlineTitle`.",
+      "why": "The build was authored on 2026-11-18, when `inlineEdit` on a master-detail FK inlined the child in the master's form by itself. Since the #35889 ruling (ADR-0035, amended 2026-11-20) the form inlines a child only where a field group of the master names it, and `inlineEdit` only picks the form factor, so on the current tree the claim's form no longer edits its lines inline, which the card asks for (\"edited inline on the claim's form\"). The scorer followed the runtime in #37135 and reads `records-forms.master-detail-inline-edit` \"0 edited inline\" on the unamended build: the scorer is right, the build had gone stale. With the group the claim edits its lines inline again, and the build reads Build 141/141 with no roll-up charge at runner 30a8047b (`scored`); the 135/135 of `verified` is the 2026-11-18 reading, under that day's checks."
     }
-  ]
+  ],
+  "scored": {
+    "runner": "30a8047b",
+    "on": "2026-11-27",
+    "build": "141/141"
+  }
 }

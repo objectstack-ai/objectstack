@@ -37,7 +37,7 @@ import {
 } from '@object-ui/components';
 import { useUpload } from '@object-ui/fields';
 import { toast } from 'sonner';
-import { ConsolePageHeader } from '@object-ui/app-shell';
+import { ConsolePageHeader, passwordDoorRefusalMessages } from '@object-ui/app-shell';
 import { resolveBuiltInLanguage, useAppContentLanguages, useDisplayLocale, useObjectTranslation, type TranslateFn } from '@object-ui/i18n';
 import { useAdapter, extractFieldErrors, extractWriteErrorMessage } from '@object-ui/react';
 import { usePermissions } from '@object-ui/permissions';
@@ -880,7 +880,15 @@ function PasswordCard({ changePassword, setInitialPassword, hasLocalPassword, hi
       }
       reset();
     } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
+      // A refusal's `code` picks the localized sentence, as on the set-password
+      // and reset-password pages: a cloud-managed runtime, an SSO-only account
+      // or a pending SSO person refuses both doors with 409
+      // `RESOURCE_CONFLICT`, whose server text is English in every language.
+      // Any other code keeps the server's own message.
+      const code = err instanceof Error ? (err as Error & { code?: string }).code : undefined;
+      const refusals = passwordDoorRefusalMessages(t);
+      const localized = code && Object.prototype.hasOwnProperty.call(refusals, code) ? refusals[code] : undefined;
+      setError(localized ?? (err instanceof Error ? err.message : String(err)));
     } finally {
       setSubmitting(false);
     }

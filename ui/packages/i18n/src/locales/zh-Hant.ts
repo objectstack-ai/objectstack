@@ -2729,7 +2729,29 @@ const zhHant = {
           availableObjects: '列出可用的資料物件。',
           recentActivity: '總結我的最近動態。',
         },
+        // objectstack#37862 — the drawer's empty conversation: the platform's
+        // suggestions by the kind of page in view (`emptyConversationModel.ts`).
+        page: {
+          record: {
+            summarize: '總結這條記錄',
+            related: '這條記錄關聯了哪些內容？',
+          },
+          list: {
+            summarize: '總結這個列表裡的記錄',
+            recent: '本週新增了哪些記錄？',
+          },
+          dashboard: {
+            explain: '這個儀表盤展示了什麼？',
+            standOut: '這個儀表盤裡有什麼值得注意的？',
+          },
+          report: {
+            summarize: '總結這份報表',
+            takeaways: '這份報表的要點是什麼？',
+          },
+        },
       },
+      // objectstack#37862 — the accessible name of the empty conversation's suggestions.
+      suggestionsLabel: '推薦問題',
       // objectui#3546 slice four — the AI console surfaces: the /ai chat page's app switcher,
       // connection banner and plan/publish cards, the ChatDock chrome, and the
       // conversation-list date buckets. `group.*` is the template-key family
@@ -3633,6 +3655,7 @@ const zhHant = {
     recent: '最近使用',
     starred: '已收藏',
     removeFromFavorites: '從收藏中移除 {{name}}',
+    conversationUnavailable: '該對話已不可用',
     allReports: '全部報表',
     collapse: '收起側邊欄',
     expand: '展開側邊欄',

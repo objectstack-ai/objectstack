@@ -12,7 +12,11 @@
  *   the build against the new card in the same PR (re-pin with an `amended`
  *   entry when the Build reading is unchanged, else a new build);
  * - the build's protocol range admits the protocol this tree ships, or the
- *   install the round starts with is refused (`OS_PROTOCOL_INCOMPATIBLE`).
+ *   install the round starts with is refused (`OS_PROTOCOL_INCOMPATIBLE`);
+ * - the build passes every Build check of this tree's scorer, and its
+ *   provenance's `scored` names the runner revision that reading was taken at,
+ *   so a scorer change that refuses the build fails here, in the PR that makes
+ *   it, instead of leaving a "verified" build the gate refuses (#37917).
  */
 
 import { createHash } from 'node:crypto';
@@ -24,7 +28,10 @@ import { describe, expect, it } from 'vitest';
 import { checkProtocolCompat } from '@objectstack/metadata-core';
 import { PROTOCOL_VERSION } from '@objectstack/spec/kernel';
 
-import { formatRefusal, loadScenarios, readCapabilityAreas } from '../src/index.js';
+import { formatRefusal, loadScenarios, readCapabilityAreas, type LoadedScenario } from '../src/index.js';
+import { namespacedScenario } from '../src/runner/namespace.js';
+import { rollupSourceCharges } from '../src/runner/orchestrate.js';
+import { scoreCardArtifact } from '../src/score/index.js';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const SCENARIOS_DIR = resolve(HERE, '../../../../docs/qa/scenarios');
@@ -44,11 +51,14 @@ interface Provenance {
   build?: unknown;
   sha256?: unknown;
   amended?: Array<{ on?: unknown; card?: unknown; what?: unknown; why?: unknown }>;
+  scored?: { runner?: unknown; on?: unknown; build?: unknown };
 }
+
+const loaded = () => loadScenarios(SCENARIOS_DIR, { areas: readCapabilityAreas(AREAS_DIR), library: 'open' });
 
 describe('verified builds — each build matches its provenance and its card', () => {
   it('the directory holds a build for every dataset card', () => {
-    const { cards, refusals } = loadScenarios(SCENARIOS_DIR, { areas: readCapabilityAreas(AREAS_DIR), library: 'open' });
+    const { cards, refusals } = loaded();
     expect(refusals.map(formatRefusal)).toEqual([]);
     const datasetCards = cards
       .filter((c) => (c.card.run.datasetQuestions ?? []).length > 0)
@@ -92,6 +102,29 @@ describe('verified builds — each build matches its provenance and its card', (
         expect(typeof entry.what === 'string' && entry.what.length > 0).toBe(true);
         expect(typeof entry.why === 'string' && entry.why.length > 0).toBe(true);
       }
+    });
+
+    it("it passes every Build check of this tree's scorer, and its provenance names the runner it was scored at", () => {
+      // Scored as the runner scores it: against the namespaced card (`scoreInto`).
+      const scenario = namespacedScenario(loaded().cards.find((c) => c.card.id === id) as LoadedScenario);
+      const artifact: unknown = JSON.parse(readFileSync(buildFile, 'utf8'));
+      const score = scoreCardArtifact(scenario, artifact);
+      const failing = [
+        ...score.expect.checks,
+        ...score.tags.flatMap((t) => t.checks),
+        ...score.agentActions,
+        ...score.personaGrants,
+        ...score.naming,
+      ].filter((c) => !c.pass && c.notMeasured === undefined).map((c) => `${c.check}${c.detail ? ` (${c.detail})` : ''}`);
+      const charges = rollupSourceCharges(scenario, artifact).map((c) => `${c.persona}: ${c.rollup}`);
+      const { scored } = provenance();
+      expect(
+        { failing, charges },
+        `builds/${id}.json reads Build ${score.passed}/${score.total} under this tree's scorer, but its provenance says ${JSON.stringify(scored)}: a scorer change that refuses a verified build re-scores it in the same PR — amend the build (an \`amended\` entry) when the platform moved under it, else rebuild it — and moves \`scored\``,
+      ).toEqual({ failing: [], charges: [] });
+      expect(scored?.runner).toMatch(/^[0-9a-f]{8,40}$/);
+      expect(scored?.on).toMatch(/^\d{4}-\d{2}-\d{2}$/);
+      expect(scored?.build).toMatch(/^(\d+)\/\1$/);
     });
 
     it(`its protocol range admits this tree's protocol (${PROTOCOL_VERSION})`, () => {

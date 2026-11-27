@@ -825,9 +825,8 @@ export function createAuthClient(config: AuthClientConfig): AuthClient {
         sendVerificationEmail: (args: { email: string; callbackURL?: string }) => Promise<{ error?: { message?: string; status?: number } | null }>;
       };
       const { error } = await baseAuth.sendVerificationEmail({ email, callbackURL });
-      if (error) {
-        throw new Error(error.message ?? `Auth request failed with status ${error.status}`);
-      }
+      // `toAuthError` keeps the refusal's code, flat or in the ADR-0112 envelope.
+      if (error) throw toAuthError(error);
     },
 
     async signOut() {
@@ -848,9 +847,7 @@ export function createAuthClient(config: AuthClientConfig): AuthClient {
       forgetConfig();
       const { data, error } = await betterAuth.signOut({ callbackURL });
       TokenStorage.clear();
-      if (error) {
-        throw new Error(error.message ?? `Auth request failed with status ${error.status}`);
-      }
+      if (error) throw toAuthError(error);
       // `disableDefaultFetchPlugins: true` drops better-auth's `redirectPlugin`,
       // so the provider-logout redirect is followed here, the same way
       // `signInWithProvider` follows its `{ url, redirect }`. Without it the
@@ -1240,9 +1237,7 @@ export function createAuthClient(config: AuthClientConfig): AuthClient {
         result = await signInSocial();
       }
       const { data, error } = result;
-      if (error) {
-        throw new Error(error.message ?? `Auth request failed with status ${error.status}`);
-      }
+      if (error) throw toAuthError(error);
       // A missing redirect URL means the flow CANNOT continue — surface it
       // instead of resolving silently (the user would see a dead button).
       if (!data?.url) {

@@ -30,26 +30,30 @@
  *   Ctrl/⌘+Enter anywhere go to the next question or send.
  */
 import * as React from 'react';
+import {
+  ASK_QUESTION_LIMITS,
+  type AskQuestionOptionParsed,
+  type AskQuestionParsed,
+} from '@objectstack/spec/ai';
 import { Badge, Button, cn } from '@object-ui/components';
 import { useObjectTranslation } from '@object-ui/i18n';
 import { useQuestionCardTranslation } from './useQuestionCardTranslation';
 
-/** One option of a question, as the question envelope carries it. */
-export interface QuestionCardOption {
-  label: string;
-  /** Shown as a grey second line under the label. */
-  description?: string;
-  /** Shows a "recommended" tag on the option. */
-  recommended?: boolean;
-}
+/**
+ * One option of a question: the envelope's option
+ * (`AskQuestionOptionParsed`, `@objectstack/spec/ai`) — a label, an optional
+ * grey second line, an optional "recommended" tag.
+ */
+export type QuestionCardOption = AskQuestionOptionParsed;
 
-/** One question, as the question envelope carries it. */
-export interface QuestionCardQuestion {
-  /** Short name of the question, used to label its line in a multi-question answer. */
-  header?: string;
-  question: string;
+/**
+ * One question: the envelope's question (`AskQuestionParsed`) — an optional
+ * short header that labels its line in a multi-question answer, the question,
+ * and its options, taken read-only.
+ */
+export type QuestionCardQuestion = Omit<AskQuestionParsed, 'options'> & {
   options: readonly QuestionCardOption[];
-}
+};
 
 export interface QuestionCardProps {
   /** The questions to ask, in order. */
@@ -70,7 +74,11 @@ export interface QuestionCardProps {
 /** An option index, the typed text row, or nothing chosen yet. */
 type Choice = number | 'text' | null;
 
-const DIGIT_KEYS = ['1', '2', '3', '4'] as const;
+/** One digit key per option the envelope allows: `1` picks the first option. */
+const DIGIT_KEYS: readonly string[] = Array.from(
+  { length: ASK_QUESTION_LIMITS.maxOptions },
+  (_, i) => String(i + 1),
+);
 
 export function QuestionCard({ questions, onAnswer, onSkip, announce = false, className }: QuestionCardProps) {
   const { t } = useQuestionCardTranslation();
@@ -186,7 +194,7 @@ export function QuestionCard({ questions, onAnswer, onSkip, announce = false, cl
       return;
     }
     if (!inText && !e.ctrlKey && !e.metaKey && !e.altKey) {
-      const digit = (DIGIT_KEYS as readonly string[]).indexOf(e.key);
+      const digit = DIGIT_KEYS.indexOf(e.key);
       if (digit !== -1 && current && digit < current.options.length) {
         e.preventDefault();
         pick(digit);
@@ -259,7 +267,7 @@ export function QuestionCard({ questions, onAnswer, onSkip, announce = false, cl
                 </span>
                 <span className="flex min-w-0 flex-1 flex-col">
                   <span className="flex flex-wrap items-center gap-2">
-                    <span className="font-medium">{option.label}</span>
+                    <span className="min-w-0 break-words font-medium">{option.label}</span>
                     {option.recommended && (
                       <Badge variant="secondary" className="px-1.5 py-0 text-[10px]">
                         {t('chatbot.questionCard.recommended')}

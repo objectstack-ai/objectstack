@@ -717,10 +717,15 @@ the `embedder` it is given), and answers a search by an exact scan.
   (`knowledge_<source>` with exactly their columns) is never served: a search
   answers `KNOWLEDGE_REBUILD_REQUIRED`, and the table is dropped when the first
   complete reindex finishes. A table of any other shape under one of the
-  store's names is neither served nor dropped.
+  store's names (an object's table, in a database shared with object tables)
+  is neither served nor dropped: a rebuild that would replace it, like a
+  `dropSource`, is refused `SERVICE_UNAVAILABLE`, naming the table, and
+  nothing is removed.
 - **Re-embedding.** A passage whose text is unchanged (its `chunk_hash`) is
   not embedded again within a generation.
-- **When it cannot run.** A database that cannot be opened, or a platform
+- **When it cannot run.** A database that cannot be opened, one holding a
+  table named `knowledge_generation` that is not the store's (the reason names
+  it, and it is left as it is), or a platform
   with no native libSQL build (there is none for Windows on ARM): the plugin
   still registers and boot goes on; it warns with the reason, `healthCheck`
   answers `ok: false`, and every call answers `SERVICE_UNAVAILABLE`.
@@ -907,10 +912,14 @@ at run time — see [Who may author one](#who-may-author-one).
 
 ## 6. Sync model
 
-`KnowledgeService` subscribes to the ObjectQL engine's
+On a kernel that composes a `realtime` service, `KnowledgeService` subscribes
+to the ObjectQL engine's
 `data.record.created`, `data.record.updated`, `data.record.restored` and
 `data.record.deleted` events. A bare `record.*` event is not part of the
-vocabulary: no producer emits one, and the subscription ignores it.
+vocabulary: no producer emits one, and the subscription ignores it. On a kernel
+without one, the data engine's after-write hooks are the trigger instead
+([below](#without-a-realtime-service-the-after-write-hooks)); either way the
+same two service calls sync a row, and each write is synced once.
 
 A source's `where` decides which rows it indexes on every path — the event
 sync as well as `reindexSource`. For a created, updated or restored row, with a
@@ -984,6 +993,44 @@ published after the restore's own unit has committed.
   reconcile can repair the index, and the warning says the documents of
   deleted rows and of rows that stopped matching stay in it.
 </Callout>
+
+### Without a realtime service: the after-write hooks
+
+A kernel that composes no `realtime` service publishes no `data.record.*`
+event (the ObjectQL plugin bridges that same service to the engine). There,
+`KnowledgeServicePlugin` registers the data engine's `afterInsert`,
+`afterUpdate` and `afterDelete` hooks on every object a source with
+`refresh.onRecordChange` not `false` indexes, and each hook calls the same
+`handleRecordUpsert` / `handleRecordDelete` the subscription calls — the
+re-read under `where`, the field rules and the per-document ordering above all
+apply. The plugin takes exactly one of the two triggers, chosen at
+`kernel:ready`, so a write is never synced twice. A source registered or loaded
+later for a new object gets its hooks when it arrives.
+
+- **Off the write's response.** A hook runs inside the write, so it only hands
+  the sync off and returns: the re-read, the split and the embed run after the
+  write has answered, and a slow embedding provider does not slow the write.
+- **After the commit.** The sync starts through the engine's
+  `runAfterOpenUnitsCommit`: once the unit of work open at the write commits
+  (the write's own unit, or a caller's `engine.transaction(…)`), so the re-read
+  sees the committed row; never when that unit rolls back, so a rolled-back
+  write leaves the index as it was. With no unit open it starts at once. The
+  hook itself observes the same pre-commit moment as the realtime event above;
+  the deferral is what keeps its sync out of it.
+- **A user delete** de-indexes the row through `afterDelete`, by the row's id.
+- **A predicate write** (`multi: true`) is synced row by row: an object with an
+  `afterUpdate` / `afterDelete` hook gets one dispatch per matched row, so no
+  aggregate event is involved and no predicate-write reconcile is asked for
+  (the scheduled [reconcile](#reconcile-keeping-the-index-correct) still runs). Such a write is held to the engine's per-row
+  hook ceiling (10,000 matched rows, `MAX_BULK_PER_ROW_HOOK_ROWS`), as it is on
+  every object that already carries a per-row hook (the audit plugin's, for
+  one): over it the write is refused and nothing is written.
+- **A recycle-bin restore** runs no hooks (a restore is not a create, ADR-0148
+  D2), so on such a kernel a restored row is not re-indexed by itself; a
+  `reindexSource` brings it back.
+
+The sync is in-process: a sync that has not finished when the process stops is
+lost, and the next `reindexSource` repairs it.
 
 ### Reindex: skip and purge
 

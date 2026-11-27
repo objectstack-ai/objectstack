@@ -84,39 +84,34 @@ describe('showcase stack', () => {
   });
 
   /**
-   * #5420 (extended by #8231's remainder) — the section headings the
-   * registration makes translatable, pinned from BOTH sides on the real
-   * stack.
+   * #5420 (extended by #8231's remainder; moved to `fieldGroups` by #36553) —
+   * the section headings of the contact's create and edit forms, pinned from
+   * BOTH sides on the real stack.
    *
-   * Registering `ContactViews` is what puts its named sections in front of
-   * the i18n gates, and the two gates read the same set in opposite
-   * directions: `i18n/missing-section` (#5405) fails on a declared section
-   * with no bundle entry, `translation-target-unknown` (#5415/#5422) fails on
-   * a bundle entry no section declares. A test that checked one direction
-   * would stay green while the other broke, so this asserts set EQUALITY.
+   * The forms lay a contact out by the object's `fieldGroups`, so the group
+   * keys are the translatable section anchors, and the two i18n gates read
+   * them in opposite directions: `i18n/missing-section` (#5405) fails on a
+   * declared section with no bundle entry, `translation-target-unknown`
+   * (#5415/#5422) fails on a bundle entry nothing declares. A test that
+   * checked one direction would stay green while the other broke, so this
+   * asserts set EQUALITY. `who_is_this`, the heading of the retired create
+   * form, must not come back: nothing declares it any more.
    *
-   * Read on the composed stack, not on the imported container: what the gates
-   * see is `stack.views`, and that is exactly the reachability this issue was
-   * about. The default `form`'s four sections AND the sparse
-   * `formViews.create` override's one section are both named as of #8231's
-   * remainder, so both contribute to the set below — `formViews.create` is no
-   * longer excluded.
+   * Read on the composed stack, not on the imported modules: what the gates
+   * see is `stack.objects` / `stack.translations`.
    */
-  it('keys the contact form sections to exactly what the container declares', () => {
-    const contact = (stack.views ?? []).find((v) => targetObject(v) === 'showcase_contact');
-    const namesOf = (view: unknown): string[] => {
-      const sections = (view as { sections?: unknown } | undefined)?.sections;
-      return (Array.isArray(sections) ? sections : [])
-        .map((s) => (s as { name?: unknown } | undefined)?.name)
-        .filter((n): n is string => typeof n === 'string');
-    };
-    const form = (contact as { form?: unknown } | undefined)?.form;
-    const formViews = (contact as { formViews?: Record<string, unknown> } | undefined)?.formViews ?? {};
-    const declared = [...namesOf(form), ...Object.values(formViews).flatMap(namesOf)].sort();
-    expect(declared).toEqual(['contact', 'notes', 'status', 'who_is_this', 'work']);
+  it('keys the contact form sections to exactly the groups the object declares', () => {
+    const object = (stack.objects ?? []).find(
+      (o: { name: string }) => o.name === 'showcase_contact',
+    );
+    const declared = (deriveFieldGroupLayout(object) ?? [])
+      .map((s) => s.key)
+      .filter((k): k is string => typeof k === 'string')
+      .sort();
+    expect(declared).toEqual(['contact', 'notes', 'status', 'work']);
 
     const zh = ShowcaseTranslationBundle['zh-CN']?.objects?.showcase_contact as
-      | { _sections?: Record<string, { label?: string }> }
+      | { _sections?: Record<string, { label?: string }>; _views?: Record<string, unknown> }
       | undefined;
     expect(Object.keys(zh?._sections ?? {}).sort()).toEqual(declared);
     // Every entry carries an actual translation — an empty or echoed English
@@ -126,54 +121,56 @@ describe('showcase stack', () => {
       expect(label, `zh-CN _sections.${name}.label`).toBeTruthy();
       expect(label).not.toMatch(/^[\x20-\x7e]+$/);
     }
+    // The container's only view is its list; no `_views.create` heading.
+    expect(Object.keys(zh?._views ?? {})).toEqual(['default']);
   });
 
   /**
-   * #5443 — the comment at the top of `ui/views/contact.view.ts` promises that
-   * the hand-written `form` "mirrors what the platform auto-derives", i.e. that
-   * you may OMIT it and get the same grouped form. That promise is only true if
-   * the object DECLARES the four groups: `deriveFieldGroupLayout` (ADR-0085 §5,
-   * the one derivation every renderer and the i18n walker consume) buckets a
-   * field only when its `group` matches a declared `fieldGroups[].key`, and
-   * otherwise drops it into the trailing untitled bucket — which is exactly
-   * what nine `showcase_contact` fields did while the comment claimed
-   * otherwise (`os lint`: 9 × `field-group-undeclared`).
+   * #5443, re-anchored by #36553 — the contact is the showcase's "create form
+   * ≠ edit form" example, and both forms now come from ONE source: the
+   * object's `fieldGroups` lay them out, and a field marked
+   * `showOnCreate: false` is left out of create only. No form view restates
+   * either (`ui/views/contact.view.ts` holds the list), which is the point.
    *
-   * So this pins the promise itself, not the declaration: the derived sections
-   * must equal the authored `form.sections` in ORDER and MEMBERSHIP. Deleting
-   * `fieldGroups` makes `deriveFieldGroupLayout` return `null` (no declared
-   * groups → grouping does not apply), and the assertion goes red on the first
-   * line rather than passing vacuously on an empty comparison.
+   * So this pins what the two forms draw. The edit form: the four derived
+   * sections, in order, with their members. `deriveFieldGroupLayout`
+   * (ADR-0085 §5, the one derivation every renderer and the i18n walker
+   * consume) buckets a field only when its `group` matches a declared
+   * `fieldGroups[].key`; deleting `fieldGroups` makes it return `null` and the
+   * first assertion goes red rather than passing on an empty comparison. The
+   * create form: those sections less the `showOnCreate: false` fields, which
+   * must leave exactly what the retired sparse create form asked for — name,
+   * email, phone and company. And the container declares no internal form.
    *
-   * Read on the composed stack for the same reason the section-key test above
-   * is: what renderers and gates see is `stack.objects`, not the imported
-   * module. The trailing ungrouped bucket the SERVED object grows (the
-   * platform injects `owner_id`, which is neither hidden nor an audit column)
-   * is deliberately out of frame here — it is a registration-time addition, and
-   * the view comment states it in prose.
+   * The trailing ungrouped bucket the SERVED object grows (the platform
+   * injects `owner_id`, which is neither hidden nor an audit column) is
+   * deliberately out of frame: it is a registration-time addition.
    */
-  it('derives the contact form sections from `fieldGroups` exactly as the view authors them', () => {
+  it('lays the contact edit and create forms out from `fieldGroups` and `showOnCreate`', () => {
     const object = (stack.objects ?? []).find(
       (o: { name: string }) => o.name === 'showcase_contact',
-    );
+    ) as { fields?: Record<string, { showOnCreate?: boolean }> } | undefined;
     const derived = deriveFieldGroupLayout(object);
     expect(derived, 'showcase_contact must declare fieldGroups (#5443)').not.toBeNull();
-    expect(derived!.map((s) => s.key)).toEqual(['contact', 'work', 'status', 'notes']);
+    const edit = derived!
+      .filter((s) => s.key !== undefined)
+      .map((s) => ({ key: s.key, label: s.label, fields: s.fields }));
+    expect(edit).toEqual([
+      { key: 'contact', label: 'Contact', fields: ['name', 'email', 'phone'] },
+      { key: 'work', label: 'Work', fields: ['company', 'title', 'account'] },
+      { key: 'status', label: 'Status', fields: ['stage', 'lead_score'] },
+      { key: 'notes', label: 'Notes', fields: ['notes'] },
+    ]);
 
-    const contact = (stack.views ?? []).find((v) => targetObject(v) === 'showcase_contact');
-    const form = (contact as { form?: unknown } | undefined)?.form;
-    const authored = (form as { sections?: unknown } | undefined)?.sections;
-    const authoredPairs = (Array.isArray(authored) ? authored : []).map((s) => {
-      const section = s as { name?: unknown; label?: unknown; fields?: unknown };
-      return {
-        key: section.name,
-        label: section.label,
-        fields: Array.isArray(section.fields) ? section.fields : [],
-      };
-    });
-    expect(derived!.map((s) => ({ key: s.key, label: s.label, fields: s.fields }))).toEqual(
-      authoredPairs,
-    );
+    const asked = edit.flatMap((s) => s.fields).filter((f) => object?.fields?.[f]?.showOnCreate !== false);
+    expect(asked).toEqual(['name', 'email', 'phone', 'company']);
+
+    const contact = (stack.views ?? []).find((v) => targetObject(v) === 'showcase_contact') as
+      | { form?: unknown; formViews?: unknown }
+      | undefined;
+    expect(contact, 'ContactViews must be registered (#5420)').toBeDefined();
+    expect(contact?.form).toBeUndefined();
+    expect(contact?.formViews).toBeUndefined();
   }, 60_000);
 
   it('registers UI, automation, security, and AI metadata', () => {
@@ -229,7 +226,8 @@ describe('showcase form + page section i18n coverage (#8231)', () => {
    *
    * Three sections used to be excluded here — `showcase_task`'s
    * `formViews.edit` ("Task") and `formViews.quick` ("Quick Edit"), and
-   * `showcase_contact`'s `formViews.create` ("Who is this?"). Naming them
+   * `showcase_contact`'s `formViews.create` ("Who is this?", since retired
+   * with the contact's other internal form, #36553). Naming them
    * would have flipped a currently-PINNED finding in
    * `packages/lint/src/validate-translatable-sections.test.ts` and
    * `validate-translation-references.test.ts`, which imported `TaskViews` /

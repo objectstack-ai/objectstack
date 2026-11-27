@@ -2646,7 +2646,29 @@ const ar = {
           availableObjects: "اذكر كائنات البيانات المتاحة.",
           recentActivity: "لخّص نشاطي الأخير.",
         },
+        // objectstack#37862 — the drawer's empty conversation: the platform's
+        // suggestions by the kind of page in view (`emptyConversationModel.ts`).
+        page: {
+          record: {
+            summarize: 'لخّص هذا السجل',
+            related: 'ما المرتبط بهذا السجل؟',
+          },
+          list: {
+            summarize: 'لخّص السجلات في هذه القائمة',
+            recent: 'ما السجلات التي أُضيفت هذا الأسبوع؟',
+          },
+          dashboard: {
+            explain: 'ماذا تعرض لوحة المعلومات هذه؟',
+            standOut: 'ما اللافت في لوحة المعلومات هذه؟',
+          },
+          report: {
+            summarize: 'لخّص هذا التقرير',
+            takeaways: 'ما أبرز النقاط في هذا التقرير؟',
+          },
+        },
       },
+      // objectstack#37862 — the accessible name of the empty conversation's suggestions.
+      suggestionsLabel: 'أسئلة مقترحة',
       discussing: "قيد العرض: {{target}}",
       focus: {
         pin: "مواصلة السؤال عن هذا السجل",
@@ -3815,6 +3837,7 @@ const ar = {
     recent: "الأخيرة",
     starred: "المميزة",
     removeFromFavorites: "إزالة {{name}} من المفضلة",
+    conversationUnavailable: "لم تعد هذه المحادثة متاحة",
     allReports: "كل التقارير",
     collapse: 'طي الشريط الجانبي',
     expand: 'توسيع الشريط الجانبي',

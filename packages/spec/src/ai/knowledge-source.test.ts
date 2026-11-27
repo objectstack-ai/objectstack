@@ -11,6 +11,9 @@
 //   dropped;
 // - the six renamed or removed keys are tombstones, each refused with its own
 //   prescription, and the `file` / `http` kinds are refused with theirs;
+// - a prescription that names `os migrate meta` first names the door every
+//   source written against 18 came through, a registration in code, which
+//   that command does not walk, and says the edit is made there;
 // - `content` is a non-empty list of field names, and `'*'` is refused;
 // - `name` takes the router-addressable grammar (ADR-0150 D5).
 //
@@ -42,6 +45,24 @@ function issuesOf(input: unknown): Array<[string, string, string]> {
   expect(r.success, 'the input should be refused').toBe(false);
   if (r.success) return [];
   return r.error.issues.map((i) => [i.code, i.path.join('.'), i.message]);
+}
+
+/**
+ * The door every source written against 18 came through: a registration in
+ * code. No stack could hold `knowledgeSources` before the type, and
+ * `os migrate meta` walks a stack's collections, so it lists no edit for one.
+ */
+const CODE_DOOR = ['`KnowledgeServicePlugin({ sources })`', '`registerSource`', 'in the registration itself'];
+
+/** `message` names the code door and where the edit is made, before the sentence that names the command. */
+function expectCodeDoorBeforeCommand(message: string): void {
+  const command = message.indexOf('Run `os migrate meta --from 18`');
+  expect(command, 'the prescription names the command').toBeGreaterThan(-1);
+  for (const named of CODE_DOOR) {
+    const at = message.indexOf(named);
+    expect(at, `${named} is named`).toBeGreaterThan(-1);
+    expect(at, `${named} is named before the command`).toBeLessThan(command);
+  }
 }
 
 describe('KnowledgeSourceSchema — the one schema of the knowledge_source type', () => {
@@ -150,13 +171,14 @@ describe('KnowledgeSourceSchema — the renamed and removed keys are tombstones 
       'refresh.cron',
       'call `reindexSource` from a flow or a job',
     ],
-  ])('`%s` is refused at its own path with its prescription and the migrate sentence', (key, input, path, fix) => {
+  ])('`%s` is refused at its own path with its prescription, the code door and the migrate sentence', (key, input, path, fix) => {
     const issues = issuesOf(input);
     expect(issues).toHaveLength(1);
     const [code, at, message] = issues[0]!;
     expect([code, at]).toEqual(['invalid_type', path]);
     expect(message).toContain(`\`knowledge_source.${key}\` was removed in @objectstack/spec 19.0.0 (ADR-0161 K6)`);
     expect(message).toContain(fix);
+    expectCodeDoorBeforeCommand(message);
     expect(message.endsWith(MIGRATE)).toBe(true);
   });
 
@@ -191,6 +213,7 @@ describe('KnowledgeSourceSchema — `content` lists fields (ADR-0161 K5)', () =>
     expect([code, at]).toEqual(['invalid_format', 'source.content.1']);
     expect(message).toContain("the `'*'` member was removed in @objectstack/spec 19.0.0 (ADR-0161 K5)");
     expect(message).toContain("List the fields whose text should be indexed, for example `content: ['title', 'body']`.");
+    expectCodeDoorBeforeCommand(message);
   });
 
   it('refuses an empty list and an absent one', () => {

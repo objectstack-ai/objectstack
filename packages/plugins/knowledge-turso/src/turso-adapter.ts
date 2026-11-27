@@ -622,7 +622,7 @@ export class TursoKnowledgeAdapter implements IKnowledgeAdapter {
         if (fits(active) || fits(building)) return { commit: true, value: undefined };
         if (building) {
           // A build of another fingerprint left unfinished: replaced, one per source.
-          await tx.execute(`DROP TABLE IF EXISTS ${quoted(generationTable(ctx.source.name, building.generation))}`);
+          await this.dropGenerationTable(tx, ctx.source.name, building.generation);
           await tx.execute({
             sql: `DELETE FROM ${quoted(GENERATION_TABLE)} WHERE source_id = ? AND generation = ?`,
             args: [ctx.source.name, building.generation],
@@ -649,7 +649,7 @@ export class TursoKnowledgeAdapter implements IKnowledgeAdapter {
         const t = quoted(GENERATION_TABLE);
         if (building?.fingerprint === index.fingerprint) {
           if (active) {
-            await tx.execute(`DROP TABLE IF EXISTS ${quoted(generationTable(ctx.source.name, active.generation))}`);
+            await this.dropGenerationTable(tx, ctx.source.name, active.generation);
             await tx.execute({ sql: `DELETE FROM ${t} WHERE source_id = ? AND generation = ?`, args: [ctx.source.name, active.generation] });
           }
           await tx.execute({
@@ -679,7 +679,8 @@ export class TursoKnowledgeAdapter implements IKnowledgeAdapter {
    * write transaction: the table and the row of each generation — the active
    * one and one under construction — and the table of the store's earlier
    * releases, when the source still has one. A source it holds nothing for is
-   * no error.
+   * no error. A table the store did not make under a generation's name is
+   * refused and nothing is removed (`dropGenerationTable`).
    */
   async dropSource(ctx: AdapterContext): Promise<void> {
     const client = this.requireClient();
@@ -691,7 +692,7 @@ export class TursoKnowledgeAdapter implements IKnowledgeAdapter {
       await this.transaction(async (tx) => {
         const { active, building } = await this.generations(sourceId, tx);
         for (const g of [active, building]) {
-          if (g !== undefined) await tx.execute(`DROP TABLE IF EXISTS ${quoted(generationTable(sourceId, g.generation))}`);
+          if (g !== undefined) await this.dropGenerationTable(tx, sourceId, g.generation);
         }
         await tx.execute({ sql: `DELETE FROM ${quoted(GENERATION_TABLE)} WHERE source_id = ?`, args: [sourceId] });
         if (legacy) await tx.execute(`DROP TABLE IF EXISTS ${quoted(legacyTable(sourceId))}`);
@@ -738,7 +739,11 @@ export class TursoKnowledgeAdapter implements IKnowledgeAdapter {
   /**
    * Make the store ready once: WAL on a file (a store written by two
    * processes without it loses writes), the vector functions proven present,
-   * then the generation table. Until that succeeds the next call tries again.
+   * then the generation table — made, or found with exactly its columns. A
+   * table of that name the store did not make (in a database shared with
+   * object tables, one an object of that name owns) is never taken for it and
+   * never touched: the store is not ready, naming the table. Until that
+   * succeeds the next call tries again.
    */
   private async ready(): Promise<void> {
     if (this.isReady) return;
@@ -766,6 +771,17 @@ export class TursoKnowledgeAdapter implements IKnowledgeAdapter {
           'its database has no vector functions',
           `The database answered: ${errorText(err)}. The store needs libSQL (vector32, vector_distance_cos); ` +
             'a plain SQLite build has neither.',
+        );
+      }
+      // `CREATE TABLE IF NOT EXISTS` passes over any table of the name, so the
+      // shape is read first; its indexes would otherwise be added to that table.
+      const shape = await this.shapeOf(client, GENERATION_TABLE);
+      if (shape !== 'none' && shape !== 'generation') {
+        throw notReady(
+          `a table it did not make holds the name of its generation table, '${GENERATION_TABLE}'`,
+          `The database holds a table '${GENERATION_TABLE}' whose columns are not those of this store's generation ` +
+            'table, so the store cannot keep its index generations there; that table is left as it is. Rename or ' +
+            'remove it, or keep the store in a database of its own.',
         );
       }
       try {
@@ -820,6 +836,28 @@ export class TursoKnowledgeAdapter implements IKnowledgeAdapter {
     return tableShape(columns.rows.map((r) => ({ name: r.name, type: r.type })));
   }
 
+  /**
+   * Drops the passage table of one generation of a source, by the name its
+   * generation row gives — only when that table is one of this store's
+   * passage tables (or there is none). A table of any other shape under that
+   * name, one the store did not make in a database shared with object tables,
+   * is refused and never dropped; the transaction `tx` belongs to is rolled
+   * back with the refusal, so nothing of the call is removed.
+   */
+  private async dropGenerationTable(tx: Transaction, sourceId: string, generation: number): Promise<void> {
+    const table = generationTable(sourceId, generation);
+    const shape = await this.shapeOf(tx, table);
+    if (shape !== 'none' && shape !== 'passage') {
+      throw notReady(
+        `a table it did not make, '${table}', holds the name of generation ${generation} of source '${sourceId}'`,
+        `The database holds a table '${table}' that is not one of this store's generation tables, so it is not ` +
+          `dropped, and generation ${generation} of source '${sourceId}' cannot be replaced or removed. Rename or ` +
+          'remove that table, or keep the store in a database of its own.',
+      );
+    }
+    await tx.execute(`DROP TABLE IF EXISTS ${quoted(table)}`);
+  }
+
   /** Opens the next generation of a source: its row, and its table made afresh. */
   private async openGeneration(
     tx: Transaction,
@@ -840,7 +878,7 @@ export class TursoKnowledgeAdapter implements IKnowledgeAdapter {
     // source can share the name (`knowledge_<a>_g1` is source `a_g1`'s), and
     // so can a table the store did not make, in a shared database.
     const shape = await this.shapeOf(tx, table);
-    if (shape === 'legacy' || shape === 'other') {
+    if (shape !== 'none' && shape !== 'passage') {
       throw notReady(
         `a table it did not make holds the name of source '${sourceId}''s next index`,
         `The database holds a table '${table}' that is not one of this store's generation tables, so generation ` +
