@@ -42,6 +42,7 @@ import {
   AppCodeSchema,
   GUARDRAIL_CHECKS,
   isGalleryTier,
+  MASTER_DETAIL_INLINE_EDIT_TAG,
   ROW_SCOPE_TAG,
   ScenarioCardSchema,
   type ScenarioCard,
@@ -605,6 +606,13 @@ function checkCard(
       );
     }
   });
+  // The inline-edit tag credits only a `master_detail` field, so the build prompt must name one as such.
+  if (card.capabilities.includes(MASTER_DETAIL_INLINE_EDIT_TAG) && !(expect.lookups ?? []).some((l) => l.masterDetail === true)) {
+    refuse(
+      ['expect', 'lookups'],
+      `the card carries \`${MASTER_DETAIL_INLINE_EDIT_TAG}\`, whose check credits only a \`master_detail\` field, but no expect.lookups row is marked \`"masterDetail": true\`: mark the detail's relationship to its master, or the build prompt lists it as a plain lookup`,
+    );
+  }
 
   // ── seed: every expected object is seeded, and the seed models the shape ──
   const seed = run.seed;

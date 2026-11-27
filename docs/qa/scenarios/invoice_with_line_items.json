@@ -4,7 +4,7 @@
   "tier": "control",
   "origin": "generic",
   "title": { "zh": "发票管理:发票随单录入明细行,自动汇总金额", "en": "Invoicing: invoices with inline line items and a summed total" },
-  "provenance": "Golden case `invoice_with_line_items` of packages/cli/src/lint/corpus.ts; `expect` derived mechanically from its fixture (every object; minFieldsPerObject = the smallest object's field count; one selectFields row per select field with minOptions = its option count; one lookups row per lookup or master_detail field).",
+  "provenance": "Golden case `invoice_with_line_items` of packages/cli/src/lint/corpus.ts; `expect` derived mechanically from its fixture (every object; minFieldsPerObject = the smallest object's field count; one selectFields row per select field with minOptions = its option count; one lookups row per lookup or master_detail field, a master_detail one marked `masterDetail: true`).",
   "prompt": {
     "short": {"zh": "做一个开票应用,管理发票和发票明细行。", "en": "Build an invoicing app with invoices and their line items."},
     "detailed": {
@@ -16,7 +16,7 @@
     "objects": ["invoice", "invoice_line", "account"],
     "minFieldsPerObject": 1,
     "selectFields": [{"object": "invoice", "field": "status", "minOptions": 3}],
-    "lookups": [{"object": "invoice", "field": "account", "to": "account"}, {"object": "invoice_line", "field": "invoice", "to": "invoice"}]
+    "lookups": [{"object": "invoice", "field": "account", "to": "account"}, {"object": "invoice_line", "field": "invoice", "to": "invoice", "masterDetail": true}]
   },
   "asOf": "2026-10-31",
   "capabilities": [

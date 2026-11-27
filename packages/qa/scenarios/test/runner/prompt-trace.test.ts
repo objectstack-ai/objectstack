@@ -67,6 +67,10 @@ function tracesTo(check: string, prompt: string, card: ScenarioCard, phase: 'bui
 
 const SERVER = { baseUrl: 'http://x', adminEmail: 'a@x', adminPassword: 'p' };
 
+const LOOKUPS_LINE = /^- Lookups, each referencing the object shown: .*$/m;
+const MASTER_DETAIL_LINE = /^- Master-detail relationships, each a `master_detail` field \(not a `lookup`\) .*$/m;
+const relation = (l: { object: string; field: string; to: string }): string => `${code(`${l.object}.${l.field}`)} → ${code(l.to)}`;
+
 describe('every Build check traces to the build prompt', () => {
   it('loads the library', () => {
     expect(library.refusals.map(formatRefusal)).toEqual([]);
@@ -100,6 +104,26 @@ describe('every Build check traces to the build prompt', () => {
         const { en, zh } = card.prompt.detailed;
         if (en !== undefined) expect(en).toMatch(/inline/i);
         if (zh !== undefined) expect(zh).toMatch(/内联/);
+      });
+
+      // The tag credits only a `master_detail` field: a row the contract listed among the lookups is built as one.
+      it(`${card.id}: carries the inline-edit tag, so the build prompt names its master-detail as one, never among the lookups`, () => {
+        const prompt = buildPrompt(card);
+        const marked = (card.expect.lookups ?? []).filter((l) => l.masterDetail === true);
+        expect(marked.length).toBeGreaterThan(0);
+        const masterDetailLine = MASTER_DETAIL_LINE.exec(prompt)?.[0] ?? '';
+        const lookupsLine = LOOKUPS_LINE.exec(prompt)?.[0] ?? '';
+        for (const l of marked) {
+          expect(masterDetailLine).toContain(relation(l));
+          expect(lookupsLine).not.toContain(relation(l));
+        }
+      });
+    } else {
+      it(`${card.id}: carries no inline-edit tag, so the build prompt lists every relationship among the lookups, as before`, () => {
+        const prompt = buildPrompt(card);
+        expect(MASTER_DETAIL_LINE.test(prompt)).toBe(false);
+        const rows = card.expect.lookups ?? [];
+        if (rows.length) expect(LOOKUPS_LINE.exec(prompt)?.[0]).toBe(`- Lookups, each referencing the object shown: ${rows.map(relation).join(', ')}.`);
       });
     }
   }

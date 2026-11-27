@@ -56,10 +56,21 @@ export const SelectFieldExpectationSchema = z.strictObject({
   minOptions: z.number().int().min(1),
 });
 
+/**
+ * A relationship field the build must declare: `object.field` referencing
+ * `to`. The exact-name check (`lookup:<object>.<field>-><to>`) reads the
+ * target only, so a `lookup` and a `master_detail` both pass it.
+ * `masterDetail: true` marks the row that is a master-detail (the detail's
+ * rows owned by and entered inline on the master), so the build prompt names
+ * it as one instead of listing it among the lookups: a card carrying
+ * `records-forms.master-detail-inline-edit` credits only a `master_detail`
+ * field, and the loader holds such a card to mark at least one row.
+ */
 export const LookupExpectationSchema = z.strictObject({
   object: MachineNameSchema,
   field: MachineNameSchema,
   to: MachineNameSchema,
+  masterDetail: z.literal(true).optional(),
 });
 
 // ── The datasets a card's build declares (ADR-0149) ──
@@ -144,6 +155,13 @@ export const CapabilityTagSchema = z
  * check by it, so the two can never spell it apart.
  */
 export const ROW_SCOPE_TAG = 'access-security.row-scope';
+
+/**
+ * The tag whose check credits only a `master_detail` field edited inline on
+ * its master. The loader requires a card carrying it to mark a lookup row
+ * `masterDetail`, and the build prompt names that row as a master-detail.
+ */
+export const MASTER_DETAIL_INLINE_EDIT_TAG = 'records-forms.master-detail-inline-edit';
 
 /**
  * A card's business functions — the marketplace taxonomy's business-function

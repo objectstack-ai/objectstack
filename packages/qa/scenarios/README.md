@@ -772,7 +772,8 @@ npx @objectstack/scenarios help                                      # the comma
   parent-controlled child, a field naming them).
 - **Structure contract** (`prompts.ts`): every Build check traces to text the build prompt carries, so a faithful build
   never fails for not guessing a name. Besides the seed (objects and fields) and the persona sets, the contract states
-  each `expect` row the exact-name scorer checks by name: every lookup's target, every single-choice field with its
+  each `expect` row the exact-name scorer checks by name: every lookup's target (a row marked `masterDetail` named as a
+  master-detail on its own line, since the inline-edit tag credits only a `master_detail` field), every single-choice field with its
   minimum option count, every dashboard and every app navigation target, and, on a card carrying
   `records-forms.select-options`, that every other single-choice field offers two options or more. An iterate prompt
   states its change's rows the same way: the new objects (with the card's field minimum), lookups, option fields,
