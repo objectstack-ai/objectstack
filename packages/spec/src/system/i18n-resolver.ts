@@ -2070,27 +2070,29 @@ const METADATA_DOCUMENT_TRANSLATORS: Readonly<Record<string, MetadataDocumentTra
   app: translateApp,
   dashboard: translateDashboard,
   // A dataset's measure labels are drawn on the dashboard, under every metric
-  // tile and on every chart axis (#14253). Registering it HERE is the whole
-  // wiring — `TRANSLATABLE_METADATA_TYPES` is derived below, and
-  // `@objectstack/rest` reads the derived set.
+  // tile and on every chart axis (#14253). Registering it HERE, with its name
+  // in `TRANSLATED_METADATA_TYPE_NAMES` (the type check asks for both), is the
+  // whole wiring — `TRANSLATABLE_METADATA_TYPES` is built from that list, and
+  // `@objectstack/rest` reads the set.
   dataset: translateDataset,
   page: translatePage,
   picklist: translatePicklist,
   // The security catalog's two display surfaces: the console's `position-ref`
   // and `permission-ref` pickers list `GET /meta/position` and
-  // `GET /meta/permission`, so registering here is the whole wiring.
+  // `GET /meta/permission`, so registering here (and in the name list) is the
+  // whole wiring.
   position: translatePosition,
   permission: translatePermissionSet,
   // The console's report index and report page both read `GET /meta/report`,
-  // so registering here is the whole wiring.
+  // so registering here (and in the name list) is the whole wiring.
   report: translateReport,
   // A doc book's title and section titles: the console's docs portal builds
   // its sidebar from `GET /meta/book`, and the tree route translates the book
   // it resolves through this same table (`createMetaBookTreeAnswer`).
   book: translateBook,
   // A named import mapping's label: the console's import wizard offers each
-  // mapping by label from `GET /meta/mapping`, so registering here is the
-  // whole wiring.
+  // mapping by label from `GET /meta/mapping`, so registering here (and in
+  // the name list) is the whole wiring.
   mapping: translateMapping,
 } satisfies Record<(typeof TRANSLATED_METADATA_TYPE_NAMES)[number], MetadataDocumentTranslator>;
 
@@ -2773,10 +2775,11 @@ function translateDatasetMembers(
  * Chinese tile titles with `Untouched > 14 days` directly beneath them
  * (#14253).
  *
- * Registering the translator in {@link METADATA_DOCUMENT_TRANSLATORS} is the
- * whole wiring: `TRANSLATABLE_METADATA_TYPES` is DERIVED from that table, and
- * `@objectstack/rest` reads the derived set, so the REST boundary follows with
- * nothing else to remember (#3786).
+ * Registering the translator in {@link METADATA_DOCUMENT_TRANSLATORS}, with
+ * its name in {@link TRANSLATED_METADATA_TYPE_NAMES} (the type check refuses
+ * one without the other), is the whole wiring: `TRANSLATABLE_METADATA_TYPES`
+ * is built from that list, and `@objectstack/rest` reads the set, so the REST
+ * boundary follows with nothing else to remember (#3786).
  *
  * ## Writes only where the bundle answered
  *

@@ -257,12 +257,29 @@ function writesToAnExistingObject(init: ts.Expression): boolean {
  *    initializer did not create: `export const ApiEndpoint =
  *    Object.assign(ApiEndpointSchema, { create })` adds `create` to
  *    `ApiEndpointSchema` itself. Those initializers are left as they are;
- *  - a call that registers into a module-level table. None exists at module
- *    scope today, and `scripts/pure-schema-construction.test.ts` holds that:
- *    it reads every module-scope initializer of this package's sources and
- *    refuses one that calls a function writing to a module-level binding,
- *    unless that write is keyed by a value only the initializer can reach (a
- *    `WeakMap` set on a schema it just built: `componentSlot`, `declare`).
+ *  - a call that registers into a store some other code reads later. Two
+ *    families do, at module scope, and both are wrapped because dropping one
+ *    loses nothing a reader can ask for:
+ *    - `withRefusalHead(prescription, head)` (6 constants in
+ *      `data/query.zod.ts`) puts the head of a refusal constant in a
+ *      process-wide map on `globalThis`. Only code that raises that same
+ *      constant reads the map, and that code reads the constant, so a bundle
+ *      that can raise the text keeps the initializer that registered it;
+ *    - every strict object (`strictObject`, `strictObjectError` and the schema
+ *      helpers built on them) pushes its declaration into a process-wide
+ *      store. Only this package's tests and `scripts/build-schemas.ts` read
+ *      the store, and they load the sources, never a bundle of them.
+ *
+ * `scripts/pure-schema-construction.test.ts` holds that account. It lists
+ * every module-level store a function in this package's sources writes (by
+ * name, through a member chain, a type-only cast, `globalThis`, or the result
+ * of a module-level function such as `registry()`), each with its reason; it
+ * marks the stores that are registrations; and it reads every module-scope
+ * initializer and refuses one whose load-time calls reach a registration by a
+ * name that store's reason does not cover (a module-scope
+ * `registerMetadataTypeSchema(…)` reds it). Calls are matched by name, not
+ * resolved, and a helper that writes only to its own parameter is not a
+ * store, so this is a guard against the known shapes, not a proof.
  *
  * Function bodies are not touched: they run when called, not at load.
  */

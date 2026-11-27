@@ -12,6 +12,7 @@
 // that quotes every marked name in every place that is not a call.
 
 import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { build } from 'tsup';
@@ -328,6 +329,8 @@ const MODULE_STATE_WRITTEN_IN_FUNCTIONS: Record<string, string> = {
   'kernel/metadata-type-redaction.ts EXTRA_METADATA_TYPE_REDACTORS': 'runtime registration API, called from a plugin init, never at module scope',
   'kernel/metadata-type-schemas.ts EXTRA_METADATA_TYPE_ACTIONS': 'runtime registration API, called from a plugin init, never at module scope',
   'kernel/metadata-type-schemas.ts EXTRA_METADATA_TYPE_SCHEMAS': 'runtime registration API, called from a plugin init, never at module scope',
+  'shared/refusal-head.ts registry()': 'REGISTRATION: process-wide map on `globalThis`, written by `withRefusalHead` at module scope; see LOAD_TIME_REGISTRATIONS',
+  'shared/strict-object.ts declarationStore()': 'REGISTRATION: process-wide declaration store, pushed by `strictObjectError` at module scope; see LOAD_TIME_REGISTRATIONS',
   'shared/refinement-projection.ts DECLARED': 'WeakMap keyed by a rule the module-scope caller just built (`declare`): no other code holds the key',
   'stack.zod.ts cachedPackageOwnedKeys': 'lazy cache, filled on first call',
   'stack.zod.ts objectUnmergeableKeysCache': 'lazy cache, filled on first call',
@@ -363,11 +366,44 @@ function sourceFiles(dir: string): string[] {
   return out;
 }
 
-/** `file binding` for every module-level or imported binding a function in `file` writes to. */
-function moduleStateWrittenInFunctions(file: string): string[] {
+interface FileScan {
+  /** `file binding` for every module-level store a function in this file writes to. */
+  written: string[];
+  /** Each such `file binding`, with the module-level functions that write it directly. */
+  writers: Map<string, Set<string>>;
+  /** Module-level function name → the names it calls (bare callee or member name). */
+  calls: Map<string, Set<string>>;
+  /** The names called at load: by a module-scope initializer, outside the functions it defines. */
+  loadTimeCalls: string[];
+}
+
+/** The name a call expression calls by: `f(…)` → `f`, `a.b.f(…)` → `f`. */
+function calleeName(call: ts.CallExpression): string | undefined {
+  const e = call.expression;
+  if (ts.isIdentifier(e)) return e.text;
+  if (ts.isPropertyAccessExpression(e)) return e.name.text;
+  return undefined;
+}
+
+/** The module-level name a function node is declared under, if any. */
+function moduleFunctionName(n: ts.Node, sf: ts.SourceFile): string | undefined {
+  if (ts.isFunctionDeclaration(n) && n.name && n.parent === sf) return n.name.text;
+  if ((ts.isArrowFunction(n) || ts.isFunctionExpression(n)) && ts.isVariableDeclaration(n.parent) && ts.isIdentifier(n.parent.name)) {
+    const list = n.parent.parent;
+    if (ts.isVariableDeclarationList(list) && ts.isVariableStatement(list.parent) && list.parent.parent === sf) return n.parent.name.text;
+  }
+  return undefined;
+}
+
+function scanFile(file: string): FileScan {
   const sf = ts.createSourceFile(file, readFileSync(file, 'utf8'), ts.ScriptTarget.Latest, true);
+  const rel = path.relative(path.join(PKG_DIR, 'src'), file).split(path.sep).join('/');
   const bindings = new Set<string>();
+  // Module-level functions too: a write through one's result (`registry().set(…)`)
+  // reaches the store that function hands out.
+  const functions = new Set<string>();
   for (const st of sf.statements) {
+    if (ts.isFunctionDeclaration(st) && st.name) functions.add(st.name.text);
     if (ts.isVariableStatement(st)) {
       for (const d of st.declarationList.declarations) if (ts.isIdentifier(d.name)) bindings.add(d.name.text);
     } else if (ts.isImportDeclaration(st) && st.importClause && !st.importClause.isTypeOnly) {
@@ -378,36 +414,173 @@ function moduleStateWrittenInFunctions(file: string): string[] {
       if (named && ts.isNamedImports(named)) for (const el of named.elements) if (!el.isTypeOnly) bindings.add(el.name.text);
     }
   }
+  // The receiver a write lands on, through member access and the type-only
+  // wrappers (`as`, `satisfies`, `!`, `<T>`, parentheses).
   const root = (e: ts.Expression): ts.Expression => {
     let n = e;
-    while (ts.isPropertyAccessExpression(n) || ts.isElementAccessExpression(n) || ts.isParenthesizedExpression(n) || ts.isNonNullExpression(n)) n = n.expression;
+    while (
+      ts.isPropertyAccessExpression(n) ||
+      ts.isElementAccessExpression(n) ||
+      ts.isParenthesizedExpression(n) ||
+      ts.isNonNullExpression(n) ||
+      ts.isAsExpression(n) ||
+      ts.isSatisfiesExpression(n) ||
+      ts.isTypeAssertionExpression(n)
+    )
+      n = n.expression;
     return n;
   };
-  const written = new Set<string>();
-  const visit = (n: ts.Node, inFunction: boolean): void => {
+  const target = (e: ts.Expression): string | undefined => {
+    const r = root(e);
+    if (ts.isIdentifier(r) && r.text === 'globalThis') return 'globalThis';
+    if (ts.isIdentifier(r) && bindings.has(r.text)) return r.text;
+    if (ts.isCallExpression(r) && ts.isIdentifier(r.expression) && functions.has(r.expression.text)) return `${r.expression.text}()`;
+    return undefined;
+  };
+  const writers = new Map<string, Set<string>>();
+  const calls = new Map<string, Set<string>>();
+  const loadTimeCalls: string[] = [];
+  const visit = (n: ts.Node, fn: string | undefined, inFunction: boolean, atModuleScope: boolean): void => {
+    const own = moduleFunctionName(n, sf);
+    const enclosing = own ?? fn;
     const inside = inFunction || ts.isFunctionLike(n);
+    if (ts.isCallExpression(n)) {
+      const name = calleeName(n);
+      if (name && inside && enclosing) {
+        if (!calls.has(enclosing)) calls.set(enclosing, new Set());
+        calls.get(enclosing)!.add(name);
+      }
+      if (name && atModuleScope && !inside) loadTimeCalls.push(name);
+    }
     if (inside) {
+      let written: string | undefined;
       if (ts.isCallExpression(n) && ts.isPropertyAccessExpression(n.expression) && WRITING_METHODS.has(n.expression.name.text)) {
-        const r = root(n.expression.expression);
-        if (ts.isIdentifier(r) && bindings.has(r.text)) written.add(r.text);
+        written = target(n.expression.expression);
       }
       if (ts.isBinaryExpression(n) && n.operatorToken.kind >= ts.SyntaxKind.FirstAssignment && n.operatorToken.kind <= ts.SyntaxKind.LastAssignment) {
-        const r = root(n.left);
-        if (ts.isIdentifier(r) && bindings.has(r.text)) written.add(r.text);
+        written = target(n.left);
+      }
+      if (written) {
+        const key = `${rel} ${written}`;
+        if (!writers.has(key)) writers.set(key, new Set());
+        if (enclosing) writers.get(key)!.add(enclosing);
       }
     }
-    ts.forEachChild(n, (c) => visit(c, inside));
+    ts.forEachChild(n, (c) => visit(c, enclosing, inside, atModuleScope));
   };
-  visit(sf, false);
-  const rel = path.relative(path.join(PKG_DIR, 'src'), file).split(path.sep).join('/');
-  return [...written].map((b) => `${rel} ${b}`);
+  for (const st of sf.statements) visit(st, undefined, false, ts.isVariableStatement(st) && !st.modifiers?.some((m) => m.kind === ts.SyntaxKind.DeclareKeyword));
+  return { written: [...writers.keys()], writers, calls, loadTimeCalls };
+}
+
+/** `file binding` for every module-level store a function in `file` writes to. */
+function moduleStateWrittenInFunctions(file: string): string[] {
+  return scanFile(file).written;
+}
+
+/**
+ * The ledger entries above that are REGISTRATIONS: a store some other code
+ * reads after it was written, so a write a module-scope initializer performs
+ * would be lost if a bundler dropped that initializer. Every other entry is a
+ * cache, a log-once set or a WeakMap keyed by a value only the writer holds,
+ * whose writes no reader depends on.
+ */
+const REGISTRATION_STORES: ReadonlySet<string> = new Set([
+  'kernel/metadata-type-redaction.ts EXTRA_METADATA_TYPE_REDACTORS',
+  'kernel/metadata-type-schemas.ts EXTRA_METADATA_TYPE_ACTIONS',
+  'kernel/metadata-type-schemas.ts EXTRA_METADATA_TYPE_SCHEMAS',
+  'shared/refusal-head.ts registry()',
+  'shared/strict-object.ts declarationStore()',
+]);
+
+/**
+ * For each {@link REGISTRATION_STORES} entry: why a module-scope initializer
+ * that writes it may be dropped when nothing reads that initializer, and which
+ * load-time callers that reason covers (`'any'`, or the names listed). A
+ * module-scope call that reaches a store by any other name — a module-scope
+ * `registerMetadataTypeSchema(…)`, say — fails the test until it is read and
+ * covered here.
+ */
+const LOAD_TIME_REGISTRATIONS: Record<string, { reason: string; callers: 'any' | readonly string[] }> = {
+  'shared/refusal-head.ts registry()': {
+    reason:
+      '`withRefusalHead(prescription, head)` registers the one-line head of a refusal constant in a process-wide map. The map is read only by code that raises that same constant, and that code reads the constant, so any bundle that can raise the text keeps the initializer that registered it',
+    callers: ['withRefusalHead'],
+  },
+  'shared/strict-object.ts declarationStore()': {
+    reason:
+      'every strict object (`strictObject`, `strictObjectError`, and the schema helpers built on them) pushes its declaration into a process-wide store. The store is read only by this package\'s tests and `scripts/build-schemas.ts`, which load the sources, never a bundle of them',
+    callers: 'any',
+  },
+  'kernel/metadata-type-redaction.ts EXTRA_METADATA_TYPE_REDACTORS': { reason: 'runtime registration API: a plugin calls it from its init, never a module scope', callers: [] },
+  'kernel/metadata-type-schemas.ts EXTRA_METADATA_TYPE_ACTIONS': { reason: 'runtime registration API: a plugin calls it from its init, never a module scope', callers: [] },
+  'kernel/metadata-type-schemas.ts EXTRA_METADATA_TYPE_SCHEMAS': { reason: 'runtime registration API: a plugin calls it from its init, never a module scope', callers: [] },
+};
+
+/** Every ledger entry a function name reaches: what it writes, plus what the names it calls reach. */
+function reachedStores(scans: FileScan[]): Map<string, Set<string>> {
+  const direct = new Map<string, Set<string>>();
+  const calls = new Map<string, Set<string>>();
+  for (const scan of scans) {
+    for (const [store, fns] of scan.writers) for (const fn of fns) (direct.get(fn) ?? direct.set(fn, new Set()).get(fn)!).add(store);
+    for (const [fn, names] of scan.calls) for (const name of names) (calls.get(fn) ?? calls.set(fn, new Set()).get(fn)!).add(name);
+  }
+  const reached = new Map<string, Set<string>>();
+  for (const fn of new Set([...direct.keys(), ...calls.keys()])) reached.set(fn, new Set(direct.get(fn) ?? []));
+  for (let changed = true; changed; ) {
+    changed = false;
+    for (const [fn, names] of calls) {
+      const mine = reached.get(fn)!;
+      for (const name of names) for (const store of reached.get(name) ?? []) if (!mine.has(store)) { mine.add(store); changed = true; }
+    }
+  }
+  return reached;
 }
 
 describe('no module-scope initializer registers into module state', () => {
-  it('every module-level binding a function writes to is a cache, a log-once set or a runtime API, and is listed', () => {
+  it('every module-level store a function writes to is a cache, a log-once set or a runtime API, and is listed', () => {
     const found = sourceFiles(path.join(PKG_DIR, 'src')).flatMap(moduleStateWrittenInFunctions).sort();
     // Anti-vacuity floor: the scan reads real files and finds the known caches.
     expect(found.length).toBeGreaterThan(20);
     expect(found).toEqual(Object.keys(MODULE_STATE_WRITTEN_IN_FUNCTIONS).sort());
+  });
+
+  it('every module-scope initializer that reaches a registration at load is covered by that store\'s reason', () => {
+    expect(Object.keys(LOAD_TIME_REGISTRATIONS).sort()).toEqual([...REGISTRATION_STORES].sort());
+    for (const store of REGISTRATION_STORES) expect(MODULE_STATE_WRITTEN_IN_FUNCTIONS).toHaveProperty([store]);
+    const scans = sourceFiles(path.join(PKG_DIR, 'src')).map(scanFile);
+    const reached = reachedStores(scans);
+    const seen = new Set<string>();
+    const uncovered = new Set<string>();
+    let loadTimeCallCount = 0;
+    for (const scan of scans) {
+      for (const name of scan.loadTimeCalls) {
+        loadTimeCallCount += 1;
+        for (const store of reached.get(name) ?? []) {
+          if (!REGISTRATION_STORES.has(store)) continue;
+          seen.add(`${name} → ${store}`);
+          const { callers } = LOAD_TIME_REGISTRATIONS[store];
+          if (callers !== 'any' && !callers.includes(name)) uncovered.add(`${name} → ${store}`);
+        }
+      }
+    }
+    // Anti-vacuity: the initializers are read, and the two known registering families are seen.
+    expect(loadTimeCallCount).toBeGreaterThan(1000);
+    expect(seen).toContain('withRefusalHead → shared/refusal-head.ts registry()');
+    expect(seen).toContain('strictObject → shared/strict-object.ts declarationStore()');
+    expect([...uncovered].sort()).toEqual([]);
+  });
+
+  it('the load-time reach sees a registration API called at module scope (positive control)', () => {
+    const dir = mkdtempSync(path.join(tmpdir(), 'pure-reach-'));
+    const store = path.join(dir, 'store.ts');
+    writeFileSync(store, 'const TABLE = new Map<string, number>();\nexport function register(k: string): void { TABLE.set(k, 1); }\nfunction viaHelper(k: string): void { register(k); }\nexport const A = viaHelper(\'a\');\nexport const B = [1].map(() => register(\'lazy\'));\n');
+    const scan = scanFile(store);
+    rmSync(dir, { recursive: true, force: true });
+    expect(scan.written).toEqual([`${path.relative(path.join(PKG_DIR, 'src'), store).split(path.sep).join('/')} TABLE`]);
+    const reached = reachedStores([scan]);
+    expect([...(reached.get('viaHelper') ?? [])]).toEqual(scan.written);
+    // `viaHelper('a')` runs at load; the `map` callback is a function, so `register('lazy')` is not counted as a direct load-time call.
+    expect(scan.loadTimeCalls).toContain('viaHelper');
+    expect(scan.loadTimeCalls).not.toContain('register');
   });
 });
