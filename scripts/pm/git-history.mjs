@@ -3,9 +3,10 @@
 
 /**
  * git-history.mjs — answer a "how many commits on <ref> in <window>" question,
- * or a "which commit last touched <path> on <ref>" question, or REFUSE, so
- * neither a churn number nor a provenance sha can ever be quoted from
- * truncated history (#9878).
+ * or a "which commit last touched <path> on <ref>" question, or an "is <commit>
+ * in <ref>'s history" question, or REFUSE, so neither a churn number, nor a
+ * provenance sha, nor a "not an ancestor" can ever be quoted from truncated
+ * history (#9878).
  *
  *   node scripts/pm/git-history.mjs count  --since=2026-07-19 [--until=2026-08-19]
  *   node scripts/pm/git-history.mjs count  --days=30 [--ref=origin/main] [--path=packages/core]
@@ -13,11 +14,15 @@
  *   node scripts/pm/git-history.mjs ensure --since=2026-07-19   # deepen + prove, answer nothing
  *   node scripts/pm/git-history.mjs touch  --path=<file> [--ref=origin/main] [--format=%H]
  *                                          # the last commit on <ref> that touched <file>, PROVEN
+ *   node scripts/pm/git-history.mjs ancestor --commit=<sha> [--ref=origin/main] [--control=<sha>]
+ *                                          # is <sha> in <ref>'s history: yes or no, PROVEN
  *   node scripts/pm/git-history.mjs --self-test
  *
  * Exit codes: **0** answered, and the answer is provable · **2** refused — the
- * window (or the touch) is not provably present locally and could not be made
- * so · **1** usage or environment.
+ * window (or the touch, or the negative) is not provably present locally and
+ * could not be made so · **1** usage or environment. `ancestor` alone has one
+ * more: **0** is a proven yes and **3** a proven no (the sixth trap below says
+ * why a no is neither 0 nor 1).
  *
  * On success the ANSWER alone goes to stdout (so `$(...)` capture works) and a
  * one-line method receipt goes to stderr, ready to paste beside the number.
@@ -176,6 +181,54 @@
  * The self-test pins a piped `log`, many buffers long, byte for byte against
  * the same `log` sent to a file.
  *
+ * ## The sixth trap, same graft: `merge-base --is-ancestor` says "no" for a real ancestor
+ *
+ * A shallow clone can only WITHHOLD an ancestor path; it never invents one. So
+ * the containment reading fails in one direction: exit 0 (an ancestor) proves
+ * itself in any clone, and exit 1 (not an ancestor) is what a cut produces for
+ * a commit that sits below it. The checks that want the negative — not yet
+ * released, not on main, a blocker not landed — are the ones that get it free.
+ * Measured on this file's 40-commit self-test fixture cloned at `--depth=5`
+ * (floor c35), git 2.43.0:
+ *
+ *   | `git merge-base --is-ancestor <x> origin/main`                        | exit |
+ *   |-----------------------------------------------------------------------|------|
+ *   | c38 — inside the window                                               | 0    |
+ *   | c2 — in main's real history, its object not in the clone              | 128  |
+ *   | c2 — the same commit after `git fetch origin <c2>` put the object in  | **1** |
+ *   | a commit built on c2 that never merged                                | 1    |
+ *
+ * Rows three and four are one exit code for opposite facts, and row two is a
+ * third number that `if ! git merge-base --is-ancestor …` reads as the same
+ * "no". The prose procedure that used to stand here in a skill file was to run
+ * a second leg by hand: a commit known to be in the ref's history and at least
+ * as deep as the tested one must answer 0 on the same clone, or the negative
+ * is void. `ancestor` runs both legs and names its control itself:
+ *
+ *   - a YES is printed at once — the path exists here, so it exists;
+ *   - a NO stands when no cut can hide the tested commit: either the ref's
+ *     history carries no graft at all (every root under it is a real root), or
+ *     every graft boundary under the ref is OLDER than the tested commit by the
+ *     skew margin. A real ancestor that the walk missed must sit below a
+ *     boundary, and a boundary is its descendant, so it cannot predate it. The
+ *     newest boundary is therefore the control leg: it is in the ref's history
+ *     by construction (it is where the walk stopped) and it is deeper than the
+ *     tested commit. `--control=<sha>` adds the operator's own leg on top: it
+ *     must answer 0 and must not be newer than the tested commit;
+ *   - otherwise it deepens (`--deepen=N` doubling, then `--unshallow`, the same
+ *     additive ladder `touch` climbs) and reads again, and REFUSES with exit 2
+ *     and empty stdout when the negative still cannot be told from a cut.
+ *
+ * "Deeper" is read by COMMITTER DATE, the reading the windowed commands
+ * already rest on. A history whose committer dates run backwards along
+ * ancestry (a `--committer-date-is-author-date` rebase) defeats it;
+ * `--margin-days` (default 7) is the slack, and a complete clone needs none.
+ *
+ * A proven no exits **3**, not 0 and not 1. Not 0, so `ancestor … && echo
+ * landed` cannot read a no as a yes. Not 1, because 1 is this tool's usage
+ * exit: a mistyped flag must never be readable as "not an ancestor", which is
+ * the exact false negative this command exists to end.
+ *
  * ## Cost, measured — because a tool nobody runs fixes nothing
  *
  *   | case                                            | wall  |
@@ -218,11 +271,12 @@ const SELF_TEST_BATTERIES = Object.freeze({
   'bare dates: the instant the proof reads is the instant git counts': 16,
   'touch: the provenance reading a shallow clone fabricates': 26,
   'piped stdout: the answer a pipe reads is the answer a file holds': 4,
+  'ancestor: the negative a shallow clone fabricates': 32,
 });
 
 // DELETING an entry silences that battery's floor exactly as effectively as
 // zeroing it, so the roster's own size is pinned too.
-const SELF_TEST_BATTERY_FLOOR = 6;
+const SELF_TEST_BATTERY_FLOOR = 7;
 
 // The key an assertion is filed under when no battery is open. It is not a
 // declared battery, so it reds by the same set difference rather than silently
@@ -701,6 +755,246 @@ export function ensureTouchProvable({
   return { answered: false, sha: r.sha, verdict: r.verdict, steps, reason: r.verdict.reason };
 }
 
+// ── ancestor: the containment reading ────────────────────────────────────────
+
+/**
+ * `ancestor`'s exit code for a PROVEN no. Its own number: 1 is this tool's
+ * usage exit, and a mistyped flag must never be readable as "not an ancestor"
+ * (the sixth trap in the header).
+ */
+export const EXIT_NOT_ANCESTOR = 3;
+
+const DAY_MS = 24 * 60 * 60 * 1000;
+
+/** The full sha `rev` names as a COMMIT here, or null when it resolves to none. */
+function commitShaOf(cwd, rev) {
+  if (typeof rev !== 'string' || rev === '' || rev.startsWith('-')) return null;
+  const out = git(['rev-parse', '--verify', '--quiet', `${rev}^{commit}`], { cwd, allowFail: true });
+  const sha = (out || '').trim();
+  return /^[0-9a-f]{40,64}$/.test(sha) ? sha : null;
+}
+
+/** Committer date of `sha` in ms, or null when it cannot be read. */
+function commitDateMs(cwd, sha) {
+  const out = git(['log', '-1', '--format=%cI', sha], { cwd, allowFail: true });
+  const ms = out === null ? NaN : Date.parse(out.trim());
+  return Number.isFinite(ms) ? ms : null;
+}
+
+/**
+ * `git merge-base --is-ancestor <commit> <ref>`, raw: the exit status as git
+ * gave it, never thrown. 0 is an ancestor, 1 is not one AS FAR AS THIS CLONE
+ * CAN SEE, and anything else (128 for an object that is not here) is no
+ * reading at all.
+ *
+ * @returns {{status: number|null, stderr: string}}
+ */
+export function rawIsAncestor(cwd, commit, ref) {
+  const r = spawnSync('git', ['merge-base', '--is-ancestor', commit, ref], {
+    cwd,
+    encoding: 'utf8',
+    stdio: ['ignore', 'pipe', 'pipe'],
+  });
+  return { status: r.status, stderr: String(r.stderr || '').trim() };
+}
+
+/**
+ * Every commit under `ref` where the walk is CUT: the parentless commits
+ * reachable from it that are grafted rather than real roots, each with its
+ * committer date. Empty means the history under `ref` is complete here,
+ * whatever the repository's shallow flag says about some other ref.
+ *
+ * @returns {Array<{sha: string, ms: number|null}>|null} null when `ref` does not resolve.
+ */
+export function graftBoundaries(cwd, ref) {
+  const out = git(['rev-list', '--max-parents=0', '--format=%cI', ref], { cwd, allowFail: true });
+  if (out === null) return null;
+  const found = [];
+  let sha = null;
+  for (const line of out.split('\n')) {
+    if (line.startsWith('commit ')) { sha = line.slice('commit '.length).trim(); continue; }
+    if (line === '' || sha === null) continue;
+    const ms = Date.parse(line.trim());
+    if (isGraftBoundary(cwd, sha)) found.push({ sha, ms: Number.isFinite(ms) ? ms : null });
+    sha = null;
+  }
+  return found;
+}
+
+/**
+ * Does a NEGATIVE stand — can no cut under the ref be hiding the tested
+ * commit? Pure, so the self-test pins every arm with injected numbers.
+ *
+ *   - no boundary at all: the history under the ref is complete, and a walk of
+ *     a complete history that missed the commit missed nothing (`by: complete`);
+ *   - otherwise the NEWEST boundary decides, as it does for a window: a real
+ *     ancestor the walk missed sits below some boundary, a boundary is its
+ *     descendant, and a descendant does not predate its ancestor. So when even
+ *     the newest boundary is older than the tested commit by the skew margin,
+ *     none can hide it (`by: floor`), and that boundary is the control leg:
+ *     in the ref's history by construction, and deeper than the tested commit;
+ *   - a tested commit with no date here (its object is absent) can be placed
+ *     against nothing, and a boundary with no readable date decides nothing.
+ *
+ * @param {{boundaries: Array<{sha: string, ms: number|null}>, testedMs: number|null, marginDays?: number}} input
+ * @returns {{proven: boolean, by: 'complete'|'floor'|null,
+ *            control: {sha: string, ms: number|null}|null,
+ *            why: 'tested-absent'|'boundary-undated'|'floor-intrudes'|null}}
+ */
+export function negativeIsProven({ boundaries, testedMs, marginDays = DEFAULT_MARGIN_DAYS }) {
+  if (boundaries.length === 0) return { proven: true, by: 'complete', control: null, why: null };
+  const undated = boundaries.find((b) => b.ms === null);
+  if (undated) return { proven: false, by: null, control: undated, why: 'boundary-undated' };
+  const newest = boundaries.reduce((a, b) => (b.ms > a.ms ? b : a));
+  if (testedMs === null) return { proven: false, by: null, control: newest, why: 'tested-absent' };
+  if (newest.ms < testedMs - marginDays * DAY_MS) return { proven: true, by: 'floor', control: newest, why: null };
+  return { proven: false, by: null, control: newest, why: 'floor-intrudes' };
+}
+
+const isoDay = (ms) => (ms === null ? 'undated' : new Date(ms).toISOString().slice(0, 10));
+const short9 = (sha) => String(sha).slice(0, 9);
+
+/**
+ * One reading of "is `commit` in `ref`'s history", fetching nothing. Both
+ * legs, with the exit code each one gave, travel in the result so the receipt
+ * can print them.
+ *
+ * @returns {{state: 'yes'|'no'|'unproven'|'unreadable', deepenCanHelp?: boolean, refSha: string|null, tested: string|null,
+ *            testedStatus: number|null, testedMs: number|null, by: 'complete'|'floor'|null,
+ *            boundaries: Array<{sha: string, ms: number|null}>, control: {sha: string, ms: number|null}|null,
+ *            operator: {sha: string|null, status: number|null, ms: number|null, ok: boolean}|null,
+ *            reason: string|null}}
+ */
+export function ancestorReading({ cwd, commit, ref, control, marginDays = DEFAULT_MARGIN_DAYS }) {
+  const base = {
+    refSha: null, tested: null, testedStatus: null, testedMs: null, by: null, boundaries: [], control: null, operator: null,
+  };
+  const refSha = commitShaOf(cwd, ref);
+  if (refSha === null) {
+    return { ...base, state: 'unreadable', reason: `ref '${ref}' does not resolve to a commit in this checkout` };
+  }
+  const tested = commitShaOf(cwd, commit);
+  let testedStatus = null;
+  let testedMs = null;
+  if (tested !== null) {
+    const raw = rawIsAncestor(cwd, tested, refSha);
+    testedStatus = raw.status;
+    if (raw.status === 0) {
+      return { ...base, state: 'yes', refSha, tested, testedStatus, reason: null };
+    }
+    if (raw.status !== 1) {
+      return {
+        ...base, state: 'unreadable', refSha, tested, testedStatus,
+        reason: `git merge-base --is-ancestor exited ${raw.status}, which is neither answer${raw.stderr ? ` (${raw.stderr})` : ''}`,
+      };
+    }
+    testedMs = commitDateMs(cwd, tested);
+  }
+  const boundaries = graftBoundaries(cwd, refSha) ?? [];
+  const neg = negativeIsProven({ boundaries, testedMs, marginDays });
+  const reading = { ...base, refSha, tested, testedStatus, testedMs, boundaries, control: neg.control };
+
+  // The operator's own control leg, when one was named. It can only ADD a
+  // requirement: it never stands in for the floor, because a commit the
+  // operator knows to be in the history says nothing about a second cut on
+  // another line of it.
+  let operator = null;
+  if (control !== undefined) {
+    const sha = commitShaOf(cwd, control);
+    const status = sha === null ? null : rawIsAncestor(cwd, sha, refSha).status;
+    const ms = sha === null ? null : commitDateMs(cwd, sha);
+    let problem = null;
+    if (sha === null) problem = `the control ${control} is not a commit in this clone`;
+    else if (status !== 0) {
+      problem =
+        `the control leg answered exit ${status}: ${short9(sha)} is not in '${ref}' as this clone sees it, so the ` +
+        "negative is void (a control is a commit KNOWN to be in the ref's history)";
+    } else if (testedMs !== null && ms !== null && ms > testedMs) {
+      problem =
+        `the control ${short9(sha)} (${isoDay(ms)}) is NEWER than the tested commit (${isoDay(testedMs)}) — a near ` +
+        'relative inside the shallow window answers 0 on every clone and proves nothing about a deeper commit';
+    }
+    operator = { sha, status, ms, ok: problem === null };
+    // A control that is too SHALLOW is the operator's choice of commit, and no
+    // deepen changes which commit was named; one that is absent or answers 1
+    // is what a deepen exists to turn.
+    const nearRelative = sha !== null && status === 0 && problem !== null;
+    if (problem !== null) return { ...reading, state: 'unproven', deepenCanHelp: !nearRelative, operator, reason: problem };
+  }
+
+  if (neg.proven) return { ...reading, state: 'no', by: neg.by, operator, reason: null };
+
+  const cut = `this clone's history of '${ref}' is cut at ${boundaries.length} graft boundar${boundaries.length === 1 ? 'y' : 'ies'}`;
+  let reason;
+  if (neg.why === 'tested-absent') {
+    reason =
+      `${commit} is not an object in this clone, and ${cut} (newest ${short9(neg.control.sha)}, ${isoDay(neg.control.ms)}) — ` +
+      'it may sit below one of them, or nowhere in this history at all, and nothing here tells those apart';
+  } else if (neg.why === 'boundary-undated') {
+    reason = `${cut} and ${short9(neg.control.sha)} carries no readable commit date, so the cut cannot be placed against the tested commit`;
+  } else {
+    reason =
+      `raw git says exit 1, and ${cut} whose newest, ${short9(neg.control.sha)} (${isoDay(neg.control.ms)}), is not ` +
+      `${marginDays} day(s) older than the tested commit ${short9(tested)} (${isoDay(testedMs)}) — the commit can sit ` +
+      'BELOW that cut, where a real ancestor reads exactly like this';
+  }
+  return { ...reading, state: 'unproven', deepenCanHelp: true, operator, reason };
+}
+
+/**
+ * Take the containment reading, deepening only as far as proving a negative
+ * needs. A yes never fetches. The ladder is `touch`'s: `--deepen=N` (counted
+ * from the current boundary, so it can only ADD history), N doubling from
+ * `deepenStep`, then `--unshallow`. Fetching also moves the remote-tracking
+ * ref, so a deepened answer is read at the fetched tip and the receipt names
+ * the sha it was read against.
+ *
+ * @returns {ReturnType<typeof ancestorReading> & {steps: string[]}}
+ */
+export function ensureAncestorProvable({
+  cwd, commit, ref, control, allowFetch = true, allowUnshallow = true, deepenStep = DEFAULT_DEEPEN_STEP, marginDays,
+}) {
+  const steps = [];
+  const attempt = () => ancestorReading({ cwd, commit, ref, control, marginDays });
+  const settled = (r) => r.state === 'yes' || r.state === 'no';
+
+  let r = attempt();
+  if (settled(r)) {
+    steps.push(isShallow(cwd) ? 'read without fetching' : 'complete clone (no fetch)');
+    return { ...r, steps };
+  }
+  // Unreadable is about the question (a ref that names nothing here), and a
+  // clone with no cut under the ref has nothing a deepen could add.
+  if (r.state === 'unreadable' || r.boundaries.length === 0 || r.deepenCanHelp === false) return { ...r, steps };
+  if (!allowFetch) return { ...r, steps, reason: `${r.reason}; --no-fetch was given` };
+
+  const remotes = (git(['remote'], { cwd, allowFail: true }) || '').split('\n').filter(Boolean);
+  const target = splitRemoteRef(ref, remotes);
+  if (!target) {
+    return {
+      ...r,
+      steps,
+      reason:
+        `${r.reason}; '${ref}' names no remote to deepen from ` +
+        `(remotes here: ${remotes.length ? remotes.join(', ') : 'none'})`,
+    };
+  }
+  for (let n = deepenStep; n <= MAX_DEEPEN_STEP && isShallow(cwd); n *= 2) {
+    const fetched = git(['fetch', `--deepen=${n}`, target.remote, target.branch], { cwd, allowFail: true });
+    steps.push(`fetch --deepen=${n} ${target.remote} ${target.branch}${fetched === null ? ' (failed)' : ''}`);
+    if (fetched === null) break;
+    r = attempt();
+    if (settled(r)) return { ...r, steps };
+  }
+  if (allowUnshallow && isShallow(cwd)) {
+    const un = git(['fetch', '--unshallow', target.remote], { cwd, allowFail: true });
+    steps.push(`fetch --unshallow ${target.remote}${un === null ? ' (failed)' : ''}`);
+    r = attempt();
+    if (settled(r)) return { ...r, steps };
+  }
+  return { ...r, steps };
+}
+
 // ── CLI ──────────────────────────────────────────────────────────────────────
 
 function usage(msg) {
@@ -713,8 +1007,11 @@ function usage(msg) {
       '  node scripts/pm/git-history.mjs ensure --since=<date>|--days=<n> [--ref=<ref>]\n' +
       '  node scripts/pm/git-history.mjs touch  --path=<file> [--ref=<ref>] [--format=%H] [--deepen=<n>]\n' +
       '                                         [--no-fetch] [--no-unshallow]\n' +
+      '  node scripts/pm/git-history.mjs ancestor --commit=<sha> [--ref=<ref>] [--control=<sha>] [--margin-days=<n>]\n' +
+      '                                         [--deepen=<n>] [--no-fetch] [--no-unshallow]\n' +
       '  node scripts/pm/git-history.mjs --self-test\n\n' +
-      'exit 0 answered · 2 refused (window or touch not provably complete) · 1 usage/environment\n',
+      'exit 0 answered · 2 refused (window, touch or negative not provably complete) · 1 usage/environment\n' +
+      'ancestor: exit 0 = yes · 3 = no, PROVEN (its control leg is in the receipt) · 2 refused · 1 usage\n',
   );
   process.exit(1);
 }
@@ -732,6 +1029,8 @@ function parseArgs(argv) {
       case '--days': opts.days = Number(v); break;
       case '--ref': opts.ref = v; break;
       case '--path': opts.paths.push(v); break;
+      case '--commit': opts.commit = v; break;
+      case '--control': opts.control = v; break;
       case '--format': opts.format = v; opts.formatGiven = true; break;
       case '--deepen': opts.deepen = Number(v); break;
       case '--margin-days': opts.marginDays = Number(v); break;
@@ -791,8 +1090,12 @@ function main(argv) {
   }
   const { cmd, opts } = parseArgs(argv);
   if (cmd === null) usage('a command is required');
-  if (!['count', 'log', 'ensure', 'touch'].includes(cmd)) usage(`unknown command '${cmd}'`);
+  if (!['count', 'log', 'ensure', 'touch', 'ancestor'].includes(cmd)) usage(`unknown command '${cmd}'`);
+  if (cmd !== 'ancestor' && (opts.commit !== undefined || opts.control !== undefined)) {
+    usage(`--commit and --control belong to 'ancestor', not '${cmd}'`);
+  }
   if (cmd === 'touch') return touchMain(opts);
+  if (cmd === 'ancestor') return ancestorMain(opts);
 
   const since = resolveSince(opts);
   const until = resolveUntil(opts);
@@ -903,6 +1206,105 @@ function touchMain(opts) {
   process.stdout.write(`${answer}\n`);
   process.stderr.write(`${receipt}\n`);
   return 0;
+}
+
+/**
+ * `ancestor`: is `--commit` in `--ref`'s history? Prints `yes` or `no` alone
+ * on stdout and the two legs with their exit codes on stderr. Exit 0 for a
+ * yes, {@link EXIT_NOT_ANCESTOR} for a PROVEN no, 2 with EMPTY stdout when the
+ * negative cannot be told from a shallow cut.
+ */
+function ancestorMain(opts) {
+  if (opts.since !== undefined || opts.days !== undefined || opts.until !== undefined) {
+    usage('ancestor takes no window — drop --since/--days/--until');
+  }
+  if (opts.paths.length > 0 || opts.formatGiven) usage('ancestor takes no --path and no --format');
+  if (opts.commit === undefined || opts.commit === '') usage('ancestor needs --commit=<sha>');
+  if (opts.control === '') usage('--control needs a value');
+  if (opts.deepen !== undefined && (!Number.isInteger(opts.deepen) || opts.deepen <= 0)) usage('--deepen must be a positive integer');
+  if (opts.marginDays !== undefined && (!Number.isFinite(opts.marginDays) || opts.marginDays < 0)) usage('--margin-days must be zero or more');
+  const cwd = opts.cwd || process.cwd();
+  // A sha this clone does not have is a legitimate question (it may sit below
+  // the floor). A NAME that resolves to nothing is a typo, and must not ride
+  // the same path to a "no".
+  if (commitShaOf(cwd, opts.commit) === null && !/^[0-9a-f]{7,64}$/.test(opts.commit)) {
+    usage(`--commit=${opts.commit} names no commit here (give a sha, or a ref this checkout has)`);
+  }
+  const marginDays = opts.marginDays ?? DEFAULT_MARGIN_DAYS;
+
+  const r = ensureAncestorProvable({
+    cwd,
+    commit: opts.commit,
+    ref: opts.ref,
+    control: opts.control,
+    allowFetch: opts.fetch,
+    allowUnshallow: opts.unshallow,
+    deepenStep: opts.deepen,
+    marginDays,
+  });
+
+  const testedLeg = r.tested === null
+    ? `tested leg: ${opts.commit} is not an object in this clone`
+    : `tested leg ${short9(r.tested)} exit ${r.testedStatus}`;
+
+  if (r.state !== 'yes' && r.state !== 'no') {
+    const remote = splitRemoteRef(opts.ref, ['origin']) ? 'origin' : '<remote>';
+    // Three refusals, three remedies: a ref that names nothing is fetched, a
+    // control that is too shallow is re-chosen, and only a cut is deepened.
+    let remedy;
+    if (r.state === 'unreadable') {
+      remedy = `   Remedy: name a ref this checkout has (git -C ${cwd} fetch ${remote}), then ask again.\n`;
+    } else if (r.deepenCanHelp === false) {
+      remedy =
+        '   Remedy: name a control at least as old as the tested commit, or drop --control and let the\n' +
+        '   floor be the control leg.\n';
+    } else if (r.boundaries.length === 0) {
+      remedy =
+        "   Remedy: this clone's history of the ref is complete, so no fetch turns that leg — the control,\n" +
+        '   or the ref, is not the commit you take it for. Re-read both.\n';
+    } else {
+      remedy =
+        '   A shallow clone withholds ancestor paths and never adds one: exit 0 proves itself, and exit 1\n' +
+        '   is what a cut produces for a commit that sits below it. No answer was printed.\n' +
+        `   Remedy: git -C ${cwd} fetch --deepen=${opts.deepen ?? DEFAULT_DEEPEN_STEP} ${remote} ${opts.ref.replace(/^[^/]+\//, '')}` +
+        `   # or: git -C ${cwd} fetch --unshallow ${remote}\n`;
+    }
+    process.stderr.write(
+      `⛔ git-history REFUSES to say "not an ancestor" — ${r.reason}.\n` +
+        `   ref: ${opts.ref}${r.refSha ? ` (${short9(r.refSha)})` : ''}   commit: ${opts.commit}\n` +
+        `${r.refSha
+          ? `   ${testedLeg}${r.operator ? ` · operator control ${opts.control} exit ${r.operator.status ?? 'unreadable'}` : ''}\n`
+          : ''}` +
+        `${r.steps.length ? `   tried: ${r.steps.join(' · ')}\n` : ''}` +
+        remedy,
+    );
+    return 2;
+  }
+
+  const head = `method: git merge-base --is-ancestor ${short9(r.tested ?? opts.commit)} ${opts.ref}@${short9(r.refSha)}`;
+  const tail = ` · tip ${refTip(cwd, opts.ref)} · ${r.steps.join(' · ')}`;
+  if (r.state === 'yes') {
+    process.stdout.write('yes\n');
+    process.stderr.write(
+      `${head} · ${testedLeg} — an ancestor path present here is present in the full history ` +
+        `(a shallow clone withholds paths, it never adds one), so no control leg is owed${tail}\n`,
+    );
+    return 0;
+  }
+
+  const controlLeg = r.by === 'complete'
+    ? "control leg: none is owed — every root under the ref is a real root, so this clone's history of it is " +
+      'complete and the walk that missed the commit missed nothing'
+    : `control leg ${short9(r.control.sha)} exit 0 — the newest of ${r.boundaries.length} graft boundar` +
+      `${r.boundaries.length === 1 ? 'y' : 'ies'} under the ref (${isoDay(r.control.ms)}), in its history by ` +
+      `construction and at least ${marginDays} day(s) older than the tested commit (${isoDay(r.testedMs)}): ` +
+      'no cut sits where that commit could hide';
+  const operatorLeg = r.operator
+    ? ` · operator control ${short9(r.operator.sha)} exit ${r.operator.status} (${isoDay(r.operator.ms)}, not newer than the tested commit)`
+    : '';
+  process.stdout.write('no\n');
+  process.stderr.write(`${head} · ${testedLeg} · ${controlLeg}${operatorLeg}${tail}\n`);
+  return EXIT_NOT_ANCESTOR;
 }
 
 // ── self-test ────────────────────────────────────────────────────────────────
@@ -1506,6 +1908,196 @@ function selfTest() {
       early.code === 0 && early.bytes > 0 && early.bytes < fileBytes.length
         && /^method: git log [^\n]*\n$/.test(early.stderr ?? '') && !/EPIPE/.test(early.stderr ?? ''),
       JSON.stringify(early));
+
+    // ── ancestor: the negative a shallow clone fabricates ───────────────────
+    // The sixth trap in the header. Last, because it adds two never-merged
+    // commits to `up` and deepens its own clones; nothing above reads either.
+    battery('ancestor: the negative a shallow clone fabricates');
+    const bnd = (sha, iso) => ({ sha, ms: iso === null ? null : Date.parse(iso) });
+    const tested0 = Date.parse('2026-07-11T12:00:00Z');
+    const vComplete = negativeIsProven({ boundaries: [], testedMs: tested0 });
+    t('no graft under the ref: a negative stands by COMPLETENESS and owes no control — even for a commit with no '
+      + 'date here, because a walk of a complete history that missed it missed nothing',
+      vComplete.proven === true && vComplete.by === 'complete' && vComplete.control === null
+        && negativeIsProven({ boundaries: [], testedMs: null }).proven === true, JSON.stringify(vComplete));
+    const vFloor = negativeIsProven({ boundaries: [bnd('old', '2026-06-01T00:00:00Z'), bnd('new', '2026-06-21T12:00:00Z')], testedMs: tested0 });
+    t('every boundary older than the tested commit by the margin: the negative stands by the FLOOR, and the control '
+      + 'leg it names is the NEWEST boundary — the one a hidden ancestor would have to predate',
+      vFloor.proven === true && vFloor.by === 'floor' && vFloor.control.sha === 'new', JSON.stringify(vFloor));
+    const vIntrude = negativeIsProven({ boundaries: [bnd('old', '2026-06-01T00:00:00Z'), bnd('new', '2026-07-06T12:00:00Z')], testedMs: tested0 });
+    t('the NEWEST boundary decides, not the oldest — one cut inside the margin is enough to void the negative',
+      vIntrude.proven === false && vIntrude.why === 'floor-intrudes' && vIntrude.control.sha === 'new', JSON.stringify(vIntrude));
+    t('the margin is the whole difference between those two: the same cut five days below the tested commit is '
+      + 'refused at the default 7 days and stands at --margin-days=1',
+      negativeIsProven({ boundaries: [bnd('new', '2026-07-06T12:00:00Z')], testedMs: tested0, marginDays: 1 }).proven === true
+        && negativeIsProven({ boundaries: [bnd('new', '2026-07-06T12:00:00Z')], testedMs: tested0, marginDays: 7 }).proven === false);
+    t('a tested commit with no date here (its object is absent) is placed against nothing, and a boundary with no '
+      + 'readable date decides nothing — neither is rounded to a "no"',
+      negativeIsProven({ boundaries: [bnd('b', '2026-06-01T00:00:00Z')], testedMs: null }).why === 'tested-absent'
+        && negativeIsProven({ boundaries: [bnd('b', null)], testedMs: tested0 }).why === 'boundary-undated');
+
+    g(['config', 'uploadpack.allowAnySHA1InWant', 'true'], up);
+    const cAt = (i) => g(['rev-parse', `origin/main~${FIXTURE_COMMITS - 1 - i}`], full).trim();
+    const c2 = cAt(2);
+    const c38 = cAt(38);
+    // Two commits that never merged, built in `up` and fetched by sha: one on
+    // c2, dated below every shallow floor cut here, and one on c38, dated a
+    // day after the tip.
+    const neverMerged = (parent, iso, msg) => execFileSync(
+      'git', ['commit-tree', g(['rev-parse', `${parent}^{tree}`], up).trim(), '-p', parent, '-m', msg],
+      { cwd: up, encoding: 'utf8', env: { ...process.env, GIT_AUTHOR_DATE: iso, GIT_COMMITTER_DATE: iso } },
+    ).trim();
+    const oldSide = neverMerged(c2, '2026-06-04T00:00:00Z', 'never merged, old');
+    const newSide = neverMerged(c38, '2026-07-11T12:00:00Z', 'never merged, new');
+    const rawAnc = (cwd, x) => spawnSync('git', ['merge-base', '--is-ancestor', x, 'origin/main'], { cwd, stdio: 'ignore' }).status;
+    const anc = (args, cwd) => runCliAllowFail(['ancestor', ...args], cwd);
+    const shallowWith = (name, depth, shas) => {
+      const dir = join(root, name);
+      g(['clone', '--quiet', `--depth=${depth}`, `file://${up}`, dir], root);
+      if (shas.length > 0) g(['fetch', '--quiet', 'origin', ...shas], dir);
+      return dir;
+    };
+
+    const anc5 = shallowWith('anc5', 5, []);
+    const b5anc = boundaryOf(anc5);
+    t('BASELINE — c2 is in main\'s real history, and on a depth-5 clone that does not hold its object raw git '
+      + 'exits 128: a third number, which `if ! git merge-base --is-ancestor …` reads as "not an ancestor"',
+      rawAnc(full, c2) === 0 && rawAnc(anc5, c2) === 128, `full ${rawAnc(full, c2)} shallow ${rawAnc(anc5, c2)}`);
+    g(['fetch', '--quiet', 'origin', c2, oldSide, newSide], anc5);
+    t('FIXTURE — fetching those shas by name puts the objects in and moves no cut: the clone is still shallow and '
+      + 'its one graft boundary under origin/main is the one it was cloned with',
+      isShallow(anc5) === true && boundaryOf(anc5) === b5anc
+        && JSON.stringify(graftBoundaries(anc5, 'origin/main').map((b) => b.sha)) === JSON.stringify([b5anc])
+        && graftBoundaries(full, 'origin/main').length === 0,
+      JSON.stringify(graftBoundaries(anc5, 'origin/main')));
+    t('BASELINE — with its object present, the SAME real ancestor now reads exit 1 (the defect, reproduced: the '
+      + 'cut withheld the path, at an ordinary exit code and with no warning)',
+      rawAnc(anc5, c2) === 1, `raw ${rawAnc(anc5, c2)}`);
+    t('BASELINE — and a commit that truly never merged reads exit 1 too: one exit code for opposite facts',
+      rawAnc(anc5, oldSide) === 1 && rawAnc(full, c2) === 0, `raw ${rawAnc(anc5, oldSide)}`);
+
+    const refusedAnc = anc([`--commit=${c2}`, '--no-fetch'], anc5);
+    t('the CLI REFUSES that reading with exit 2 and EMPTY stdout — a captured answer is empty rather than "no"',
+      refusedAnc.code === 2 && refusedAnc.stdout === '', JSON.stringify(refusedAnc));
+    t('and the refusal prints the tested leg\'s own exit code, the cut it could not rule out with its date, and a '
+      + '--deepen remedy',
+      refusedAnc.stderr.includes(`tested leg ${short(c2)} exit 1`) && refusedAnc.stderr.includes(`${short(b5anc)} (2026-07-06)`)
+        && /Remedy: git -C \S+ fetch --deepen=/.test(refusedAnc.stderr), refusedAnc.stderr);
+    const libReading = ancestorReading({ cwd: anc5, commit: c2, ref: 'origin/main' });
+    t('ancestorReading is the read-only form of the same refusal: unproven, both numbers in the result, and it '
+      + 'fetched nothing (the cut is where it was)',
+      libReading.state === 'unproven' && libReading.testedStatus === 1 && libReading.deepenCanHelp === true
+        && libReading.control.sha === b5anc && boundaryOf(anc5) === b5anc, JSON.stringify(libReading));
+
+    const yesAnc = anc([`--commit=${c38}`, '--no-fetch'], anc5);
+    t('FIRING CONTROL — a commit inside the window answers `yes`, exit 0, on the same shallow clone without any '
+      + 'fetch: a yes proves itself, so the command discriminates rather than refusing every shallow clone',
+      yesAnc.code === 0 && yesAnc.stdout === 'yes\n' && /no control leg is owed/.test(yesAnc.stderr)
+        && /read without fetching/.test(yesAnc.stderr) && isShallow(anc5) === true, JSON.stringify(yesAnc));
+
+    const marginRefusal = anc([`--commit=${newSide}`, '--no-fetch'], anc5);
+    t('a never-merged commit dated five days above the cut is REFUSED at the default margin: the cut is not 7 '
+      + 'days older than it, so the cut is not yet a control',
+      marginRefusal.code === 2 && marginRefusal.stdout === '' && /is not 7 day\(s\) older/.test(marginRefusal.stderr),
+      JSON.stringify(marginRefusal));
+    const noAnc = anc([`--commit=${newSide}`, '--no-fetch', '--margin-days=1'], anc5);
+    t('with the margin it can meet, the same commit answers `no` WITHOUT fetching, and the clone is still shallow '
+      + '— the predicate is the cut\'s place against the commit, never the shallow flag',
+      noAnc.stdout === 'no\n' && /read without fetching/.test(noAnc.stderr) && isShallow(anc5) === true, JSON.stringify(noAnc));
+    t(`a proven no exits ${EXIT_NOT_ANCESTOR}: not 0, so \`ancestor … && echo landed\` cannot read it as a yes, and not 1, `
+      + 'which is this tool\'s usage exit',
+      noAnc.code === EXIT_NOT_ANCESTOR && EXIT_NOT_ANCESTOR !== 0 && EXIT_NOT_ANCESTOR !== 1 && EXIT_NOT_ANCESTOR !== 2,
+      `exit ${noAnc.code}`);
+    t('and the receipt carries BOTH legs with their exit codes: the tested commit at 1, and the control — the '
+      + 'graft boundary itself — at 0',
+      noAnc.stderr.includes(`tested leg ${short(newSide)} exit 1`) && noAnc.stderr.includes(`control leg ${short(b5anc)} exit 0`)
+        && rawAnc(anc5, b5anc) === 0, noAnc.stderr);
+
+    const withControl = anc([`--commit=${newSide}`, '--no-fetch', '--margin-days=1', `--control=${c38}`], anc5);
+    t('--control adds the operator\'s own leg to the receipt when it holds: in the ref\'s history (exit 0) and not '
+      + 'newer than the tested commit',
+      withControl.code === EXIT_NOT_ANCESTOR && withControl.stderr.includes(`operator control ${short(c38)} exit 0`),
+      JSON.stringify(withControl));
+    const nearRelative = anc([`--commit=${oldSide}`, `--control=${c38}`], anc5);
+    t('⛔ a control NEWER than the tested commit is refused as a near relative, exit 2 with empty stdout — it '
+      + 'answers 0 on every clone and says nothing about a deeper commit',
+      nearRelative.code === 2 && nearRelative.stdout === '' && /NEWER than the tested commit/.test(nearRelative.stderr),
+      JSON.stringify(nearRelative));
+    t('and that refusal climbed no ladder although fetching was allowed: no deepen changes which commit the '
+      + 'operator named, so the cut is where it was and nothing was tried',
+      boundaryOf(anc5) === b5anc && !/tried:/.test(nearRelative.stderr) && /name a control at least as old/.test(nearRelative.stderr),
+      nearRelative.stderr);
+    const absentShallow = anc(['--commit=deadbeefdeadbeef', '--no-fetch'], anc5);
+    t('a sha this shallow clone does not hold is REFUSED, exit 2 — below the cut or nowhere at all, and nothing '
+      + 'here tells those apart',
+      absentShallow.code === 2 && absentShallow.stdout === '' && /is not an object in this clone/.test(absentShallow.stderr),
+      JSON.stringify(absentShallow));
+
+    const anc20 = shallowWith('anc20', 20, [newSide]);
+    const deepFloor = anc([`--commit=${newSide}`, '--no-fetch'], anc20);
+    t('on a depth-20 clone the cut sits weeks below that commit, and the DEFAULT margin answers `no` without '
+      + 'fetching — the common case pays nothing',
+      deepFloor.code === EXIT_NOT_ANCESTOR && deepFloor.stdout === 'no\n' && /at least 7 day\(s\) older/.test(deepFloor.stderr)
+        && isShallow(anc20) === true, JSON.stringify(deepFloor));
+
+    const anc5b = shallowWith('anc5b', 5, [c2]);
+    const deepenedYes = anc([`--commit=${c2}`, '--deepen=8'], anc5b);
+    t('with fetching allowed the refused reading deepens and answers the TRUTH: c2 is an ancestor, `yes`, exit 0 '
+      + '— the answer the complete clone gives, where raw git had said 1',
+      deepenedYes.code === 0 && deepenedYes.stdout === 'yes\n' && /fetch --deepen=8 origin main/.test(deepenedYes.stderr)
+        && anc([`--commit=${c2}`], full).stdout === 'yes\n', JSON.stringify(deepenedYes));
+
+    const anc5c = shallowWith('anc5c', 5, [oldSide]);
+    const deepenedNo = anc([`--commit=${oldSide}`], anc5c);
+    t('and the never-merged commit built on c2 deepens to a PROVEN `no`: the ladder ends on a complete history, '
+      + 'whose negative owes no control',
+      deepenedNo.code === EXIT_NOT_ANCESTOR && deepenedNo.stdout === 'no\n' && /fetch --deepen=64 origin main/.test(deepenedNo.stderr)
+        && /every root under the ref is a real root/.test(deepenedNo.stderr), JSON.stringify(deepenedNo));
+
+    const anc5d = shallowWith('anc5d', 5, [oldSide]);
+    const voidControl = anc([`--commit=${oldSide}`, `--control=${c2}`, '--no-fetch'], anc5d);
+    t('an operator control that answers 1 on this clone VOIDS the negative: refused, exit 2, and the line says '
+      + 'which leg failed',
+      voidControl.code === 2 && voidControl.stdout === '' && /control leg answered exit 1/.test(voidControl.stderr)
+        && rawAnc(anc5d, c2) === 1, JSON.stringify(voidControl));
+    const curedControl = anc([`--commit=${oldSide}`, `--control=${c2}`], anc5d);
+    t('and with fetching allowed the SAME clone deepens until that control turns 0, then reads again: `no`, with '
+      + 'the operator leg at exit 0 in the receipt — the hand procedure, run',
+      curedControl.code === EXIT_NOT_ANCESTOR && curedControl.stdout === 'no\n' && /fetch --deepen=/.test(curedControl.stderr)
+        && curedControl.stderr.includes(`operator control ${short(c2)} exit 0`) && rawAnc(anc5d, c2) === 0,
+      JSON.stringify(curedControl));
+
+    g(['fetch', '--quiet', 'origin', oldSide, newSide], full);
+    const fullNo = anc([`--commit=${oldSide}`], full);
+    t('a complete clone answers `no` without fetching and says the history is complete rather than naming a floor',
+      fullNo.code === EXIT_NOT_ANCESTOR && fullNo.stdout === 'no\n' && /complete clone \(no fetch\)/.test(fullNo.stderr)
+        && /control leg: none is owed/.test(fullNo.stderr), JSON.stringify(fullNo));
+    const fullAbsent = anc(['--commit=deadbeefdeadbeef'], full);
+    t('there a sha the clone does not hold IS a no — absent from a complete history — and the receipt says the '
+      + 'object is not here instead of quoting an exit code git never gave',
+      fullAbsent.code === EXIT_NOT_ANCESTOR && /is not an object in this clone/.test(fullAbsent.stderr)
+        && !/tested leg \S+ exit/.test(fullAbsent.stderr), JSON.stringify(fullAbsent));
+    const fullBadControl = anc([`--commit=${oldSide}`, `--control=${newSide}`], full);
+    t('a control that is NOT in the ref\'s history is refused even on a complete clone, with no fetch tried and '
+      + 'no deepen prescribed: the control or the ref is not the commit the operator takes it for',
+      fullBadControl.code === 2 && fullBadControl.stdout === '' && /control leg answered exit 1/.test(fullBadControl.stderr)
+        && !/tried:/.test(fullBadControl.stderr) && !/--deepen=/.test(fullBadControl.stderr), JSON.stringify(fullBadControl));
+
+    const noCommit = anc([], full);
+    const typoName = anc(['--commit=not-a-ref-here'], full);
+    t('ancestor without --commit is usage, and so is a NAME that resolves to nothing: exit 1 with empty stdout, '
+      + `never the ${EXIT_NOT_ANCESTOR} a typo could otherwise ride to a "no"`,
+      noCommit.code === 1 && noCommit.stdout === '' && typoName.code === 1 && typoName.stdout === ''
+        && /names no commit here/.test(typoName.stderr), JSON.stringify({ noCommit: noCommit.code, typoName }));
+    const windowed = anc([`--commit=${c2}`, '--since=2026-06-01'], full);
+    const strayCommit = runCliAllowFail(['count', `--since=${WINDOW_SINCE}`, `--commit=${c2}`], full);
+    t('ancestor takes no window, and no other command takes --commit: both are usage',
+      windowed.code === 1 && windowed.stdout === '' && strayCommit.code === 1 && strayCommit.stdout === '',
+      JSON.stringify({ windowed: windowed.code, strayCommit: strayCommit.code }));
+    const noRef = anc([`--commit=${c38}`, '--ref=origin/nope'], anc5);
+    t('an unresolvable ref is REFUSED (exit 2, empty stdout) with its own remedy, not read as "not in it"',
+      noRef.code === 2 && noRef.stdout === '' && /does not resolve to a commit/.test(noRef.stderr)
+        && !/--deepen=/.test(noRef.stderr), JSON.stringify(noRef));
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
