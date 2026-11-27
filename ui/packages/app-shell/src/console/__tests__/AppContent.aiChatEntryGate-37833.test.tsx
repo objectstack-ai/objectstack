@@ -419,12 +419,31 @@ describe('objectstack#37833 — the ai:chat entry is hidden from a member who ca
     it('a direct link for a member with no AI seat: the page draws AiUnavailable, not its loading state', async () => {
       metadataApps = [policyApp()];
       const apiFetch = await warmTheCatalog(NO_SEAT);
-      const unmount = mountOutsideAct('/apps/policy/component/ai/chat', apiFetch);
+      // The page alone, as the component route mounts it: the console's other
+      // renders in the same window would flush the loading render it must
+      // never depend on.
+      const host = document.createElement('div');
+      document.body.appendChild(host);
+      const root = createRoot(host);
+      const actEnv = globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean };
+      actEnv.IS_REACT_ACT_ENVIRONMENT = false;
+      root.render(
+        withProviders(
+          apiFetch,
+          <MemoryRouter initialEntries={['/apps/policy/component/ai/chat']}>
+            <Routes>
+              <Route path="/apps/:appName/component/ai/chat" element={<AppAskPage />} />
+            </Routes>
+          </MemoryRouter>,
+        ),
+      );
       try {
         expect(await drawn('ai-unavailable')).toBe(true);
         expect(document.querySelector('[data-testid="app-ask-page-loading"]')).toBeNull();
       } finally {
-        unmount();
+        root.unmount();
+        host.remove();
+        actEnv.IS_REACT_ACT_ENVIRONMENT = true;
       }
     });
 
