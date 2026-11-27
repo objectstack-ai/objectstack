@@ -26,13 +26,15 @@
  *   2. the NEWEST comment after it signed by this seat (`LANE#N · ACCOUNT · SESSION`, `readSignatureLine`) — the
  *      round-open marker is the one trace a running session leaves on the post, and any seat-signed comment is that
  *      session's trace, so the headline is printed, never required;
- *   3. on the seat's intake (`seatIntakeKeys`: the post title's `area:*` and `epic #N`, or `--intake`), the open
- *      `pm:dispatched` ∪ `pm:queue` cards: the newest `Claim:` of THIS seat (its `Seat:` line, else its signature)
- *      written by another session — and a push to a lane card's `claude/issue-N` branch (one `git ls-remote` for the
- *      whole board, intersected locally; the head commit's committer date and `Claude-Session:` trailer), which counts
- *      as a claim when the card's newest claim is this seat's or there is none (推即认领);
- *   4. the closed intake cards, newest-updated first: the first with a claim of this seat — its session, timed by that
- *      session's newest comment on the card (a merge closes a card, so `closed_at` is no act of the seat).
+ *   3. every open `pm:dispatched` ∪ `pm:queue` card updated inside the window, on the intake or off it (a p0 or p1
+ *      card is taken from any area): the newest `Claim:` of THIS seat (its `Seat:` line, else its signature) written
+ *      by another session — and a push to a card's `claude/issue-N` branch (one `git ls-remote` for the whole board,
+ *      intersected locally; the head commit's committer date and `Claude-Session:` trailer), which counts as a claim
+ *      when the card's newest claim is this seat's, or, on the seat's intake (`seatIntakeKeys`: the post title's
+ *      `area:*` and `epic #N`, or `--intake`), when there is none (推即认领);
+ *   4. every closed card updated inside the window, newest-updated first: the first with a claim of this seat — its
+ *      session, timed by that session's newest comment on the card (a merge closes a card, so `closed_at` is no act
+ *      of the seat).
  *
  * The verdict: an activity is UN-CLOCKED-OUT when it is newer than reading 1 (or there is no brief), and FOREIGN when
  * its session is not `--session` or an `--own` one (a lease-table session, the seat's card threads) — an unread
@@ -112,7 +114,7 @@ export const ROUND_PHRASE = '一轮(约 60 分钟)';
 export const UNREAD_LEGS = Object.freeze([
   "the maintainer's explicit summon — the arbitration line (有简报径直坐席;无简报才走保守确认); not on the board as a reading",
   'the lease table — its area sessions see this seat by rule; pass them with --own, the reader does not parse the table',
-  'a push to a branch not spelled `claude/issue-N…` (a card thread\'s platform branch) — matched to no card here; its claim names it',
+  'a push to a branch not spelled `claude/issue-N…` (a card thread\'s platform branch), or on an off-intake card no claim names — matched to no seat here; its claim names it',
   "a push's real time — the head commit's committer date is read, so a later push of an older commit reads older",
   'the touch readings after a clear mutex — `git-history.mjs touch` and `check-harness-current.mjs`, run them next',
 ]);
@@ -176,9 +178,10 @@ export function commentSession(body) {
 
 /**
  * Readings 1 and 2 over the seat post's thread: the newest stand-down brief, and the newest comment after it signed
- * by this seat. Pure.
+ * by this seat from a session outside `own` — an own comment newer than another session's marker must not hide it,
+ * the same filter reading 3 takes. Pure.
  */
-export function postReadings(rows, seatName) {
+export function postReadings(rows, seatName, own = new Set()) {
   const list = Array.isArray(rows) ? rows : [];
   let brief = null;
   for (const row of list) if (standDownBrief(row?.body) && (brief === null || (stampOf(row) ?? 0) >= (stampOf(brief) ?? 0))) brief = row;
@@ -187,7 +190,7 @@ export function postReadings(rows, seatName) {
   for (const row of list) {
     if (row === brief || !after(row)) continue;
     const sig = readSignatureLine(String(row?.body ?? ''));
-    if (!sig || `${sig.lane}#${sig.seat}`.toLowerCase() !== seatName) continue;
+    if (!sig || `${sig.lane}#${sig.seat}`.toLowerCase() !== seatName || own.has(sig.session)) continue;
     if (marker === null || (stampOf(row) ?? 0) >= (stampOf(marker) ?? 0)) marker = row;
   }
   return { brief, marker };
@@ -289,20 +292,19 @@ export function readMutex({ repo, seat, session, own: ownList = [], post = null,
   if (seatOfPostTitle(postRow.title) !== seat.name) gaps.push(`the post #${postRow.number}'s title names ${seatOfPostTitle(postRow.title) ?? 'no seat'}, not ${seat.name}`);
   const thread = readAllPages(`/repos/${repo}/issues/${postRow.number}/comments`, { get });
   if (!thread.ok) return { prerequisite: `the seat post #${postRow.number}'s thread could not be read (${thread.error})` };
-  const { brief, marker } = postReadings(thread.value, seat.name);
+  const { brief, marker } = postReadings(thread.value, seat.name, own);
   const briefAt = brief ? stampOf(brief) : null;
   const since = Math.max(nowMs - roundMinutes * 60_000, briefAt ?? -Infinity);
   const activities = [];
   if (marker) activities.push({ reading: '2', at: stampOf(marker), session: readSignatureLine(marker.body)?.session ?? null, where: `seat post #${postRow.number} comment ${marker.id}`, what: (h44IsRoundOpenMarker(marker.body) ? 'round-open marker: ' : '') + h65Headline(marker.body).trim().slice(0, 90) });
 
-  // 3 and 4 need the intake.
+  // 3 and 4 read EVERY open `pm:dispatched` ∪ `pm:queue` card and every closed card updated inside the window: a seat's
+  // claim lawfully sits off its intake (card-pick's p0/p1 legs take a card from any area). The intake keys bound only
+  // the push leg's UNCLAIMED cards, where no claim says whose seat a push is.
   const keys = intake ?? seatIntakeKeys(postRow, repo);
   const onIntake = (issue) => cardIntakeKeys(issue, repo).some((k) => keys.includes(k));
   const readings = { post: postRow.number, brief, marker, keys, claim: null, push: null, closed: null };
-  if (keys.length === 0) {
-    gaps.push(`the post #${postRow.number}'s title names no \`area:*\` or \`epic #N\` intake, so readings 3 and 4 read no lane; pass --intake`);
-    return { readings, activities, gaps, briefAt, own, reads };
-  }
+  if (keys.length === 0) gaps.push(`the post #${postRow.number}'s title names no \`area:*\` or \`epic #N\` intake, so the push leg read no unclaimed lane card; pass --intake`);
   const threadOf = new Map();
   const readThread = (n) => {
     if (threadOf.has(n)) return threadOf.get(n);
@@ -313,34 +315,36 @@ export function readMutex({ repo, seat, session, own: ownList = [], post = null,
     threadOf.set(n, rows);
     return rows;
   };
-  // 3. the open lane cards.
-  const lane = [];
+  // 3. the open cards: a claim of this seat by another session, wherever the card sits.
+  const open = [];
   for (const label of LANE_LABELS) {
     const r = readAllPages(`/repos/${repo}/issues?state=open&labels=${encodeURIComponent(label)}`, { get });
     if (!r.ok) {
       gaps.push(`the open \`${label}\` listing could not be read (${r.error})`);
       continue;
     }
-    for (const i of r.value) if (!i.pull_request && onIntake(i) && !lane.some((x) => x.number === i.number)) lane.push(i);
+    for (const i of r.value) if (!i.pull_request && !open.some((x) => x.number === i.number)) open.push(i);
   }
-  for (const issue of lane) {
+  const seatCards = new Set();
+  for (const issue of open) {
     if ((Date.parse(issue.updated_at ?? '') || Infinity) < since) continue;
     const rows = readThread(issue.number);
     if (!rows) continue;
-    const { foreign } = claimReadings(rows, seat.name, own);
+    const { newest, foreign } = claimReadings(rows, seat.name, own);
+    if (newest && claimSeat(newest.body) === seat.name) seatCards.add(issue.number);
     if (foreign && (stampOf(foreign) ?? Infinity) >= since) {
-      activities.push({ reading: '3', at: stampOf(foreign), session: commentSession(foreign.body), where: `#${issue.number} comment ${foreign.id}`, what: 'a claim of this seat' });
+      activities.push({ reading: '3', at: stampOf(foreign), session: commentSession(foreign.body), where: `#${issue.number} comment ${foreign.id}${onIntake(issue) ? '' : ' (off the intake)'}`, what: 'a claim of this seat' });
       if (readings.claim === null || (stampOf(foreign) ?? 0) > (stampOf(readings.claim.row) ?? 0)) readings.claim = { number: issue.number, row: foreign };
     }
   }
-  // 3, the push half: one ls-remote, intersected locally with the lane cards.
+  // 3, the push half: one ls-remote, intersected locally with the intake's cards and the cards this seat claims.
   const heads = lsRemote(repo);
   if (!heads.ok) gaps.push(`\`git ls-remote --heads\` could not be read (${heads.error}), so no push was checked`);
   else {
-    const laneNumbers = new Set(lane.map((i) => i.number));
+    const pushCards = new Set([...open.filter(onIntake).map((i) => i.number), ...seatCards]);
     for (const h of heads.value) {
       const n = headCard(h.ref);
-      if (n === null || !laneNumbers.has(n)) continue;
+      if (n === null || !pushCards.has(n)) continue;
       const c = get(`/repos/${repo}/commits/${h.sha}`);
       reads.commits += 1;
       if (!c.ok) {
@@ -359,11 +363,11 @@ export function readMutex({ repo, seat, session, own: ownList = [], post = null,
       if (readings.push === null || at > readings.push.at) readings.push = { number: n, at, session: pushSession };
     }
   }
-  // 4. the closed lane cards inside the window, newest-updated first.
+  // 4. every closed card inside the window, newest-updated first.
   const closed = readAllPages(`/repos/${repo}/issues?state=closed&sort=updated&direction=desc&since=${encodeURIComponent(iso(since))}`, { get });
   if (!closed.ok) gaps.push(`the closed listing since ${iso(since)} could not be read (${closed.error})`);
   else {
-    const cards = closed.value.filter((i) => !i.pull_request && onIntake(i)).sort((a, b) => Date.parse(b.updated_at ?? '') - Date.parse(a.updated_at ?? ''));
+    const cards = closed.value.filter((i) => !i.pull_request).sort((a, b) => Date.parse(b.updated_at ?? '') - Date.parse(a.updated_at ?? ''));
     for (const issue of cards) {
       const rows = readThread(issue.number);
       if (!rows) continue;
@@ -374,7 +378,7 @@ export function readMutex({ repo, seat, session, own: ownList = [], post = null,
       const traces = rows.filter((r) => who !== null && String(r?.body ?? '').includes(who));
       const last = traces.reduce((best, r) => (best === null || (stampOf(r) ?? 0) >= (stampOf(best) ?? 0) ? r : best), null) ?? claim;
       readings.closed = { number: issue.number, session: who, at: stampOf(last) };
-      activities.push({ reading: '4', at: stampOf(last), session: who, where: `closed #${issue.number} comment ${last.id}`, what: "this seat's claim on the newest-updated closed lane card, timed by its session's newest comment there" });
+      activities.push({ reading: '4', at: stampOf(last), session: who, where: `closed #${issue.number} comment ${last.id}`, what: "this seat's claim on the newest-updated closed card, timed by its session's newest comment there" });
       break;
     }
   }
@@ -401,7 +405,7 @@ export function renderText(r, v, { seat, repo, roundMinutes }) {
   L.push(`  3. intake ${r.readings.keys.length > 0 ? r.readings.keys.join(', ') : '(none)'}: newest claim of this seat by another session ${r.readings.claim ? `#${r.readings.claim.number} comment ${r.readings.claim.row.id} · ${at(stampOf(r.readings.claim.row))}` : 'none inside the window'}; push ${r.readings.push ? `#${r.readings.push.number} · ${at(r.readings.push.at)} · ${r.readings.push.session ?? 'no Claude-Session trailer'}` : 'none inside the window'}`);
   L.push(`  4. first closed lane card with this seat's claim: ${r.readings.closed ? `#${r.readings.closed.number} · ${r.readings.closed.session ?? 'no session read'} · last trace ${at(r.readings.closed.at)}` : 'none inside the window'}`);
   for (const a of v.yields) L.push(`  ⛔ reading ${a.reading} · ${a.where} · ${at(a.at)} · ${a.session ?? 'session unread'} — ${a.what}`);
-  if (v.exit === EXIT_YIELD) L.push('  Exit before any write: another session sits this seat. Re-run next fire; a brief it writes releases the seat at once.');
+  if (v.exit === EXIT_YIELD) L.push("  Exit before any write: another session sits this seat. Re-run next fire; a brief it writes releases the seat at once. A session the seat knows as its own — a lease-table area session, its PM session seen from an area, a dev's remote session — is cleared with --own, never by ignoring this line; a push with no Claude-Session trailer reads foreign the same way.");
   for (const g of r.gaps) L.push(`  gap: ${g}`);
   L.push(`  Own sessions: ${[...r.own].join(', ')}. Reads: ${r.reads.threads} card thread(s), ${r.reads.commits} head commit(s).`);
   L.push('  Not read here (the seat reads these itself):');
@@ -471,7 +475,7 @@ const USAGE = [
   '  node scripts/pm/round-open.mjs --self-test',
   '',
   '  --seat    this executing seat (repo:NAME#N, epic:#N#k); the director and the review chains hold no round mutex.',
-  '  --own     sessions that are this seat\'s own — the lease table\'s area sessions, a card thread\'s session.',
+  '  --own     sessions that are this seat\'s own — the lease table\'s area sessions, the PM session (from an area), a card thread\'s or a remote dev\'s session.',
   '  --post    the seat post, when its title does not name the seat as `LANE · seat N`.',
   '  --intake  the lane, when the post title names no `area:*` / `epic #N`.',
   `  Exits: ${EXIT_CLEAR} CLEAR · ${EXIT_USAGE} usage · ${EXIT_PREREQUISITE} prerequisite (no seat post read) · ${EXIT_INCOMPLETE} INCOMPLETE (a gap, named) · ${EXIT_YIELD} YIELD (自退).`,
@@ -573,9 +577,9 @@ export function main(argv, deps = {}) {
 
 const SELF_TEST_BATTERIES = Object.freeze({
   'the rule text: every phrase this file is built from is in the file that writes it': 2,
-  'readings 1 and 2: the newest stand-down brief, the newest seat-signed comment after it': 6,
-  'reading 3: the newest claim of this seat by another session, and a push on a lane branch': 7,
-  'reading 4: the first closed lane card with a claim of this seat, timed by its session': 3,
+  'readings 1 and 2: the newest stand-down brief, the newest seat-signed comment after it': 7,
+  'reading 3: the newest claim of this seat by another session, and a push on a lane branch': 9,
+  'reading 4: the first closed lane card with a claim of this seat, timed by its session': 4,
   'the verdict: foreign, un-clocked-out and under a round yields; own, clocked-out or older does not; a gap is never clear': 7,
   'the CLI: usage, exits and the footer': 7,
 });
@@ -656,6 +660,7 @@ export function selfTest() {
     t('a seat-signed comment OLDER than the brief is no reading 2', pr2.marker, null);
     const late = c(`${sig(OTHER)}\n\n## Seated · seat 8 again`, 40);
     t('⭐ a seat-signed comment after the brief is reading 2, whatever its headline', postReadings([BRIEF, late], 'repo:objectstack#8').marker?.id, late.id);
+    t('N1 — an OWN comment newer than another session\'s marker does not hide it: reading 2 is the newest by a session outside own', postReadings([BRIEF, late, c(`${sig(ME)}\n\nSeat audit`, 10)], 'repo:objectstack#8', new Set([ME])).marker?.id, late.id);
     t('the seat a post title names: `LANE · seat N`, `LANE#N`, bare LANE for seat 1', [seatOfPostTitle(POST.title), seatOfPostTitle('[PM seat] repo:cloud#1 — 🟢 os-warren'), seatOfPostTitle('[PM seat] review — ⏳ vacant'), seatOfPostTitle('not a post')], ['repo:objectstack#8', 'repo:cloud#1', 'review#1', null]);
   }
 
@@ -669,7 +674,9 @@ export function selfTest() {
     const off = card(['pm:dispatched', 'area:ui'], 20);
     const fx = { issues: [POST, live, off], comments: { 37865: [], [live.number]: [claim(OTHER, 20)], [off.number]: [claim(OTHER, 15)] } };
     const r = run(fx);
-    t('⭐ a foreign claim of this seat on the intake, inside the round, is a reading-3 activity — a card off the intake buys no read', [r.activities.map((a) => a.reading), r.readings.claim?.number, r.reads.threads], [['3'], live.number, 1]);
+    t('⭐ a foreign claim of this seat inside the round is a reading-3 activity, on the intake and OFF it (S1: a p0/p1 card is taken from any area), the off-intake one marked so', [r.activities.map((a) => a.reading), r.readings.claim?.number, r.reads.threads, r.activities.filter((a) => a.where.endsWith('(off the intake)')).length], [['3', '3'], off.number, 2, 1]);
+    const offOnly = run({ issues: [POST, card(['pm:dispatched', 'area:ux', 'priority:p1'], 12)], comments: { 37865: [], [n]: [claim(OTHER, 12)] } });
+    t('⭐ THE REVIEW\'S S1 SHAPE — the seat\'s only foreign claim sits on a p1 card outside its intake: YIELD, never CLEAR', offOnly.v.exit, EXIT_YIELD);
     const stale = card(['pm:queue', 'area:fleet'], 600);
     const r2 = run({ issues: [POST, stale], comments: { 37865: [], [stale.number]: [claim(OTHER, 600)] } });
     t('a lane card not updated inside the window buys no thread read', [r2.reads.threads, r2.activities.length], [0, 0]);
@@ -679,6 +686,9 @@ export function selfTest() {
     t('⭐ 推即认领: a push on an unclaimed lane card\'s `claude/issue-N` branch inside the round is an activity, its session the commit trailer; one ls-remote, other heads matched to nothing', [rp.activities.map((a) => [a.reading, a.session]), rp.reads.commits], [[['3 push', OTHER]], 1]);
     const fxq = { ...fxp, comments: { 37865: [], [pushed.number]: [claim(OTHER, 400, 'repo:objectstack#3')] } };
     t('…but a push on a card ANOTHER seat claims is that seat\'s, never this one\'s', run(fxq).activities.length, 0);
+    const offPushed = card(['pm:dispatched', 'area:ux'], 20);
+    const fxo = { issues: [POST, offPushed], comments: { 37865: [], [offPushed.number]: [claim(ME, 20)] }, heads: [{ ref: `refs/heads/claude/issue-${offPushed.number}-x`, sha: 'abc999' }], commits: { abc999: { commit: { committer: { date: ago(5) }, message: `wip\n\nClaude-Session: https://claude.ai/code/${OTHER}` } } } };
+    t('a push on an OFF-intake card this seat claims is read too — an unclaimed off-intake card\'s head is not (no claim says whose seat it is)', [run(fxo).activities.map((a) => [a.reading, a.session]), run({ ...fxo, comments: { 37865: [], [offPushed.number]: [] } }).reads.commits], [[['3 push', OTHER]], 0]);
     t('a head no card on the intake owns, and `headCard` itself: `claude/issue-N` and `claude/issue-N-…` only', [headCard('refs/heads/claude/issue-35237-slice4'), headCard('refs/heads/claude/issue-35237'), headCard('refs/heads/claude/issue-35237x'), headCard('refs/heads/claude/project-thread-x')], [35237, 35237, null, null]);
   }
 
@@ -690,6 +700,8 @@ export function selfTest() {
     const r = run(fx);
     t('⭐ the newest-updated closed intake card with this seat\'s claim gives its session, timed by that session\'s newest comment (not the merge)', [r.readings.closed?.number, r.readings.closed?.session, r.readings.closed?.at === Date.parse(ago(20))], [shut.number, OTHER, true]);
     t('the walk stops at the first such card', r.activities.filter((a) => a.reading === '4').length, 1);
+    const offShut = card(['area:ux'], 10, { state: 'closed' });
+    t('⭐ S1 — a closed card OFF the intake with this seat\'s claim is reading 4 too', run({ issues: [POST, offShut], comments: { 37865: [], [offShut.number]: [claim(OTHER, 30)] } }).readings.closed?.number, offShut.number);
     const none = run({ issues: [POST, card(['area:fleet'], 15, { state: 'closed' })], comments: { 37865: [] } });
     t('a closed card with no claim of this seat gives no reading 4', none.readings.closed, null);
   }

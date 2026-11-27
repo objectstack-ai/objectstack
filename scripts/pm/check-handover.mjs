@@ -128,10 +128,12 @@
  * reading; the rule and what a hit means (queue behind it or yield, `area-lease.md` 重叠检查) stay in the rule text.
  * It shares (a)'s population and its paging (`readDispatched`): every open `pm:dispatched` card, every thread. Per card,
  * the NEWEST `Claim:` (`CLAIM_COMMENT_MARKER`) not followed by any `Release:`, its `File surface:` line (one line, or
- * an empty value and the list under it) and every later `Claim amendment`'s, unioned; the code spans that are paths,
- * braces expanded, minus every path a `Not …` / `No …` / `⛔ …` clause fences (`surfaceTokens`). Then each pair of a
- * dispatch entry and a claimed entry that could hold one file (`surfacesMeet`: literal paths, directories, globs; a
- * claimed bare file name reads anywhere, a dispatched one is the root file). `--card=N` leaves the card being
+ * an empty value and the list under it) and every later `Claim amendment`'s, in thread order; the code spans that are
+ * paths, braces expanded, minus what a `Not …` / `No …` / `⛔ …` clause fences (`surfaceTokens`). Then each pair of a
+ * dispatch entry and a claimed entry that could hold one file (`meetKind`: literal paths, directories, globs read
+ * root-relative; a claimed bare file name reads anywhere and a claimed path fragment as a whole-segment suffix, a
+ * dispatched one is the root file; a name against a directory or `DIR/**` is not judged, and is listed as NOT
+ * COMPARED). The surface is read in thread order: a fence removes only what was declared at or before it. `--card=N` leaves the card being
  * dispatched out. ⛔ It does not read open PRs' diffs — `overlap-check.mjs` is that reading — nor a surface written in
  * prose with no path in it: such a claim is named, and the run exits 5, never 0.
  *
@@ -439,7 +441,7 @@ export function stayBehindText(reported) {
 export const EXIT_SURFACE_UNREAD = 5;
 
 /** How many `inflight: ` self-test cases must register — the mode's battery floor (AGENTS.md, writing a `--self-test`). */
-const INFLIGHT_CASE_FLOOR = 17;
+const INFLIGHT_CASE_FLOOR = 22;
 
 /** The claim template's `File surface:` key line (SKILL.md 〈模板与表〉), read one line at a time. */
 export const FILE_SURFACE_LINE = /^[ \t]*(?:>[ \t]*)?(?:[-*+][ \t]+)?(?:\*\*)?`?File surface`?(?:\*\*)?[ \t]*[:：](?:\*\*)?(.*)$/u;
@@ -491,7 +493,8 @@ export function isPathToken(token) {
 }
 
 /** An EXCLUSION clause of the surface — it opens with `Not`, `No`, `none`, `never`, `except` or `⛔`. */
-const EXCLUSION_CLAUSE = /^[\s([*>-]*(?:⛔|(?:not|no|none|never|nor|except|excluding)\b)/iu;
+// A clause that bounds the surface FROM the outside (`No changes outside \`x\``) names x as surface, not as a fence.
+const EXCLUSION_CLAUSE = /^[\s([*>-]*(?:⛔|(?:not|no|none|never|nor|except|excluding)\b)(?![^`\n]*\boutside\b)/iu;
 
 /**
  * The paths a surface value names, split into what it INCLUDES and what an exclusion clause names (`Not
@@ -531,24 +534,47 @@ const globRegex = (p) =>
   );
 
 /**
- * Does a dispatch entry MEET a claimed entry — could one file be inside both? Conservative where it cannot tell, in
- * the direction of reporting: a literal path meets itself, its directories and everything under it; a glob meets a
- * path it matches, a directory its static part lies under, and another glob whose static part shares a prefix with
- * its own. The two sides are read differently in ONE place: a dispatch entry is a repo-relative path, so a bare
- * `package.json` there is the root file; a CLAIMED bare file name (`own-door-bridge.ts`, no slash) is prose shorthand
- * for that name anywhere, so it meets a path or glob whose last segment is or matches it — ⛔ never a `DIR/**` or a
- * bare directory, whose contents this reader cannot list (it would meet every claim that names a `package.json`).
+ * HOW a dispatch entry meets a claimed entry — could one file be inside both? `null` when it cannot; else `'path'`,
+ * `'name'` or `'suffix'`, the reading that met, printed beside the pair. A dispatch entry is a repo-relative path,
+ * so a bare `package.json` there is the root file. A claimed entry is read three ways, in order:
+ *
+ *   path    root-relative: a literal path meets itself, its directories and everything under it; a glob meets a path
+ *           it matches, a directory its static part lies under, and another glob whose static part shares a prefix;
+ *   name    a claimed BARE file name (`own-door-bridge.ts`, no slash) is prose shorthand for that name anywhere: it
+ *           meets a path or glob whose last segment is or matches it;
+ *   suffix  a claimed path FRAGMENT (`lanes/director.md`, `references/contract-review.md`, the fleet's way of naming
+ *           a skill file) meets a dispatch path ending in it on whole segments, a dispatch directory the fragment
+ *           starts inside, and a glob whose trailing segments match it.
+ *
+ * Where it cannot tell it does NOT report: a name or a fragment against a `DIR/**` or a bare directory (whose
+ * contents this reader cannot list — it would meet every claim that names a `package.json`) is no meeting, and
+ * `inflightVerdict` lists such a claimed name as NOT COMPARED, so a clear run says what it did not judge.
  */
-export function surfacesMeet(dispatch, claimed) {
+export function meetKind(dispatch, claimed) {
   const norm = (p) => String(p ?? '').replace(/^\.\//u, '').replace(/\/+$/u, '');
   const a = norm(dispatch);
   const b = norm(claimed);
-  if (a === '' || b === '') return false;
+  if (a === '' || b === '') return null;
   if (!String(claimed).replace(/^\.\//u, '').includes('/') && a.includes('/')) {
     const last = a.split('/').pop();
-    if (!GLOB_CHAR.test(a)) return last === b || (GLOB_CHAR.test(b) && globRegex(b).test(last));
-    return !/^\*\*$/u.test(last) && globRegex(last).test(b);
+    if (!GLOB_CHAR.test(a)) return last === b || (GLOB_CHAR.test(b) && globRegex(b).test(last)) ? 'name' : null;
+    return !/^\*\*$/u.test(last) && globRegex(last).test(b) ? 'name' : null;
   }
+  if (rootMeets(a, b)) return 'path';
+  if (!b.includes('/') || GLOB_CHAR.test(b)) return null;
+  const segs = b.split('/');
+  if (!GLOB_CHAR.test(a)) {
+    if (a.endsWith(`/${b}`)) return 'suffix';
+    if (hasExtension(a)) return null;
+    for (let k = 1; k < segs.length; k++) if (a.endsWith(`/${segs.slice(0, k).join('/')}`)) return 'suffix';
+    return null;
+  }
+  const tail = a.split('/').slice(-segs.length);
+  return tail.length === segs.length && !tail.includes('**') && globRegex(tail.join('/')).test(b) ? 'suffix' : null;
+}
+
+/** The root-relative reading of `meetKind` (its `path` arm). Pure. */
+function rootMeets(a, b) {
   const ga = GLOB_CHAR.test(a);
   const gb = GLOB_CHAR.test(b);
   if (!ga && !gb) return a === b || a.startsWith(`${b}/`) || b.startsWith(`${a}/`);
@@ -564,6 +590,15 @@ export function surfacesMeet(dispatch, claimed) {
   return head.startsWith(`${path}/`) || `${path}/`.startsWith(head);
 }
 
+/** Does a dispatch entry meet a claimed entry, by any reading of `meetKind`? */
+export const surfacesMeet = (dispatch, claimed) => meetKind(dispatch, claimed) !== null;
+
+/** A claimed bare name against a dispatch entry `meetKind` cannot judge it against: a `DIR/**` glob or a bare directory. */
+const notComparable = (dispatch, claimed) => {
+  const d = String(dispatch).replace(/\/+$/u, '');
+  return !String(claimed).includes('/') && d.includes('/') && (/(?:^|\/)\*\*$/u.test(d) || (!GLOB_CHAR.test(d) && !hasExtension(d)));
+};
+
 /** The session a claim names: its `Session:` line, else its signature's, else the first session id in it. */
 export function claimSession(body) {
   const text = String(body ?? '');
@@ -574,8 +609,9 @@ export function claimSession(body) {
 
 /**
  * One open card's in-flight surface: its NEWEST `Claim:` and every later `Claim amendment` that re-declares the
- * surface — UNIONED, the reporting direction (an amendment may only add to the surface, 就地修's 同轮增补), every
- * fence applied to the union. `held` is the population; `released` (a `Release:` newer than the claim, whoever wrote it), `unclaimed`
+ * surface, read in THREAD ORDER — each declaration adds its paths to what came before (an amendment may only add,
+ * 就地修's 同轮增补), and each fence removes only what was declared AT OR BEFORE it: the newest declaration wins, so a
+ * path a later amendment names is surface even when the claim fenced that name. `held` is the population; `released` (a `Release:` newer than the claim, whoever wrote it), `unclaimed`
  * and `out` (not an open `pm:dispatched` issue) are not in flight.
  * @returns {{ verdict: 'out'|'unclaimed'|'released'|'held', claim?: object, session?: string|null, seat?: string|null,
  *             declared?: boolean, paths?: string[], excluded?: string[] }}
@@ -588,17 +624,25 @@ export function inflightSurface(issue, comments) {
   const claim = rows[newest.index];
   const release = rows.find((c) => c !== claim && isNewer(c, claim) && markerMatches(RELEASE_COMMENT_MARKER, String(c?.body ?? '')));
   if (release) return { verdict: 'released', claim, release };
-  const values = [fileSurfaceValue(claim?.body)];
-  for (const c of rows) {
-    if (c === claim || !isNewer(c, claim) || !CLAIM_AMENDMENT_HEAD.test(stripSignatureLine(String(c?.body ?? '')).trimStart())) continue;
-    values.push(fileSurfaceValue(c.body));
-  }
-  const declared = values.some((v) => v !== null);
-  const tokens = values.filter((v) => v !== null).map(surfaceTokens);
-  const excluded = [...new Set(tokens.flatMap((t) => t.excluded))];
+  const amendments = rows.filter((c) => c !== claim && isNewer(c, claim) && CLAIM_AMENDMENT_HEAD.test(stripSignatureLine(String(c?.body ?? '')).trimStart()));
+  const order = [claim, ...amendments.sort((x, y) => (isNewer(x, y) ? 1 : isNewer(y, x) ? -1 : 0))];
   // A fence names a path or a bare file name; a bare name fences that name wherever the surface put it.
-  const fenced = (p) => excluded.some((e) => e === p || (!e.includes('/') && p.split('/').pop() === e));
-  const paths = [...new Set(tokens.flatMap((t) => t.paths))].filter((p) => !fenced(p));
+  const fences = (list) => (p) => list.some((e) => e === p || (!e.includes('/') && p.split('/').pop() === e));
+  let declared = false;
+  const current = new Set();
+  const excludedAll = new Set();
+  for (const row of order) {
+    const value = fileSurfaceValue(row?.body);
+    if (value === null) continue;
+    declared = true;
+    const t = surfaceTokens(value);
+    const fenced = fences(t.excluded);
+    for (const p of [...current]) if (fenced(p)) current.delete(p);
+    for (const p of t.paths) if (!fenced(p)) current.add(p);
+    for (const e of t.excluded) excludedAll.add(e);
+  }
+  const paths = [...current];
+  const excluded = [...excludedAll];
   const sig = readSignatureLine(String(claim?.body ?? ''));
   return { verdict: 'held', claim, session: claimSession(claim?.body), seat: sig ? `${sig.lane}#${sig.seat}` : null, declared, paths, excluded };
 }
@@ -623,6 +667,7 @@ export function parseInflightPaths(value) {
 export function inflightVerdict({ paths = [], held = [], exclude = new Set() } = {}) {
   const overlaps = [];
   const unread = [];
+  const notCompared = [];
   for (const h of held) {
     if (exclude.has(h.issue.number)) continue;
     if (h.paths.length === 0) {
@@ -630,11 +675,17 @@ export function inflightVerdict({ paths = [], held = [], exclude = new Set() } =
       continue;
     }
     const pairs = [];
-    for (const d of paths) for (const c of h.paths) if (surfacesMeet(d, c)) pairs.push([d, c]);
+    for (const d of paths) {
+      for (const c of h.paths) {
+        const kind = meetKind(d, c);
+        if (kind !== null) pairs.push([d, c, kind]);
+        else if (notComparable(d, c)) notCompared.push({ issue: h.issue, dispatch: d, claimed: c });
+      }
+    }
     if (pairs.length > 0) overlaps.push({ ...h, pairs });
   }
   const exit = overlaps.length > 0 ? EXIT_REFUSED : unread.length > 0 ? EXIT_SURFACE_UNREAD : EXIT_OK;
-  return { exit, overlaps, unread };
+  return { exit, overlaps, unread, notCompared };
 }
 
 /** What `--inflight` prints — the verdict line first, then every overlap with its meeting pairs, then the unread. */
@@ -645,13 +696,15 @@ export function inflightText(verdict, { repo, paths, read }) {
       ? `check-handover --inflight: OVERLAP — ${verdict.overlaps.length} in-flight claim(s) on ${repo} meet the surface about to be dispatched.`
       : verdict.exit === EXIT_SURFACE_UNREAD
         ? `check-handover --inflight: NO OVERLAP READ, ${verdict.unread.length} SURFACE(S) UNREAD — no readable in-flight surface on ${repo} meets this one; the cards below name no path, so read their claims by hand.`
-        : `check-handover --inflight: clear — no in-flight claim on ${repo} declares a surface that meets this one.`;
+        : `check-handover --inflight: clear — no in-flight claim on ${repo} declares a surface that meets this one${verdict.notCompared?.length > 0 ? `; ${verdict.notCompared.length} claimed bare name(s) NOT COMPARED, listed below` : ''}.`;
   const lines = [head, `  Dispatch surface: ${paths.map((p) => `\`${p}\``).join(', ')}.`];
   verdict.overlaps.forEach((h, i) => {
-    lines.push(`  ${i + 1}. ${who(h)}: ${h.pairs.map(([d, c]) => `\`${d}\` meets \`${c}\`${c.includes('/') ? '' : ' (a bare file name on the claim, read anywhere)'}`).join('; ')}`);
+    const how = { path: '', name: ' (a bare file name on the claim, read anywhere)', suffix: ' (a path fragment on the claim, read as a suffix)' };
+    lines.push(`  ${i + 1}. ${who(h)}: ${h.pairs.map(([d, c, kind]) => `\`${d}\` meets \`${c}\`${how[kind] ?? ''}`).join('; ')}`);
   });
   if (verdict.overlaps.length > 0) lines.push('     Queue behind each, or yield, as the overlap check rules (`area-lease.md`); ⛔ never dispatch over it.');
   if (verdict.unread.length > 0) lines.push(`  Surface unread (no \`File surface:\` line, or no path in it): ${verdict.unread.map((h) => `${who(h)}${h.declared ? '' : ' — no line'}`).join(', ')}.`);
+  if (verdict.notCompared?.length > 0) lines.push(`  Not compared (a claimed bare name against a directory or a \`DIR/**\`, whose contents this reader cannot list): ${verdict.notCompared.map((x) => `#${x.issue.number} \`${x.claimed}\` against \`${x.dispatch}\``).join(', ')}.`);
   lines.push(`  Read: ${read}.`);
   return lines.join('\n');
 }
@@ -1168,7 +1221,7 @@ export function selfTest() {
   const prose = inflightSurface(IF_CARD(), [IF_CLAIM("File surface: none in the repository this round; the thread writes a design note.")]);
   const none = inflightSurface(IF_CARD(), [comment(44, 0, 'Claim: round 1\nSession: `session_01L9qibyUSf2nKJWW6qBemSU`')]);
   const v1 = inflightVerdict({ paths: ['scripts/pm/dispatch-gates.mjs', 'scripts/pm/round-open.mjs'], held: [{ issue: IF_CARD(), ...heldIf }, { issue: { number: 37767 }, ...prose }] });
-  t('inflight: ⭐ an OVERLAP is exit 2, naming the card, its claim and each meeting pair — over any unread surface', v1.exit === EXIT_REFUSED && v1.overlaps.length === 1 && v1.overlaps[0].pairs.join() === 'scripts/pm/dispatch-gates.mjs,scripts/pm/dispatch-gates.mjs' && inflightText(v1, { repo: 'o/r', paths: ['scripts/pm/dispatch-gates.mjs'], read: 'x' }).includes('OVERLAP — 1 in-flight claim(s)') && inflightText(v1, { repo: 'o/r', paths: ['x'], read: 'x' }).includes('#37064 (claim 40'));
+  t('inflight: ⭐ an OVERLAP is exit 2, naming the card, its claim and each meeting pair — over any unread surface', v1.exit === EXIT_REFUSED && v1.overlaps.length === 1 && v1.overlaps[0].pairs.join() === 'scripts/pm/dispatch-gates.mjs,scripts/pm/dispatch-gates.mjs,path' && inflightText(v1, { repo: 'o/r', paths: ['scripts/pm/dispatch-gates.mjs'], read: 'x' }).includes('OVERLAP — 1 in-flight claim(s)') && inflightText(v1, { repo: 'o/r', paths: ['x'], read: 'x' }).includes('#37064 (claim 40'));
   const v2 = inflightVerdict({ paths: ['scripts/pm/round-open.mjs'], held: [{ issue: IF_CARD(), ...heldIf }, { issue: { number: 37767 }, ...prose }, { issue: { number: 37766 }, ...none }] });
   t('inflight: ⭐ no readable surface meets, but a prose-only surface or a claim with no line is NOT clear — exit 5, each named', v2.exit === EXIT_SURFACE_UNREAD && v2.unread.map((h) => h.issue.number).join() === '37767,37766' && none.declared === false && prose.declared === true && inflightText(v2, { repo: 'o/r', paths: ['x'], read: 'x' }).includes('#37766 (claim 44'));
   const v3 = inflightVerdict({ paths: ['scripts/pm/round-open.mjs'], held: [{ issue: IF_CARD(), ...heldIf }, { issue: { number: 37767 }, ...prose }], exclude: new Set([37767]) });
@@ -1179,6 +1232,19 @@ export function selfTest() {
     const ownSource = readFileSync(SELF_PATH, 'utf8');
     t('inflight: structural — the listing is ONE helper, shared by (a) and --inflight, and --inflight buys no request before its probe', (ownSource.match(/^[ \t]+(?:const )?dispatched = await readDispatched\(repo\);$/gmu) ?? []).length === 2 && ownSource.indexOf('const reach = await probeTransport(repo);') < ownSource.indexOf('dispatched = await readDispatched(repo);'));
   }
+  // Fix round 1 of the contract review (S2, S3, N4): order, fragments, and what a clear run did not judge.
+  const S2_CLAIM = IF_CLAIM('File surface: `scripts/pm/check-handover.mjs` (`--inflight`). Not `dispatch-gates.mjs` (carrier item 3 waits).');
+  const S2_AMEND = comment(45, 60, `${IF_SIG}\n\nClaim amendment: carrier item 3 · 2026-11-28T09:00Z\nFile surface: \`scripts/pm/dispatch-gates.mjs\` (the --tier wording).`);
+  const s2 = inflightSurface(IF_CARD(), [S2_CLAIM, S2_AMEND]);
+  t('inflight: ⭐ THE REVIEW\'S PROBE (S2) — the claim fences `dispatch-gates.mjs`, a LATER amendment declares `scripts/pm/dispatch-gates.mjs`: the newest declaration wins, and the dispatch reports OVERLAP', s2.paths.join() === 'scripts/pm/check-handover.mjs,scripts/pm/dispatch-gates.mjs' && inflightVerdict({ paths: ['scripts/pm/dispatch-gates.mjs'], held: [{ issue: IF_CARD(), ...s2 }] }).exit === EXIT_REFUSED);
+  const s2back = inflightSurface(IF_CARD(), [IF_CLAIM('File surface: `scripts/pm/dispatch-gates.mjs`, `scripts/pm/x.mjs`.'), comment(46, 60, `${IF_SIG}\n\nClaim amendment: narrowed\nFile surface: \`scripts/pm/y.mjs\`. Not \`dispatch-gates.mjs\`.`)]);
+  t('inflight: …and the other direction holds — a LATER fence removes what was declared before it, nothing after', s2back.paths.join() === 'scripts/pm/x.mjs,scripts/pm/y.mjs');
+  t('inflight: ⭐ S3 — a claimed path FRAGMENT meets the dispatch path it ends, on whole segments, both measured spellings; a partial segment never', meetKind('.claude/skills/pm-dispatch/references/lanes/director.md', 'lanes/director.md') === 'suffix' && meetKind('.claude/skills/pm-dispatch/references/contract-review.md', 'references/contract-review.md') === 'suffix' && meetKind('.claude/skills/pm-dispatch/references/xlanes/director.md', 'lanes/director.md') === null && meetKind('.claude/skills/pm-dispatch/references', 'references/contract-review.md') === 'suffix' && meetKind('.claude/skills/pm-dispatch/references/*.md', 'references/contract-review.md') === 'suffix' && meetKind('scripts/pm/**', 'lanes/director.md') === null);
+  const s3 = inflightVerdict({ paths: ['.claude/skills/pm-dispatch/references/lanes/director.md'], held: [{ issue: IF_CARD(), ...inflightSurface(IF_CARD(), [IF_CLAIM('File surface: `scripts/pm/card-pick.mjs` (optional rider `lanes/director.md`).')]) }] });
+  t('inflight: …so the card is an OVERLAP, its pair printed as a fragment read as a suffix; a root-relative match still prints as a path', s3.exit === EXIT_REFUSED && inflightText(s3, { repo: 'o/r', paths: ['x'], read: 'x' }).includes('meets `lanes/director.md` (a path fragment on the claim, read as a suffix)') && meetKind('scripts/pm/x.mjs', 'scripts/pm/**') === 'path' && meetKind('.claude/agents/os-dev.md', 'os-dev.md') === 'name');
+  const n4 = inflightVerdict({ paths: ['scripts/pm/**'], held: [{ issue: IF_CARD(), ...inflightSurface(IF_CARD(), [IF_CLAIM('File surface: `docs/adr/0162-x.md`, `package.json`.')]) }] });
+  t('inflight: N4 — a clear run NAMES the claimed bare names it could not judge against a directory or `DIR/**`; a `No changes outside …` clause is surface, not a fence', n4.exit === EXIT_OK && n4.notCompared.map((x) => x.claimed).join() === 'package.json' && inflightText(n4, { repo: 'o/r', paths: ['scripts/pm/**'], read: 'x' }).includes('1 claimed bare name(s) NOT COMPARED') && surfaceTokens('No changes outside `packages/lint/**`.').paths.join() === 'packages/lint/**');
+
   // The floor for this mode's cases: a deleted block must not pass as a shorter green run.
   const inflightCases = cases.filter((c) => c.name.startsWith('inflight: ')).length;
   t(`inflight: the mode's floor — ${INFLIGHT_CASE_FLOOR} cases pinned, ${inflightCases} registered`, inflightCases >= INFLIGHT_CASE_FLOOR);
