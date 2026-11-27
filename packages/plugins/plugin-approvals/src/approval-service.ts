@@ -6898,9 +6898,10 @@ export class ApprovalService implements IApprovalService, ObjectSchemaReadDelega
    * Told nothing:
    *  - a submitter who made the decision themselves — they already know;
    *  - anyone, when the decision ENDS A STEP and not the process: a resume that
-   *    opened a further approval step on the same run (the next approval node
-   *    down the edge this decision took) leaves the outcome to that step's
-   *    decision. Measured after the resume, never read off the graph, because a
+   *    opened a further approval step on the run that carries the request's
+   *    record (the next approval node down the edge this decision took, in the
+   *    same run or, past a `subflow` child, in its parent; #37806) leaves the
+   *    outcome to that step's decision. Measured after the resume, never read off the graph, because a
    *    decision gateway can skip a later step and only the run knows whether it
    *    did. A co-sign vote that leaves the request pending never gets here;
    *  - anyone, for the SLA sweep's auto-decision ({@link ApprovalService.decideAndResume}).
@@ -6919,8 +6920,24 @@ export class ApprovalService implements IApprovalService, ObjectSchemaReadDelega
     if (request.flow_run_id) {
       let nextStepOpened: boolean;
       try {
+        // [#37806] Across the run that carries the record (ADR-0162 Execution
+        // item 7), never the decided request's own run alone: a step decided
+        // in a `subflow` child hands the next step to its parent, which opens
+        // it under the PARENT's run id. The child inherits the parent's record
+        // run, so one probe sees both. A `map` item whose item is a record
+        // carries its own, so its outcome does not wait for the next item: "over"
+        // is judged for each record. The served row does not carry the column,
+        // so it is read off the stored row; a request opened before requests
+        // recorded it falls back to its own run, as before.
+        const own = await this.engine.find('sys_approval_request', {
+          where: { id: request.id }, fields: ['record_run_id'], limit: 1, context: SYSTEM_CTX,
+        });
+        const recordRunId = Array.isArray(own) ? own[0]?.record_run_id : undefined;
+        const where = recordRunId
+          ? { record_run_id: String(recordRunId), status: 'pending' }
+          : { flow_run_id: request.flow_run_id, status: 'pending' };
         const next = await this.engine.find('sys_approval_request', {
-          where: { flow_run_id: request.flow_run_id, status: 'pending' }, limit: 1, context: SYSTEM_CTX,
+          where, fields: ['id'], limit: 1, context: SYSTEM_CTX,
         });
         nextStepOpened = Array.isArray(next) && next.length > 0;
       } catch (err: any) {
