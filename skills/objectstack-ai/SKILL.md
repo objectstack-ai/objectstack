@@ -457,7 +457,7 @@ https://objectstack.ai/docs/protocol-upgrade:
 
 | Retired key | Removed in 17, tombstone gone in 18 — why, and what replaces it |
 |:--|:--|
-| `agent.tools` | The inline slot resolved names against the *full* registry with no surface check. Not a rename: the migration deletes the key and names each tool that was listed; re-declare each in a `defineSkill` under the stack's `skills` (ADR-0064) |
+| `agent.tools` | The inline slot resolved names against the *full* registry with no surface check. Not a rename: the strict schema refuses the key as unknown; re-declare each tool in a `defineSkill` under the stack's `skills` (ADR-0064) |
 | `agent.knowledge` | Declaring sources/indexes on an agent never scoped retrieval — `search_knowledge` takes `sourceIds` from the model's tool-call arguments. Restrict on the knowledge source (`aiExposed`, `source.where`); describe intended grounding in `instructions` |
 
 ---
