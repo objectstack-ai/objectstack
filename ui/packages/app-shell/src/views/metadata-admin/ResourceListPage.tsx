@@ -16,6 +16,8 @@ import { Link, Navigate, useLocation, useNavigate, useNavigationType, useParams,
 import { Plus, Search, RefreshCw, AlertTriangle, Lock, Copy } from 'lucide-react';
 import {
   Button,
+  NeutralIconTile,
+  ObjectIconTile,
   Tooltip,
   TooltipContent,
   TooltipProvider,
@@ -132,9 +134,11 @@ import {
   pageWindow,
   type MetadataGridColumn,
 } from './metadataListGrid.js';
-import { useListChangedAt } from './listChangedAt.js';
+import { formatChangedAt, useListChangedAt } from './listChangedAt.js';
 import { useListDraftMarks } from './listDraftMarks.js';
 import { ListChangedCell } from './ListChangedCell.js';
+import { StudioListHeader } from './StudioListHeader.js';
+import { STUDIO_SOURCE_KEY, studioListSource, studioSourceKind, type StudioSourceKind } from './studioListSource.js';
 
 /**
  * objectui#12982 — the Clone dialog of a declaration-only catalog
@@ -280,6 +284,11 @@ function DefaultMetadataList({ type, appName }: { type: string; appName?: string
   // package scope is the area's, never picked or repaired here, and a
   // read-only package offers no create.
   const host = useMetadataAreaHost();
+  // objectstack#37918 (decision 7 of epic objectstack#37424) — the App Studio
+  // area draws its own list: its header, toolbar, columns and Source words.
+  // The area's host outside Setup: Setup's access directory mounts a host too,
+  // and keeps Setup's list.
+  const studioList = !!host && !inSetup;
   // objectstack#29566 — the area's cross-package leg (`/studio/~all/metadata`)
   // outside the environment scope: the list of a type across packages. It
   // names no package and never repairs one into the URL (`?package=X` would
@@ -741,6 +750,18 @@ function DefaultMetadataList({ type, appName }: { type: string; appName?: string
   const showCustomizedFilter =
     customizations.status === 'read' && (markedCount > 0 || customizationTotal(customizations.read) > 0);
   const filteringCustomized = onlyCustomized && showCustomizedFilter;
+  // objectstack#37918 — what the Studio list's Source says of a row
+  // (`studioListSource.ts`): its mark first, then its provenance. Its source
+  // filter's "modified and new" and "system-shipped" are this, so "only
+  // customizations" is folded into it there and not offered beside it.
+  const studioKindOf = React.useCallback(
+    (row: ItemRow): StudioSourceKind => studioSourceKind(row.source, markOf(row)),
+    [markOf],
+  );
+  const sourceOf = React.useCallback(
+    (row: ItemRow): 'artifact' | 'runtime' => (studioList ? studioListSource(studioKindOf(row)) : row.source),
+    [studioList, studioKindOf],
+  );
 
   // User-driven filters and the sort on top of scope (objectstack#36896): the
   // one implementation the detail's ‹ › order reads too (`metadataListState.ts`).
@@ -749,8 +770,8 @@ function DefaultMetadataList({ type, appName }: { type: string; appName?: string
     changedAt: (row) => changedAt?.[String(row.item[config.primaryKey ?? 'name'] ?? '')],
     label: (row) => (typeof row.item.label === 'string' ? row.item.label : undefined),
     matches: (row, q) => matchesQuery(row.item, q, searchableFields),
-    source: (row) => row.source,
-    ...(showCustomizedFilter ? { customized: (row: ItemRow) => markOf(row) !== null } : {}),
+    source: sourceOf,
+    ...(showCustomizedFilter && !studioList ? { customized: (row: ItemRow) => markOf(row) !== null } : {}),
     // Only a KNOWN state filters: while the ledger is unread or unreadable, no
     // item is either active or inactive to this filter.
     ...(activation
@@ -775,10 +796,10 @@ function DefaultMetadataList({ type, appName }: { type: string; appName?: string
   const sourceCounts = React.useMemo(() => {
     const c = { all: scopedItems.length, artifact: 0, runtime: 0 };
     for (const r of scopedItems) {
-      c[r.source]++;
+      c[sourceOf(r)]++;
     }
     return c;
-  }, [scopedItems]);
+  }, [scopedItems, sourceOf]);
 
   const invalidCount = React.useMemo(
     () => scopedItems.filter((r) => r.diagnostics && r.diagnostics.valid === false).length,
@@ -814,9 +835,13 @@ function DefaultMetadataList({ type, appName }: { type: string; appName?: string
     (inSetup && navEntryTitle(app, `/apps/${appName}`, location.pathname, location.search, navT, language)) || typeLabel;
   // objectstack#27356 — under Setup the label leads the identity cell, with the
   // API name beneath it, in place of a separate Label column.
+  // objectstack#37918 (decision 7) — the same in the Studio list, whose object
+  // list draws no plural label column either.
   const primaryKey = config.primaryKey ?? 'name';
-  const labelColumn = inSetup && columns[0]?.key === primaryKey ? columns.find((c) => c.key === 'label') : undefined;
-  const shownColumns = labelColumn ? columns.filter((c) => c !== labelColumn) : columns;
+  const listColumns = studioList && type === 'object' ? columns.filter((c) => c.key !== 'pluralLabel') : columns;
+  const labelColumn =
+    (inSetup || studioList) && listColumns[0]?.key === primaryKey ? listColumns.find((c) => c.key === 'label') : undefined;
+  const shownColumns = labelColumn ? listColumns.filter((c) => c !== labelColumn) : listColumns;
   // The type offers SOME runtime write channel (the editors' type tier), and —
   // in the environment scope — the caller holds the capability the metadata
   // door requires. The server refuses either way; this is the half that says
@@ -874,7 +899,30 @@ function DefaultMetadataList({ type, appName }: { type: string; appName?: string
           : dashboardNew === 'pending'
             ? null
             : t('engine.list.readOnlyHint', locale));
-  const createButton = (canCreate && (
+  // objectstack#37918 (decision 8 of epic objectstack#37424) — on a read-only
+  // base, New is offered because the item goes to the base's `.custom` pair
+  // (ADR-0146 D3), and its tooltip says so: the package is read-only, the new
+  // item lands in the pair. Not disabled, and no banner over the list.
+  const pairCreateHint =
+    createInPair && host?.packageId && pairId
+      ? tFormat('engine.list.createInPairHint', locale, {
+          package: customizations.status === 'read' && customizations.baseName ? customizations.baseName : host.packageId,
+          pair: pairId,
+          type: typeLabel,
+        })
+      : null;
+  const studioNewButton = (
+    <Button
+      size="sm"
+      onClick={handleCreate}
+      data-testid="metadata-list-create"
+      aria-describedby={pairCreateHint ? 'metadata-list-create-pair-hint' : undefined}
+    >
+      <Plus className="h-4 w-4 mr-1" />
+      {tFormat('engine.list.createNamed', locale, { type: typeLabel })}
+    </Button>
+  );
+  const newButton = !studioList ? (
     <Button
       size="sm"
       variant={config.createFields ? 'default' : 'outline'}
@@ -889,7 +937,22 @@ function DefaultMetadataList({ type, appName }: { type: string; appName?: string
       <Plus className="h-4 w-4 mr-1" />
       {t('engine.list.create', locale)}
     </Button>
-  )) || (dashboardNew === 'no-app' && (
+  ) : pairCreateHint ? (
+    <TooltipProvider delayDuration={200}>
+      <Tooltip>
+        <TooltipTrigger asChild>{studioNewButton}</TooltipTrigger>
+        <TooltipContent side="bottom" className="max-w-xs text-xs">
+          {pairCreateHint}
+        </TooltipContent>
+      </Tooltip>
+      <span id="metadata-list-create-pair-hint" className="sr-only">
+        {pairCreateHint}
+      </span>
+    </TooltipProvider>
+  ) : (
+    studioNewButton
+  );
+  const createButton = (canCreate && newButton) || (dashboardNew === 'no-app' && (
     <span role="note" className="max-w-xs text-xs text-muted-foreground" data-testid="metadata-list-create-unavailable">
       {t('engine.list.dashboardNewNoApp', locale)}
     </span>
@@ -971,15 +1034,49 @@ function DefaultMetadataList({ type, appName }: { type: string; appName?: string
   // holds one column at that edge.
   // On the base's own rows only: a row its pair adds is writable where it opens.
   const newSimilarRows = type === 'permission' && !!host?.packageId && host.readOnly === true && canAuthor && !walled;
+  // objectstack#37918 (decision 7) — in the Studio list, "Modified at" and
+  // "Source" are drawn only when the list's rows do not all say the same
+  // thing there, and a column of numbers is right-aligned. Read off the
+  // list's whole scope, before the search or the source filter, so a column
+  // does not come and go while the reader types.
+  const changedShownOf = (row: ItemRow): string => {
+    const name = String(row.item[primaryKey] ?? '');
+    const draft = draftMarkOf({
+      name,
+      packageId: (row.item as { _packageId?: string })._packageId,
+      member: bundleMemberOf(row.item, config.bundleMemberField) || undefined,
+    });
+    return `${formatChangedAt(changedAt?.[name], locale) ?? ''}|${draft ?? ''}`;
+  };
+  const showChangedColumn = !studioList || new Set(scopedItems.map(changedShownOf)).size > 1;
+  const showSourceColumn = !studioList || new Set(scopedItems.map(studioKindOf)).size > 1;
+  const servedCountKeys = new Set(
+    (entry?.list?.columns ?? []).filter((c) => c.type === 'count').map((c) => c.field),
+  );
+  const numericColumn = (key: string): boolean => {
+    if (servedCountKeys.has(key)) return true;
+    let seen = false;
+    for (const row of scopedItems) {
+      const value = valueAtPath(row.item, key);
+      if (value == null) continue;
+      if (typeof value !== 'number') return false;
+      seen = true;
+    }
+    return seen;
+  };
   const gridColumns: MetadataGridColumn[] = [
     ...shownColumns.map((c, ci) => ({
       key: c.key,
-      label: localizeColumnLabel(ci === 0 && labelColumn ? labelColumn : c),
+      label:
+        studioList && ci === 0 && labelColumn
+          ? t('engine.list.col.name', locale)
+          : localizeColumnLabel(ci === 0 && labelColumn ? labelColumn : c),
       width: c.width,
+      ...(studioList && ci > 0 && numericColumn(c.key) ? { alignRight: true } : {}),
     })),
     // objectstack#36898 — the item's change time and its pending-draft mark.
-    { key: CHANGED_COLUMN, label: t('engine.list.col.changedAt', locale) },
-    { key: SOURCE_COLUMN, label: t('engine.list.col.source', locale) },
+    ...(showChangedColumn ? [{ key: CHANGED_COLUMN, label: t('engine.list.col.changedAt', locale) }] : []),
+    ...(showSourceColumn ? [{ key: SOURCE_COLUMN, label: t('engine.list.col.source', locale) }] : []),
     ...(activation || CloneDialog || newSimilarRows
       ? [
           {
@@ -991,10 +1088,12 @@ function DefaultMetadataList({ type, appName }: { type: string; appName?: string
       : []),
   ];
   // A header sorts by what it reads: the first column drawn label-first is
-  // headed (and sorted by) the label, otherwise by the API name.
+  // headed (and sorted by) the label, otherwise by the API name. The Studio
+  // list's Name column sorts by the API name, the list's default order, so an
+  // untouched list shows its arrow there (objectstack#37918).
   const sortKeyOfColumn = (c: MetadataGridColumn): ListSortKey | undefined =>
     c.key === primaryKey
-      ? labelColumn
+      ? labelColumn && !studioList
         ? 'label'
         : 'name'
       : c.key === 'label'
@@ -1007,7 +1106,7 @@ function DefaultMetadataList({ type, appName }: { type: string; appName?: string
     () => metadataListGridSchema(type, gridColumns, sortKeyOfColumn, LIST_PAGE_SIZE),
     // Re-keyed on the columns' content, never on the array's identity.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [type, JSON.stringify(gridColumns), primaryKey, !!labelColumn],
+    [type, JSON.stringify(gridColumns), primaryKey, !!labelColumn, studioList],
   );
   const gridSource = React.useMemo(
     () => new MetadataListSource(gridRowsAll, metadataListObjectSchema(type, typeEntryLabel, gridColumns)),
@@ -1032,7 +1131,35 @@ function DefaultMetadataList({ type, appName }: { type: string; appName?: string
     [setSearchParams],
   );
 
-  const cellClass = inSetup ? 'align-middle' : 'align-top';
+  const cellClass = inSetup || studioList ? 'align-middle' : 'align-top';
+  const provenanceDesc = (row: ItemRow): string =>
+    row.source === 'artifact'
+      ? `${t('engine.list.source.artifactDesc', locale)}${row.item._packageId ? ` (${String(row.item._packageId)})` : ''}`
+      : t('engine.list.source.runtimeDesc', locale);
+  // The Studio list's Source badge says why, in the customization mark's words.
+  const studioSourceTitle = (row: ItemRow): string => {
+    const mark = markOf(row);
+    if (mark && customizations.status === 'read') {
+      return tFormat(`engine.customizationMark.${mark}Title`, locale, {
+        baseName: customizations.baseName ?? '',
+        pair: customizations.index.pairId,
+      });
+    }
+    return provenanceDesc(row);
+  };
+  const rowLock = (row: ItemRow): React.ReactNode => {
+    const lock = row.item._lock as string | undefined;
+    if (!lock || lock === 'none') return null;
+    return (
+      <span
+        className="inline-flex items-center mr-1 text-amber-600 dark:text-amber-400"
+        title={(row.item._lockReason as string | undefined) ?? `_lock=${String(lock)}`}
+        data-testid="metadata-row-lock"
+      >
+        <Lock className="h-3 w-3" />
+      </span>
+    );
+  };
   const firstCell = (info: MetadataRowInfo, c: ListColumns[number]) => {
     const { row } = info;
     const value = valueAtPath(row.item, c.key);
@@ -1048,8 +1175,64 @@ function DefaultMetadataList({ type, appName }: { type: string; appName?: string
     const hasLabel = labelValue != null && labelValue !== '';
     // ADR-0146 D3 — the row's customization mark: under a base, from its
     // served read; in the cross-package leg, an item of a pair names its base.
-    const mark = markOf(row);
+    // The Studio list says a row is modified or new in its Source column, so
+    // the mark is not drawn twice; a pair's row in the cross-package leg still
+    // names its base.
+    const mark = studioList ? null : markOf(row);
     const pairBase = host && host.packageId === null ? customizationBaseOfRow(info.rowPkg) : null;
+    if (studioList) {
+      // objectstack#37918 (decision 7) — the item's own icon and colour (an
+      // object's `icon` and `color`, the palette tile every object is drawn
+      // with), the label as the primary line, the API name small and mono below.
+      const itemIcon = typeof row.item.icon === 'string' && row.item.icon ? row.item.icon : config.iconName;
+      return (
+        <span className={cn('inline-flex min-w-0 items-center gap-3', cellClass)} data-testid={`metadata-row-${info.name}`}>
+          {type === 'object' ? (
+            <ObjectIconTile icon={itemIcon} color={row.item.color as string | undefined} size="lg" />
+          ) : (
+            <NeutralIconTile icon={itemIcon} size="lg" />
+          )}
+          <span className="min-w-0">
+            <span className="flex items-center gap-1.5">
+              <Link to={info.href} className="truncate font-medium text-foreground hover:underline">
+                {hasLabel
+                  ? labelColumn?.render
+                    ? labelColumn.render(labelValue, row.item)
+                    : defaultCell(labelValue)
+                  : cell}
+              </Link>
+              {info.invalid && (
+                <span
+                  className="inline-flex"
+                  aria-label={t('engine.list.invalidTitle', locale)}
+                  title={`${tFormat('engine.list.invalidCount', locale, { count: errorList.length })}\n${lines(errorList)}`}
+                >
+                  <AlertTriangle className="w-3.5 h-3.5 text-destructive shrink-0" />
+                </span>
+              )}
+              {info.warnOnly && (
+                <span
+                  className="inline-flex"
+                  aria-label={t('engine.list.warnTitle', locale)}
+                  title={`${tFormat('engine.list.warnCount', locale, { count: warnList.length })}\n${lines(warnList)}`}
+                >
+                  <AlertTriangle className="w-3.5 h-3.5 text-amber-600 dark:text-amber-400 shrink-0" />
+                </span>
+              )}
+              {rowLock(row)}
+              {pairBase && (
+                <CustomizationMark kind="customizationOf" baseName={pairBase} pairId={info.rowPkg} locale={locale} />
+              )}
+            </span>
+            {hasLabel && (
+              <span className="block truncate font-mono text-xs text-muted-foreground" data-testid="metadata-row-api-name">
+                {cell}
+              </span>
+            )}
+          </span>
+        </span>
+      );
+    }
     return (
       <span
         className={cn('inline-flex items-center gap-1.5', cellClass)}
@@ -1110,7 +1293,7 @@ function DefaultMetadataList({ type, appName }: { type: string; appName?: string
       const cell = c.render ? c.render(value, info.row.item) : defaultCell(valueAtPath(info.row.item, c.key));
       // objectstack#27356 — two lines at most, so a row stays a row on a
       // phone; the whole text on hover.
-      return inSetup && c.key === 'description' && typeof value === 'string' && value !== '' ? (
+      return (inSetup || studioList) && c.key === 'description' && typeof value === 'string' && value !== '' ? (
         <span className="line-clamp-2" title={value}>
           {cell}
         </span>
@@ -1121,7 +1304,7 @@ function DefaultMetadataList({ type, appName }: { type: string; appName?: string
   });
   // The page's own columns are drawn under their place in `gridColumns`.
   const pageField = (key: string) => metadataGridField(gridColumns.findIndex((c) => c.key === key));
-  cellDraws[pageField(CHANGED_COLUMN)] = (_value, rec) => {
+  if (showChangedColumn) cellDraws[pageField(CHANGED_COLUMN)] = (_value, rec) => {
     const info = rowInfoOf(rec);
     if (!info) return null;
     return (
@@ -1132,26 +1315,15 @@ function DefaultMetadataList({ type, appName }: { type: string; appName?: string
       />
     );
   };
-  cellDraws[pageField(SOURCE_COLUMN)] = (_value, rec) => {
+  if (showSourceColumn) cellDraws[pageField(SOURCE_COLUMN)] = (_value, rec) => {
     const info = rowInfoOf(rec);
     if (!info) return null;
     const { row } = info;
-    const sourceDesc =
-      row.source === 'artifact'
-        ? `${t('engine.list.source.artifactDesc', locale)}${row.item._packageId ? ` (${String(row.item._packageId)})` : ''}`
-        : t('engine.list.source.runtimeDesc', locale);
-    const lock = row.item._lock as string | undefined;
+    if (studioList) return <StudioSourceBadge kind={studioKindOf(row)} title={studioSourceTitle(row)} locale={locale} />;
+    const sourceDesc = provenanceDesc(row);
     return (
       <span className="inline-flex items-center">
-        {lock && lock !== 'none' && (
-          <span
-            className="inline-flex items-center mr-1 text-amber-600 dark:text-amber-400"
-            title={(row.item._lockReason as string | undefined) ?? `_lock=${String(lock)}`}
-            data-testid="metadata-row-lock"
-          >
-            <Lock className="h-3 w-3" />
-          </span>
-        )}
+        {rowLock(row)}
         {inSetup ? (
           // Under Setup the source is plain text with its explanation in a
           // tooltip, not a chip on every row (objectui#12606).
@@ -1248,8 +1420,58 @@ function DefaultMetadataList({ type, appName }: { type: string; appName?: string
     [cellKeys],
   );
 
+  // objectstack#37918 (decision 7) — the Studio list's toolbar: the source
+  // dropdown (all / modified and new / system-shipped, each with its count)
+  // and the search box; the activation status beside them where the scope
+  // has one. No "only customizations" (the dropdown holds it) and no sort
+  // control (the column headers sort).
+  const studioToolbar = (
+    <div className="flex flex-wrap items-center gap-2" data-testid="studio-list-toolbar">
+      <Select value={sourceFilter} onValueChange={(v) => updateListState({ source: v as MetadataListState['source'] })}>
+        <SelectTrigger className="h-8 w-auto gap-1.5 text-sm" data-testid="metadata-source-filter">
+          <SelectValue />
+        </SelectTrigger>
+        <SelectContent>
+          <SelectItem value="all">{tFormat('engine.list.sourceFilter.all', locale, { count: sourceCounts.all })}</SelectItem>
+          <SelectItem value="runtime">
+            {tFormat('engine.list.sourceFilter.changed', locale, { count: sourceCounts.runtime })}
+          </SelectItem>
+          <SelectItem value="artifact">
+            {tFormat('engine.list.sourceFilter.system', locale, { count: sourceCounts.artifact })}
+          </SelectItem>
+        </SelectContent>
+      </Select>
+      <div className="relative w-full max-w-xs">
+        <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
+        <Input
+          className="h-8 pl-8"
+          placeholder={t('engine.list.search', locale)}
+          aria-label={t('engine.list.search', locale)}
+          value={query}
+          onChange={(e) => {
+            setQueryDraft(e.target.value);
+            updateListState({ query: e.target.value });
+          }}
+          data-testid="metadata-list-search"
+        />
+      </div>
+      {activation && (
+        <Select value={statusFilter} onValueChange={(v) => updateListState({ status: v as typeof statusFilter })}>
+          <SelectTrigger className="h-8 w-auto gap-1.5 text-sm" data-testid="catalog-status-filter">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="all">{t('engine.catalog.status.all', locale)}</SelectItem>
+            <SelectItem value="active">{t('engine.catalog.status.active', locale)}</SelectItem>
+            <SelectItem value="inactive">{t('engine.catalog.status.inactive', locale)}</SelectItem>
+          </SelectContent>
+        </Select>
+      )}
+    </div>
+  );
+
   const body = (
-      <div className="p-6 space-y-4" ref={scrollAnchorRef}>
+      <div className={studioList ? 'px-6 pb-6 space-y-4' : 'p-6 space-y-4'} ref={scrollAnchorRef}>
         {createInDialog && host?.packageId && (
           <MetadataListCreateDialog
             type={type}
@@ -1275,6 +1497,7 @@ function DefaultMetadataList({ type, appName }: { type: string; appName?: string
           onCreated={(id) => navigate(`./new?package=${encodeURIComponent(id)}`)}
         />
         {/* Filter row */}
+        {!studioList && (
         <div className="flex items-center gap-3 flex-wrap">
           <div className="relative flex-1 min-w-[200px] max-w-md">
             <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
@@ -1351,6 +1574,7 @@ function DefaultMetadataList({ type, appName }: { type: string; appName?: string
             </SelectContent>
           </Select>
         </div>
+        )}
         {customizations.status === 'failed' && (
           <div className="text-xs text-muted-foreground" data-testid="metadata-customizations-failed">
             {tFormat('engine.customizationMark.readFailed', locale, { message: customizations.message })}
@@ -1492,7 +1716,7 @@ function DefaultMetadataList({ type, appName }: { type: string; appName?: string
               <div className="mt-4">
                 <Button onClick={handleCreate}>
                   <Plus className="h-4 w-4 mr-1" />
-                  {t('engine.list.create', locale)}
+                  {studioList ? tFormat('engine.list.createNamed', locale, { type: typeLabel }) : t('engine.list.create', locale)}
                 </Button>
               </div>
             )}
@@ -1502,7 +1726,11 @@ function DefaultMetadataList({ type, appName }: { type: string; appName?: string
           // objectstack#36897 — every type's list is the same table: the
           // record list's `ObjectGrid`, fed the rows above in their order
           // (`metadataListGrid.ts`), its cells drawn here by row key.
-          <div className="border rounded-lg overflow-hidden" data-testid="metadata-list-scroller">
+          // objectstack#37918 (decision 7) — full-bleed in the Studio list, no outer frame.
+          <div
+            className={studioList ? '-mx-6 border-t' : 'border rounded-lg overflow-hidden'}
+            data-testid="metadata-list-scroller"
+          >
             <ObjectGrid
               schema={gridSchema}
               dataSource={gridSource}
@@ -1597,6 +1825,36 @@ function DefaultMetadataList({ type, appName }: { type: string; appName?: string
     );
   }
 
+  if (studioList) {
+    return (
+      <div className="flex flex-col h-full overflow-hidden">
+        <StudioListHeader
+          icon={React.createElement(getIcon(config.iconName ?? 'layers'), { className: 'h-4 w-4' })}
+          title={typeLabel}
+          badge={
+            diagnosticStats.length > 0 ? (
+              <span className="inline-flex shrink-0 items-center gap-1.5">
+                {diagnosticStats.map((s, i) => (
+                  <span key={i} className="inline-flex items-center gap-1 text-xs" title={s.label}>
+                    {s.value}
+                  </span>
+                ))}
+              </span>
+            ) : undefined
+          }
+          actions={
+            <>
+              {typeActions}
+              {createButton}
+            </>
+          }
+          toolbar={studioToolbar}
+        />
+        <div className="flex-1 overflow-auto">{body}</div>
+      </div>
+    );
+  }
+
   return (
     <PageShell
       entry={entry ?? { type, label: type }}
@@ -1645,6 +1903,30 @@ interface MetadataRowInfo {
   href: string;
   invalid: boolean;
   warnOnly: boolean;
+}
+
+/**
+ * The Studio list's Source badge (objectstack#37918, decision 7): 系统自带 /
+ * 已修改 / 新建. A system-shipped row is quiet; a modified or new one is
+ * tinted, the two tints the customization marks already use.
+ */
+const STUDIO_SOURCE_TONE: Readonly<Record<StudioSourceKind, string>> = {
+  system: 'bg-muted text-muted-foreground',
+  modified: 'bg-amber-100 text-amber-800 dark:bg-amber-500/15 dark:text-amber-300',
+  new: 'bg-emerald-100 text-emerald-800 dark:bg-emerald-500/15 dark:text-emerald-300',
+};
+
+function StudioSourceBadge({ kind, title, locale }: { kind: StudioSourceKind; title: string; locale: string }) {
+  return (
+    <span
+      className={cn('inline-flex items-center whitespace-nowrap rounded-full px-2 py-0.5 text-xs font-medium', STUDIO_SOURCE_TONE[kind])}
+      title={title}
+      data-testid="metadata-row-source"
+      data-source-kind={kind}
+    >
+      {t(STUDIO_SOURCE_KEY[kind], locale)}
+    </span>
+  );
 }
 
 /** A column value as the grid's row keeps it: a scalar as is, anything else as its JSON. */
