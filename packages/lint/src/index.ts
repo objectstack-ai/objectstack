@@ -1383,8 +1383,15 @@ export {
   FIELD_EMBEDDED_SUB_FIELDS,
   FIELD_MISSING_VALUE_DOMAIN,
   RELATIONSHIP_INLINE_EDIT_NEEDS_BULK,
+  // A select option `color` the option badge renders neutral (the families and
+  // the predicate are published so a renderer-side or AI-side check asks the
+  // same question as the save door).
+  FIELD_OPTION_COLOR_RENDERS_NEUTRAL,
+  OPTION_COLOR_FAMILIES,
+  isBadgePaintableOptionColor,
+  lintOptionColors,
 } from './data-model-rules.js';
-export type { LintIssue, LocatedLintIssue, Severity } from './data-model-rules.js';
+export type { LintIssue, LocatedLintIssue, OptionColorPicklist, Severity } from './data-model-rules.js';
 
 // ─── The registry itself (#4409, relocated #4463) ────────────────────
 //
