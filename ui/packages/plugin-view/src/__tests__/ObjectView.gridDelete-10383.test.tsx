@@ -316,7 +316,12 @@ describe('objectui#10383 — bulk Delete on the registered object-view path', ()
     fireEvent.click(await screen.findByTestId('bulk-action-delete'));
     await userEvent.click(within(await confirmDialog()).getByRole('button', { name: 'Delete' }));
 
-    await waitFor(() => expect(errorSpy).toHaveBeenCalledWith('1 deleted, 1 failed'));
+    // objectstack#37758: the refusal's own reason rides under the counts.
+    await waitFor(() =>
+      expect(errorSpy).toHaveBeenCalledWith('1 deleted, 1 failed', {
+        description: expect.stringContaining('refused r2'),
+      }),
+    );
     expect(ds.delete).toHaveBeenCalledTimes(2);
     await waitFor(() => expect(screen.queryByText('Alice')).not.toBeInTheDocument());
     expect(screen.getByText('Bob')).toBeInTheDocument();

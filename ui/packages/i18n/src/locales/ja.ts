@@ -3955,6 +3955,8 @@ const ja = {
     bulkDeleteSuccess_one: "{{count}} 件の {{label}} レコードを削除しました",
     bulkDeleteSuccess_other: "{{count}} 件の {{label}} レコードを削除しました",
     bulkDeletePartial: "{{succeeded}} 件削除、{{failed}} 件失敗",
+    bulkDeleteRefusedNamed: "{{names}}：{{reason}}",
+    bulkDeleteMoreReasons: "ほか {{more}} 件の理由",
   },
   objectViewActions: {
     renameFailed: "ビューの名前変更に失敗しました",
