@@ -125,8 +125,10 @@ const MULTI_FILE_FIELD_TYPES = new Set(['file', 'image', 'field:file', 'field:im
  * full row through the wide `field:grid` widget it mapped to, and lost it when
  * the alias moved, while the spec `span` docblock still lists it as wide.
  *
- * The bare name is matched on `FormField.type` as well, for the caller that
- * passes a raw object-field type (app-shell's `ObjectFormDesigner`). It is kept
+ * The bare name is matched on `FormField.type` as well, for a caller that
+ * passes a raw object-field type: app-shell's `ObjectFormDesigner` canvas asks
+ * {@link resolveColSpan} with the raw type in the stash, so it lays a repeater
+ * out the way the runtime form does. It is kept
  * OFF {@link WIDE_FIELD_TYPES} on purpose: {@link isWideFieldType} is the
  * type-only answer app-shell's `richtextSurfaceParity` test holds equal to
  * plugin-detail's, and the detail view's width is not this rule's to change.
@@ -136,11 +138,12 @@ const WIDE_DECLARED_FIELD_TYPES = new Set(['repeater']);
 /**
  * Does this form field take the whole row by default (the `span: 'auto'` rule)?
  *
- * A wide type (see {@link isWideFieldType}), a field whose OBJECT field is a
- * `repeater` (see {@link WIDE_DECLARED_FIELD_TYPES}), or a `file` / `image`
- * field whose OBJECT field declares `multiple: true` — the rule plugin-detail's
- * `isWideDetailField` applies to the detail view, so a multi-file field reads
- * wide on both surfaces.
+ * A wide type (see {@link isWideFieldType}), a `repeater` (see
+ * {@link WIDE_DECLARED_FIELD_TYPES}), or a `file` / `image` field whose OBJECT
+ * field declares `multiple: true`. The first and the last are the rule
+ * plugin-detail's `isWideDetailField` applies to the detail view, so a
+ * multi-file field reads wide on both surfaces; the repeater rule is the
+ * form's alone (the spec `span` key is a form-field key).
  *
  * `type` and `multiple` are read off the object-field definition the
  * object-bound form paths stash on the FormField (`FormField.field`), and
@@ -213,7 +216,8 @@ function clampGrid(n: number | undefined): number {
  *
  *   2. legacy `colSpan`   → honoured but CLAMPED to the grid (never overflows).
  *   3. wide widget type   → whole row (textarea/markdown/… — the `span:'auto'` default),
- *      and a `file` / `image` field whose object field declares `multiple: true`.
+ *      a `repeater` (by its type or its object field's type), and a `file` /
+ *      `image` field whose object field declares `multiple: true`.
  *   4. section density    → grid / sectionColumns, so `sectionColumns` fields fill a row.
  *
  * `sectionColumns` defaults to the grid width, i.e. one field per cell (the flat
@@ -236,7 +240,7 @@ export function resolveColSpan(
     return Math.min(Math.max(1, Math.floor(field.colSpan)), grid);
   }
 
-  // `span: 'auto'` (or unset): wide widgets, and multi-file uploads, take the whole row.
+  // `span: 'auto'` (or unset): wide widgets, repeaters and multi-file uploads take the whole row.
   if (isWideFormField(field)) return grid;
 
   // Otherwise fill the section's density: N per row → grid/N cells each.
@@ -514,7 +518,8 @@ export interface SectionedGridLayout {
  *   row, and a `columns: 3` section on a 4-wide grid spanned 1 cell, FOUR per
  *   row (`Math.round(grid / sectionColumns)`). The grid becomes
  *   {@link TWELVE_TRACK_GRID_COLS} and each field spans twelfths of the row:
- *     1. `span: 'full'`, or a wide widget type or multi-file upload → 12, the whole row;
+ *     1. `span: 'full'`, or a wide widget type, a repeater or a multi-file
+ *        upload → 12, the whole row;
  *     2. an authored `colSpan` → that many of its SECTION's columns, clamped
  *        to them (it keeps winning over the density);
  *     3. otherwise → 12 / the section's columns.
