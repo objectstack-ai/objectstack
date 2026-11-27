@@ -102,7 +102,9 @@ const FORM_CHECK_ONLY = 'This checks the form only — no connection was attempt
  * `turso_url` and `turso_auth_token` and nothing else: the page names no
  * adapter (#37104), so a payload or a stored row still carrying `adapter`
  * (a value saved before this version) is not read, and neither is any other
- * key the page no longer declares.
+ * key the page no longer declares. The two fields are on the page only where
+ * `@objectstack/knowledge-turso` contributes them; elsewhere `values` carries
+ * neither, and the check answers from what the payload sends.
  *
  * Nothing in this repository replaces it with a live probe:
  * `@objectstack/service-knowledge` registers exactly this handler, and no

@@ -34,7 +34,7 @@ import { join } from 'node:path';
 import { afterAll, describe, expect, it } from 'vitest';
 import { LiteKernel } from '@objectstack/core';
 import type { Plugin, PluginContext } from '@objectstack/core';
-import type { IHttpRequest, IHttpResponse, IHttpServer, IKnowledgeService, RouteHandler } from '@objectstack/spec/contracts';
+import type { IHttpRequest, IHttpResponse, IHttpServer, RouteHandler } from '@objectstack/spec/contracts';
 import { KNOWLEDGE_SERVICE } from '@objectstack/spec/contracts';
 import { KnowledgeServicePlugin } from '@objectstack/service-knowledge';
 import {
@@ -219,7 +219,7 @@ describe('the Knowledge page with knowledge-turso reading its URL from settings'
     try {
       // Without the contribution this save is refused as an undeclared key.
       expect(saver.outcome).toBe('saved');
-      const knowledge = kernel.getService<IKnowledgeService & { getAdapter(id: string): any }>(KNOWLEDGE_SERVICE);
+      const knowledge = kernel.getService<{ getAdapter(id: string): { healthCheck(): Promise<unknown> } }>(KNOWLEDGE_SERVICE);
       expect(await knowledge.getAdapter('turso').healthCheck()).toMatchObject({ ok: true });
       expect(existsSync(saved)).toBe(true);
       // Not the default file.
