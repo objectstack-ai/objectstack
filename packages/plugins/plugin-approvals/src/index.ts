@@ -23,6 +23,9 @@ export {
   // #3447 P2 — expression approvers + empty-slate auto-approve outcome.
   type ApproverExpressionContext,
   type ApprovalNodeAutoOutcome,
+  // ADR-0162 item 7 — the root run and record run a request records.
+  type ApprovalRootRun,
+  type ApprovalRecordRun,
   // #4469 — the read-only stranded-request inspection's report shape.
   type StrandedApprovalRequest,
   // #13909 — which unrecoverable shape a reported row is in.

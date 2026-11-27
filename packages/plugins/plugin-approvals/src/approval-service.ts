@@ -1709,13 +1709,6 @@ export interface ApproverExpressionContext {
 }
 
 /**
- * Non-request outcome of {@link ApprovalService.openNodeRequest}: the node
- * resolved an empty approver slate and its `onEmptyApprovers: 'auto_approve'`
- * policy waved it through (#3447 P2). No `sys_approval_request` row exists —
- * nobody was ever asked — so the node must complete down its `approve` edge
- * instead of suspending.
- */
-/**
  * [ADR-0162 Execution item 7] The root run of a run, as the automation service
  * hands it to a node (`AutomationEngine.rootRunOf`, its `RootRun`): mirrored
  * here because this plugin deliberately does not depend on service-automation.
@@ -1726,7 +1719,7 @@ export interface ApprovalRootRun {
   runId: string;
   /** The key the automation service files the root run's flow under. */
   flowName: string;
-  /** The object of the root run's record; `null` for a root run started on no record. */
+  /** The object the root run was started on (with or without a record id); `null` for a root run that names none. */
   object: string | null;
   /** When the root run started (ISO 8601). */
   startedAt: string;
@@ -1741,12 +1734,19 @@ export interface ApprovalRootRun {
 export interface ApprovalRecordRun {
   /** The record run's id. */
   runId: string;
-  /** The object of the record it carries; `null` for a run on no record. */
+  /** The object the record run names (with or without a record id); `null` when it names none. */
   object: string | null;
   /** The id of the record it carries; `null` for a run on no record. */
   recordId: string | null;
 }
 
+/**
+ * Non-request outcome of {@link ApprovalService.openNodeRequest}: the node
+ * resolved an empty approver slate and its `onEmptyApprovers: 'auto_approve'`
+ * policy waved it through (#3447 P2). No `sys_approval_request` row exists —
+ * nobody was ever asked — so the node must complete down its `approve` edge
+ * instead of suspending.
+ */
 export interface ApprovalNodeAutoOutcome {
   autoApproved: true;
   reason: 'empty_approvers';

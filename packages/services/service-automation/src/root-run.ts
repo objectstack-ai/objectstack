@@ -49,9 +49,10 @@ export interface RootRun {
     /** The key the engine files the root run's flow under (its slot key, `SuspendedRun.flowName`). */
     flowName: string;
     /**
-     * The object of the root run's record, or `null` for a root run started
-     * on no record (a batch sign-off that hands a `map` its items). Never a
-     * `map` item's object: an item run's own `object` names its item.
+     * The object the root run was started on (its context's `object`, whether
+     * or not a record rides with it), or `null` for a root run that names none
+     * (a batch sign-off that hands a `map` its items). Never a `map` item's
+     * object: an item run's own `object` names its item.
      */
     object: string | null;
     /** When the root run started (ISO 8601), as its run history records it. */
@@ -66,7 +67,7 @@ export interface RootRun {
 export interface RecordRun {
     /** The record run's id. */
     runId: string;
-    /** The object of the record it carries, or `null` for a run on no record. */
+    /** The object the record run's context names (`object`, with or without a record id), or `null` when it names none. */
     object: string | null;
     /** The id of the record it carries, or `null` for a run on no record. */
     recordId: string | null;

@@ -56,9 +56,9 @@ export interface ApprovalAutomationSurface {
   /**
    * [ADR-0162 Execution item 7] The root run of the run `context` belongs to
    * (`AutomationEngine.rootRunOf`): the run its tree was started on, at any
-   * depth. `undefined` from an engine that has this member means the engine
-   * could not place the run in its tree. An engine without it hands no root
-   * run at all.
+   * depth. `undefined` means the engine could not place the run in its tree;
+   * the request it opens then records no root run, as on an engine without
+   * this member.
    */
   rootRunOf?(context: unknown): ApprovalRootRun | undefined;
   /**
@@ -195,26 +195,15 @@ export function registerApprovalNode(
       if (!recordId) return { success: false, error: `Approval node '${node.id}': no record id in $record` };
 
       // [ADR-0162 Execution item 7] The run's root run and record run,
-      // recorded on the request it opens. An engine that hands them and has
-      // none for this run could not read the run's tree whole (a run parked
-      // before runs recorded their root run, whose parent is no longer parked,
-      // or a child of one): the step is refused rather than opened unplaced,
-      // because a request that records no root run cannot be told apart from
-      // one opened before the release, and every request opened after it
-      // records one. An engine that hands none (`rootRunOf` absent) leaves the
-      // columns empty, as before.
-      const handsRunLinks = typeof automation.rootRunOf === 'function';
-      const rootRun = handsRunLinks ? automation.rootRunOf!(context) : null;
-      const recordRun = handsRunLinks && typeof automation.recordRunOf === 'function'
-        ? automation.recordRunOf(context)
-        : null;
-      if (rootRun === undefined || recordRun === undefined) {
-        return {
-          success: false,
-          error: `Approval node '${node.id}': the approval this step belongs to cannot be placed — the run it `
-            + 'was started on could not be found, so the step does not open. Start the approval again.',
-        };
-      }
+      // recorded on the request it opens. An engine that has none for this run
+      // (it could not read the run's tree whole: a run parked before runs
+      // recorded their root run, whose parent is no longer parked, or a child
+      // of one) and an engine that hands none (`rootRunOf` absent) both leave
+      // the columns empty: the step opens as it did before, and ADR-0162's
+      // checks treat its request as one that records no root run (not judged
+      // at open, down the order at abandonment).
+      const rootRun = automation.rootRunOf?.(context) ?? null;
+      const recordRun = automation.recordRunOf?.(context) ?? null;
 
       // Flow identity comes from engine-seeded variables (`$flowName` /
       // `$flowLabel`) so the request row can carry a human-readable origin;

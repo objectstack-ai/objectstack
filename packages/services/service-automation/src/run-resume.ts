@@ -1806,8 +1806,9 @@ export async function resumeInternal(
         // this resume without consuming anything, and the identical resume can
         // be retried. A chain that cannot be read whole (a parent that is no
         // longer parked) is not a reason to stop the run: it continues stamped
-        // `null` (so it is not walked again), said once here, and a reader that
-        // needs the runs refuses on its own terms.
+        // `null` (so it is not walked again), said once here, and each reader
+        // decides what a run with none means (an approval step opens its
+        // request with none recorded).
         if (!isRunLinkStamped(segmentContext)) {
             let derivation: RunLinkDerivation;
             try {
@@ -1842,8 +1843,8 @@ export async function resumeInternal(
                 // lost, and the reader that needs a root run says so itself.
                 this.logger.warn(
                     `[automation] run '${runId}' was parked before runs recorded their root run, and its root run ` +
-                        `could not be derived because ${derivation.reason}; it continues with no root run, and a node ` +
-                        `that needs one, such as an approval step, refuses.`,
+                        `could not be derived because ${derivation.reason}; it continues with no root run, and a request ` +
+                        `an approval step of it opens records none.`,
                 );
             }
         }

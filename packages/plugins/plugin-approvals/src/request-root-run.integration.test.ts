@@ -99,7 +99,6 @@ const TWO_STEP = {
   ],
 };
 
-/** Hosts the two steps in a `subflow` child: every request names the CHILD run. */
 /** A batch with no record of its own: each item is a deal, approved in its own `deal_two_step` run. */
 const BATCH = {
   name: 'deal_batch', label: 'Deal Batch', type: 'autolaunched',
@@ -115,6 +114,7 @@ const BATCH = {
   ],
 };
 
+/** Hosts the two steps in a `subflow` child: every request names the CHILD run. */
 const PARENT = {
   name: 'deal_parent', label: 'Deal Parent', type: 'autolaunched',
   nodes: [
@@ -273,21 +273,22 @@ describe('ADR-0162 item 7 — each request records its root run, in columns the 
     expect(ofFirstItem.every(r => r.record_id === 'D_m1')).toBe(true);
   });
 
-  it('a child whose tree cannot be read whole opens no request: the step is refused and the run fails, saying why', async () => {
+  it('a child whose tree cannot be read whole still opens its next step, with a request that records no root run', async () => {
     const { runId: parentRunId, request: first } = await submit('deal_parent', 'orphan');
     const childRunId = first.flow_run_id as string;
     await forgetRootRuns([parentRunId, childRunId]);
     await store.delete(parentRunId);
 
     automation = boot();
-    await approve(first, 'u_mgr').catch(() => undefined);
+    const out = await approve(first, 'u_mgr');
+    expect([out.finalized, out.resumed]).toEqual([true, true]);
 
-    expect(await pendingOn('D_orphan'), 'no second request opened').toBeUndefined();
-    const requests: any[] = await engine.find('sys_approval_request', { where: { record_id: 'D_orphan' }, context: SYSTEM });
-    expect(requests.map(r => r.flow_node_id)).toEqual(['mgr']);
-    const child = await automation.getRun(childRunId);
-    expect(child?.status).toBe('failed');
-    expect(String(child?.error)).toContain("Approval node 'exec': the approval this step belongs to cannot be placed");
+    const second = await pendingOn('D_orphan');
+    expect([second?.flow_node_id, second?.flow_run_id], 'the second step opened, as it does on an engine that hands no root run').toEqual(['exec', childRunId]);
+    expect(second.root_run_id ?? null).toBeNull();
+    expect(second.root_run_started_at ?? null).toBeNull();
+    expect(second.record_run_id ?? null).toBeNull();
+    expect((await automation.getRun(childRunId))?.status, 'the child is parked on its second step, not failed').not.toBe('failed');
   });
 
   it('an automation service that hands no root run records none, as before', async () => {
