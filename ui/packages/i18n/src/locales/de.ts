@@ -3462,7 +3462,6 @@ const de = {
     slugHint: "In URLs verwendet. Nur Kleinbuchstaben, Zahlen und Bindestriche.",
     settings: "Organisationseinstellungen",
     multiOrgDisabled: "Das Erstellen neuer Organisationen ist auf dieser Instanz deaktiviert.",
-    viewPlans: 'Tarife ansehen und upgraden',
     createFailed: 'Organisation konnte nicht erstellt werden',
   },
   help: {
@@ -4161,6 +4160,7 @@ const de = {
       invitationNotFound: 'Diese Einladung wurde bereits verwendet, ist abgelaufen oder wurde widerrufen. Wenn Sie sie angenommen haben, finden Sie die Organisation in Ihrer Organisationsliste.',
       unknown: 'Etwas ist schiefgelaufen. Bitte versuchen Sie es erneut.',
     },
+    viewPlans: 'Tarife ansehen und upgraden',
     backToList: "Zurück zu den Organisationen",
     notFound: "Organisation nicht gefunden",
     notFoundDescription: "Diese Organisation existiert nicht oder Sie haben keinen Zugriff darauf.",

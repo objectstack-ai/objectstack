@@ -3595,7 +3595,6 @@ const zh = {
     slugHint: '用于 URL 中，仅支持小写字母、数字和连字符。',
     settings: '组织设置',
     multiOrgDisabled: '此实例已禁用创建新组织。',
-    viewPlans: '查看套餐并升级',
     createFailed: '创建组织失败',
   },
   help: {
@@ -4415,6 +4414,7 @@ const zh = {
       invitationNotFound: '该邀请已被使用、已过期或已撤销。如果您已接受过该邀请，可在组织列表中找到该组织。',
       unknown: '出了点问题，请重试。',
     },
+    viewPlans: '查看套餐并升级',
     backToList: '返回组织列表',
     notFound: '未找到组织',
     notFoundDescription: '该组织不存在，或您没有访问权限。',

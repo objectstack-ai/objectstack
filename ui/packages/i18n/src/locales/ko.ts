@@ -3462,7 +3462,6 @@ const ko = {
     slugHint: "URL에 사용됩니다. 소문자, 숫자, 하이픈만 사용 가능합니다.",
     settings: "조직 설정",
     multiOrgDisabled: "이 인스턴스에서는 새 조직을 만들 수 없습니다.",
-    viewPlans: '플랜 보기 및 업그레이드',
     createFailed: '조직을 만들지 못했습니다',
   },
   help: {
@@ -4160,6 +4159,7 @@ const ko = {
       invitationNotFound: '이 초대는 이미 사용되었거나 만료되었거나 취소되었습니다. 이미 수락했다면 조직 목록에서 해당 조직을 찾을 수 있습니다.',
       unknown: '문제가 발생했습니다. 다시 시도해 주세요.',
     },
+    viewPlans: '플랜 보기 및 업그레이드',
     backToList: "조직 목록으로 돌아가기",
     notFound: "조직을 찾을 수 없음",
     notFoundDescription: "이 조직이 존재하지 않거나 접근 권한이 없습니다.",

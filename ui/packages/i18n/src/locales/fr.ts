@@ -3536,7 +3536,6 @@ const fr = {
     slugHint: "Utilisé dans les URL. Uniquement lettres minuscules, chiffres et tirets.",
     settings: "Paramètres de l'organisation",
     multiOrgDisabled: "La création de nouvelles organisations est désactivée sur cette instance.",
-    viewPlans: 'Voir les offres et passer à une offre supérieure',
     createFailed: "Échec de la création de l'organisation",
   },
   help: {
@@ -4245,6 +4244,7 @@ const fr = {
       invitationNotFound: "Cette invitation a déjà été utilisée, a expiré ou a été révoquée. Si vous l'avez acceptée, vous trouverez l'organisation dans votre liste d'organisations.",
       unknown: 'Une erreur est survenue. Veuillez réessayer.',
     },
+    viewPlans: 'Voir les offres et passer à une offre supérieure',
     backToList: "Retour aux organisations",
     notFound: "Organisation introuvable",
     notFoundDescription: "Cette organisation n'existe pas ou vous n'y avez pas accès.",

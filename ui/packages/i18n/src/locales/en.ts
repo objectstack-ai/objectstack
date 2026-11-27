@@ -4178,7 +4178,6 @@ const en = {
     slugHint: 'Used in URLs. Only lowercase letters, numbers, and hyphens.',
     settings: 'Organization settings',
     multiOrgDisabled: 'Creating new organizations is disabled on this instance.',
-    viewPlans: 'View plans and upgrade',
     createFailed: 'Failed to create organization',
   },
   help: {
@@ -5055,6 +5054,7 @@ const en = {
       invitationNotFound: 'This invitation has already been used, has expired, or was revoked. If you accepted it, the organization is in your organization list.',
       unknown: 'Something went wrong. Please try again.',
     },
+    viewPlans: 'View plans and upgrade',
     backToList: 'Back to organizations',
     notFound: 'Organization not found',
     notFoundDescription: 'This organization does not exist or you do not have access.',

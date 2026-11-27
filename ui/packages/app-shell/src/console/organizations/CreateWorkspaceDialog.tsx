@@ -399,7 +399,7 @@ export function CreateWorkspaceDialog({
                 data-testid="workspace-create-upgrade"
                 className="text-sm font-medium underline underline-offset-2 hover:no-underline"
               >
-                {t('workspace.viewPlans', { defaultValue: 'View plans and upgrade' })}
+                {t('organization.viewPlans', { defaultValue: 'View plans and upgrade' })}
               </a>
             )}
           </div>

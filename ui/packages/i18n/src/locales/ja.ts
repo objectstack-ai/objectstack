@@ -3464,7 +3464,6 @@ const ja = {
     slugHint: "URL に使用されます。小文字、数字、ハイフンのみ。",
     settings: "組織設定",
     multiOrgDisabled: "このインスタンスでは新しい組織の作成が無効です。",
-    viewPlans: 'プランを見てアップグレード',
     createFailed: '組織の作成に失敗しました',
   },
   help: {
@@ -4163,6 +4162,7 @@ const ja = {
       invitationNotFound: 'この招待はすでに使用済みか、有効期限切れか、取り消されています。承認済みの場合は、組織一覧にその組織があります。',
       unknown: '問題が発生しました。もう一度お試しください。',
     },
+    viewPlans: 'プランを見てアップグレード',
     backToList: "組織一覧に戻る",
     notFound: "組織が見つかりません",
     notFoundDescription: "この組織は存在しないか、アクセス権がありません。",

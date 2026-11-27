@@ -3540,7 +3540,6 @@ const es = {
     slugHint: "Se utiliza en URLs. Solo minúsculas, números y guiones.",
     settings: "Configuración de la organización",
     multiOrgDisabled: "La creación de nuevas organizaciones está deshabilitada en esta instancia.",
-    viewPlans: 'Ver planes y mejorar',
     createFailed: 'No se pudo crear la organización',
   },
   help: {
@@ -4249,6 +4248,7 @@ const es = {
       invitationNotFound: 'Esta invitación ya se utilizó, caducó o fue revocada. Si ya la aceptó, encontrará la organización en su lista de organizaciones.',
       unknown: 'Algo salió mal. Inténtelo de nuevo.',
     },
+    viewPlans: 'Ver planes y mejorar',
     backToList: "Volver a las organizaciones",
     notFound: "Organización no encontrada",
     notFoundDescription: "Esta organización no existe o no tienes acceso.",
