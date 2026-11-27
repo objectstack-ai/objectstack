@@ -3500,6 +3500,7 @@ const ko = {
     recent: "최근",
     starred: "즐겨찾기",
     removeFromFavorites: "즐겨찾기에서 {{name}} 제거",
+    conversationUnavailable: "이 대화는 더 이상 사용할 수 없습니다",
     allReports: "모든 보고서",
     collapse: '사이드바 접기',
     expand: '사이드바 펼치기',

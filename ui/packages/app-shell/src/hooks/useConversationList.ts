@@ -169,6 +169,22 @@ async function fetchConversationDetail(
   return normalize(row as ServerConversation);
 }
 
+/**
+ * One conversation's history row, read by id; `null` when the server answers
+ * that it is gone or not this user's (404, 403). Any other failure throws, so
+ * a network blip never reads as a deleted conversation.
+ */
+export async function readConversationRow(apiBase: string, id: string): Promise<ConversationListItem | null> {
+  const res = await authFetch(`${apiBase}/conversations/${encodeURIComponent(id)}`, {
+    credentials: 'include',
+  });
+  if (res.status === 404 || res.status === 403) return null;
+  if (!res.ok) throw Object.assign(new Error(`GET conversation failed: ${res.status}`), { status: res.status });
+  const body = (await res.json()) as ServerConversation | { conversation?: ServerConversation };
+  const row = 'conversation' in body && body.conversation ? body.conversation : body;
+  return normalize(row as ServerConversation);
+}
+
 export function useConversationList(
   options: UseConversationListOptions,
 ): UseConversationListReturn {

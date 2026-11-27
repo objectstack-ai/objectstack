@@ -3575,6 +3575,7 @@ const pt = {
     recent: "Recente",
     starred: "Favoritos",
     removeFromFavorites: "Remover {{name}} dos favoritos",
+    conversationUnavailable: "Esta conversa não está mais disponível",
     allReports: "Todos os relatórios",
     collapse: 'Recolher a barra lateral',
     expand: 'Expandir a barra lateral',

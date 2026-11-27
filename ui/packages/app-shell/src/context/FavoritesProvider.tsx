@@ -55,11 +55,15 @@ export interface FavoriteItem {
    *   favorites surfaced on Home (Starred Apps) and the sidebar Favorites
    *   section. A `view` is one list view of an object (objectstack#27594), id
    *   `view:OBJECT:VIEW`; the sidebar draws it only in the app its `href` names.
+   * - `conversation` — an AI conversation the user starred in the assistant
+   *   drawer's header (objectstack#37863), id `conversation:ID`. The sidebar
+   *   row opens it in the drawer in place; `href` is its `/ai…` address, the
+   *   fallback where no drawer can take it. It counts against the content cap.
    * - `nav` — a sidebar navigation entry promoted to the "Pinned" position via
    *   the in-tree pin toggle (see `useNavPins`). Excluded from Home/Starred and
    *   from the generic sidebar Favorites list so it doesn't render twice.
    */
-  type: 'object' | 'dashboard' | 'page' | 'report' | 'record' | 'view' | 'nav';
+  type: 'object' | 'dashboard' | 'page' | 'report' | 'record' | 'view' | 'conversation' | 'nav';
   /** ISO timestamp of when the item was favorited */
   favoritedAt: string;
   /**
@@ -80,6 +84,10 @@ export interface FavoriteItem {
    * tree node without leaking the synthesized favorite into other UIs.
    */
   navId?: string;
+  /** For `type === 'conversation'` items: the conversation the drawer opens. */
+  conversationId?: string;
+  /** For `type === 'conversation'` items: the agent the conversation is with, by route name. */
+  agent?: string;
 }
 
 interface FavoritesContextValue {
@@ -140,7 +148,7 @@ const STORAGE_BASE_KEY = 'objectui-favorites';
 /** Legacy key used by the standalone `useNavPins` hook before it was merged
  * into Favorites. Migrated once at provider mount, then deleted. */
 const LEGACY_NAV_PINS_KEY = 'objectui-nav-pins';
-/** Cap for user-visible content favorites (object/dashboard/page/report/record). */
+/** Cap for user-visible content favorites (every type but `nav`). */
 const MAX_FAVORITES = 20;
 /** Independent cap for nav-pin favorites — they live in a separate bucket. */
 const MAX_NAV_PINS = 20;

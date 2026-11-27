@@ -3580,6 +3580,7 @@ const es = {
     recent: "Reciente",
     starred: "Destacados",
     removeFromFavorites: "Quitar {{name}} de favoritos",
+    conversationUnavailable: "Esta conversación ya no está disponible",
     allReports: "Todos los informes",
     collapse: 'Contraer la barra lateral',
     expand: 'Expandir la barra lateral',

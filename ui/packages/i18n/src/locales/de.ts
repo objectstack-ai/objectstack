@@ -3500,6 +3500,7 @@ const de = {
     recent: "Zuletzt",
     starred: "Markiert",
     removeFromFavorites: "{{name}} aus Favoriten entfernen",
+    conversationUnavailable: "Diese Unterhaltung ist nicht mehr verfügbar",
     allReports: "Alle Berichte",
     collapse: 'Seitenleiste einklappen',
     expand: 'Seitenleiste ausklappen',

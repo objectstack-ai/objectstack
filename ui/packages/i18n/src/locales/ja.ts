@@ -3502,6 +3502,7 @@ const ja = {
     recent: "最近",
     starred: "スター付き",
     removeFromFavorites: "お気に入りから {{name}} を削除",
+    conversationUnavailable: "この会話はもう利用できません",
     allReports: "すべてのレポート",
     collapse: 'サイドバーを折りたたむ',
     expand: 'サイドバーを展開',

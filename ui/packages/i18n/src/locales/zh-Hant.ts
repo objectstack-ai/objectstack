@@ -3633,6 +3633,7 @@ const zhHant = {
     recent: '最近使用',
     starred: '已收藏',
     removeFromFavorites: '從收藏中移除 {{name}}',
+    conversationUnavailable: '該對話已不可用',
     allReports: '全部報表',
     collapse: '收起側邊欄',
     expand: '展開側邊欄',

@@ -3815,6 +3815,7 @@ const ar = {
     recent: "الأخيرة",
     starred: "المميزة",
     removeFromFavorites: "إزالة {{name}} من المفضلة",
+    conversationUnavailable: "لم تعد هذه المحادثة متاحة",
     allReports: "كل التقارير",
     collapse: 'طي الشريط الجانبي',
     expand: 'توسيع الشريط الجانبي',
