@@ -50,8 +50,8 @@
  *
  * ## The slot is the REQUEST kernel's, read per request
  *
- * The member is looked up with {@link readDoorSlot} (`getRequestKernelService`,
- * which every dispatcher door bridge reads its member through): the request's own
+ * The member is looked up with {@link readDoorSlot}, the reader every
+ * dispatcher door bridge reads its member through: the request's own
  * resolved kernel, never the host kernel's scoped fallback. Each of these
  * doors writes a row through the engine of the kernel whose member serves it,
  * so a tenant kernel that lacks the member must answer `501`, ⛔ never be
@@ -231,10 +231,10 @@ export async function handleOwnDoorBridgeRequest(
  *
  * A door member is closed over the kernel that registered it, so a request
  * kernel without the slot is the door's typed not-available answer (`501`),
- * ⛔ never a member found on another kernel: a door's slot is ⛔ never read
- * through `deps.resolveService` / `deps.resolveServiceOrLoud`, whose chains
- * also consult the host kernel. On a host with one kernel the request's kernel
- * IS that kernel, so the answer there is the one it always was.
+ * ⛔ never a member found on another kernel, and a door's slot is ⛔ never
+ * read through `deps.resolveService` / `deps.resolveServiceOrLoud`. On a host
+ * with one kernel the request's kernel IS that kernel, so the answer there is
+ * the one it always was.
  *
  * A kernel that throws for an unregistered name reads as an empty slot. Read
  * on every request, never recorded (AGENTS.md, "Startup registry reads").
