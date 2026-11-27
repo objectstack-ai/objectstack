@@ -732,11 +732,10 @@ export class TursoKnowledgeAdapter implements IKnowledgeAdapter {
         const legacy = await this.hasLegacy(ctx.source.name);
         const begun = await this.transaction(async (tx) => {
           const { active, building } = await this.generations(ctx.source.name, tx);
-          const fits = (g: GenerationRow | undefined): g is GenerationRow =>
-            g !== undefined && g.fingerprint === index.fingerprint && g.dim === embedder.dimensions;
+          const fits = (g: GenerationRow): boolean => g.fingerprint === index.fingerprint && g.dim === embedder.dimensions;
           // The build under way taken up, or rebuilt inside the active generation.
-          if (fits(building)) return { commit: true, value: building };
-          if (fits(active)) return { commit: true, value: active };
+          if (building !== undefined && fits(building)) return { commit: true, value: building };
+          if (active !== undefined && fits(active)) return { commit: true, value: active };
           if (building) {
             // A build of another fingerprint left unfinished: replaced, one per source.
             await this.dropGenerationTable(tx, ctx.source.name, building.generation);
