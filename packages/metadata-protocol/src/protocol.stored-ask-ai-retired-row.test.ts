@@ -75,8 +75,9 @@ function makeStubEngine(seedRows: SeedRow[]) {
     };
 
     const engine: any = {
-        async find(t: string, opts?: { where?: Record<string, unknown> }) {
-            return rowsOf(t).filter((r) => matches(r, opts?.where ?? {}));
+        async find(t: string, opts?: { where?: Record<string, unknown>; limit?: number }) {
+            const rows = rowsOf(t).filter((r) => matches(r, opts?.where ?? {}));
+            return typeof opts?.limit === 'number' ? rows.slice(0, opts.limit) : rows;
         },
         async findOne(t: string, opts?: { where?: Record<string, unknown> }) {
             assertEngineFindOnePredicate(t, opts);

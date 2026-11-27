@@ -701,10 +701,8 @@ export const ActionParamSchema = lazySchema(() => strictObject(
  * `action-type-ask-ai-removed`), and `os migrate meta --from 18` deletes from
  * sources an `ask_ai` action that nothing names.
  */
-export const ActionType = enumWithRetiredValues(
-  ['script', 'url', 'modal', 'flow', 'api', 'form'],
-  { ask_ai: ASK_AI_RETIRED },
-);
+const ACTION_TYPE_VALUES = ['script', 'url', 'modal', 'flow', 'api', 'form'] as const;
+export const ActionType = enumWithRetiredValues(ACTION_TYPE_VALUES, { ask_ai: ASK_AI_RETIRED });
 export type ActionType = z.input<typeof ActionType>;
 
 /**

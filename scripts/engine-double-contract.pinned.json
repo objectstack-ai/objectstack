@@ -2277,6 +2277,21 @@
       "pinned": 1
     },
     {
+      "file": "packages/metadata-protocol/src/protocol.stored-ask-ai-retired-row.test.ts",
+      "verb": "delete",
+      "pinned": 1
+    },
+    {
+      "file": "packages/metadata-protocol/src/protocol.stored-ask-ai-retired-row.test.ts",
+      "verb": "findOne",
+      "pinned": 1
+    },
+    {
+      "file": "packages/metadata-protocol/src/protocol.stored-ask-ai-retired-row.test.ts",
+      "verb": "update",
+      "pinned": 1
+    },
+    {
       "file": "packages/metadata-protocol/src/protocol.stored-conversions.test.ts",
       "verb": "delete",
       "pinned": 1
