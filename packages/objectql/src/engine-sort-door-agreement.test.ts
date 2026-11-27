@@ -27,10 +27,6 @@
  */
 
 import { describe, it, expect, vi } from 'vitest';
-// `findData` reaches `@objectstack/lint` only through a dynamic import; paid
-// here at module scope so the first load lands during collection, not inside
-// the first case's timeout.
-import '@objectstack/lint';
 import { ObjectStackProtocolImplementation } from '@objectstack/metadata-protocol';
 import { FieldType } from '@objectstack/spec/data';
 import { assertOrderByIsMaterializable } from './engine-top-level.js';
