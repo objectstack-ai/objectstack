@@ -96,6 +96,15 @@ export interface RefMatch {
    * as a record under another parent.
    */
   scopeDenied?: boolean;
+  /**
+   * [#36794] The SCOPED lookup asked nothing: no candidate read answered, and
+   * the engine's filter seam refused a read because the scope names a target
+   * field it cannot filter by (a formula), judged off that refusal's declared
+   * `code` and `fields`. Every other all-refused lookup is a plain miss. The
+   * refusal stays `reference_not_found` and says the lookup could not be made
+   * within the row's scope, never that the value lives under another parent.
+   */
+  scopeUnqueryable?: boolean;
 }
 
 /**
@@ -178,6 +187,11 @@ interface ScopedBy {
  * A scoped read the field-predicate guard refused (`RefMatch.scopeDenied`: the
  * scope names a target field the caller cannot read) is never probed: its miss
  * says nothing about where the value lives, so it stays `reference_not_found`.
+ * A scoped lookup none of whose reads answered because the engine's filter seam
+ * refused the scope (`RefMatch.scopeUnqueryable`: the scope names a target field
+ * the engine cannot filter by, such as a formula) is not probed either: it
+ * stays `reference_not_found` with its own sentence, which says the lookup
+ * could not be made within the row's scope.
  *
  * The probe is the caller's own read: the resolver runs every lookup as the
  * importing principal, so it can find only a record that principal can already
@@ -199,9 +213,15 @@ async function referenceNotFound(
   // A scope the caller may not filter by was never asked: nothing is known about
   // where the value lives, so it is not "under another parent".
   if (scopedMatch.scopeDenied) return refusal;
+  const qualifier = scopedBy.map((s) => `${s.label} = "${s.value}"`).join(', ');
+  // A scope no read could filter by: say the lookup could not be made, not that nothing matched.
+  if (scopedMatch.scopeUnqueryable) {
+    return coerceError(
+      meta, field, 'reference_not_found', 'import_reference_scope_unqueryable', value, ctx, { scope: qualifier },
+    );
+  }
   const unscoped = normalizeRefMatch(await ctx.resolveRef(meta.reference, value, meta));
   if (unscoped.id === undefined && !unscoped.ambiguous) return refusal;
-  const qualifier = scopedBy.map((s) => `${s.label} = "${s.value}"`).join(', ');
   const outOfScope = coerceError(
     meta, field, 'reference_out_of_scope', 'import_reference_out_of_scope', value, ctx, { scope: qualifier },
   );

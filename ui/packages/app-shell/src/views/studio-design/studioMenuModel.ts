@@ -25,13 +25,15 @@
  * full-screen (objectstack#36903-36905; objectstack#36909 retired the last of
  * the pillar redirects).
  *
- * And four entries that open no type's list, each in the group of what it
+ * And three entries that open no type's list, each in the group of what it
  * holds (the amendment's "Entries that are not a type"):
  *  - the organization's own flows (`~org`), under Automation;
  *  - the organization-wide default sharing overview, under Access, on its own
  *    route (`/studio/<package>/owd`, objectstack#36905);
- *  - diagnostics, under Platform;
- *  - the cross-package environment catalog (`~all`), under Access.
+ *  - diagnostics, under Platform.
+ * The fourth, the cross-package environment directory, left the menu for
+ * Setup → Access control (ADR-0084, amended 2026-11-26, question 5;
+ * objectstack#37565): `views/setup/accessDirectory.ts`.
  *
  * And on a package one entry under no group, 全部类型 All types
  * ({@link studioMenuAllTypesEntry}; ADR-0084, amended 2026-11-25,
@@ -47,7 +49,7 @@
  * Inside a group the type entries follow the placement table
  * (`STUDIO_MENU_PLACEMENT`, `studioMenuPlacement.ts`), and each entry carries
  * its row's tier. A type with no row is 高级 Advanced and is drawn after the
- * placed types of its group, in served order. The four entries that are not a
+ * placed types of its group, in served order. The entries that are not a
  * type are 高级 and follow the types of their group, in the order above.
  *
  * A 常用 entry the diagnostics sweep has answered for, holding no item, is
@@ -70,11 +72,15 @@
  * The package-less scope (`~org`) and the cross-package leg (`~all`) name no
  * package: their menu is the environment's — the organization's flows and the
  * environment catalog's types — drawn flat, in the same order, with no fold;
- * only the groups that hold an entry are drawn.
+ * only the groups that hold an entry are drawn. A catalog type's entry there
+ * opens its list on Setup's directory page, where the list now lives, for a
+ * principal who may open Setup (`setupDirectory`); for one who may not, it
+ * keeps the list on the cross-package leg, in the environment scope.
  */
 
 import { ENVIRONMENT_SCOPE_QUERY } from '../metadata-admin/catalog-scope.js';
 import { SETUP_DATASOURCES_PATH } from '../metadata-admin/metadataAreaHost.js';
+import { accessDirectoryPath } from '../setup/accessDirectory.js';
 import { isStudioAllPackagesScope } from './metadataArea.js';
 import {
   STUDIO_ALL_PACKAGES_SEGMENT,
@@ -128,7 +134,7 @@ export const STUDIO_MENU_ALWAYS_TYPES: readonly string[] = Object.freeze(
   STUDIO_MENU_PLACEMENT.filter((row) => row.tier === 'common').map((row) => row.type),
 );
 
-export type StudioMenuEntryKind = 'type' | 'orgFlows' | 'owd' | 'diagnostics' | 'environment' | 'allTypes';
+export type StudioMenuEntryKind = 'type' | 'orgFlows' | 'owd' | 'diagnostics' | 'allTypes';
 
 export interface StudioMenuEntry {
   /** Unique within the menu: `type:<type>` for a type, the kind otherwise. */
@@ -162,8 +168,10 @@ export function studioMenuScope(segment: string): StudioMenuScope {
   return { kind: 'package', packageId: segment };
 }
 
-function typeEntryPath(scope: StudioMenuScope, type: string): string {
+function typeEntryPath(scope: StudioMenuScope, type: string, setupDirectory: boolean): string {
   if (scope.kind !== 'package') {
+    // objectstack#37565 — the environment catalog's lists are Setup's now, for whoever may open Setup.
+    if (setupDirectory) return accessDirectoryPath(type);
     return studioMetadataAreaAddress(STUDIO_ALL_PACKAGES_SEGMENT, encodeURIComponent(type), { query: ENVIRONMENT_SCOPE_QUERY });
   }
   // ADR-0146 D1 — a datasource is Setup's runtime configuration, as its directory tile says.
@@ -184,14 +192,17 @@ const PLACEMENT_TIER: ReadonlyMap<string, StudioMenuTier> = new Map(STUDIO_MENU_
  * follow the placement table, an unplaced type after the placed ones in
  * served order, then the entries that are not a type. `settled` says the
  * diagnostics sweep has answered, so a missing count means none.
+ * `setupDirectory` says the principal may open Setup, so a package-less
+ * menu's catalog entries open Setup's directory page (objectstack#37565).
  */
 export function buildStudioMenu(input: {
   scope: StudioMenuScope;
   types: ReadonlyArray<{ type: string; domain?: string }>;
   counts: Readonly<Record<string, number>>;
   settled?: boolean;
+  setupDirectory?: boolean;
 }): StudioMenuGroupModel[] {
-  const { scope, types, counts, settled = false } = input;
+  const { scope, types, counts, settled = false, setupDirectory = false } = input;
   const groups = new Map<StudioMenuGroup, StudioMenuEntry[]>(STUDIO_MENU_GROUPS.map((g) => [g, []]));
   // An unplaced type ranks after every row; the sort is stable, so those keep served order.
   const rank = (type: string) => PLACEMENT_INDEX.get(type) ?? STUDIO_MENU_PLACEMENT.length;
@@ -201,7 +212,7 @@ export function buildStudioMenu(input: {
     if (!entries) continue;
     const tier = PLACEMENT_TIER.get(t.type) ?? 'advanced';
     const count = counts[t.type];
-    const entry: StudioMenuEntry = { key: `type:${t.type}`, kind: 'type', type: t.type, to: typeEntryPath(scope, t.type), count, tier };
+    const entry: StudioMenuEntry = { key: `type:${t.type}`, kind: 'type', type: t.type, to: typeEntryPath(scope, t.type, setupDirectory), count, tier };
     if (scope.kind === 'package' && tier === 'common' && settled && !((count ?? 0) > 0)) entry.empty = true;
     entries.push(entry);
   }
@@ -220,12 +231,6 @@ export function buildStudioMenu(input: {
       tier: 'advanced',
     });
   }
-  groups.get('security')!.push({
-    key: 'environment',
-    kind: 'environment',
-    to: studioMetadataAreaRoot(STUDIO_ALL_PACKAGES_SEGMENT),
-    tier: 'advanced',
-  });
   return STUDIO_MENU_GROUPS.map((group) => ({ group, entries: groups.get(group)! })).filter((g) => g.entries.length > 0);
 }
 
@@ -296,8 +301,9 @@ export function studioMenuTiers(menu: readonly StudioMenuGroupModel[]): Record<S
  *
  *  - the package-less scope: its flows;
  *  - an area URL: its type, diagnostics, or at the area's root the type
- *    directory — 全部类型 All types on a package (objectstack#37360), the
- *    environment catalog on the cross-package leg;
+ *    directory — 全部类型 All types on a package (objectstack#37360); the
+ *    cross-package leg's root is none, since it draws no page (it redirects to
+ *    Setup's directory, objectstack#37565);
  *  - the sharing overview's route: the OWD overview;
  *  - the package's own page: 概览 Overview (objectstack#37454);
  *  - a retired pillar's address: none, since it draws no page
@@ -309,7 +315,7 @@ export function studioMenuCurrentKey(input: { segment: string; pathname: string;
   const areaRoot = studioMetadataAreaRoot(segment);
   if (pathname === areaRoot || pathname.startsWith(`${areaRoot}/`)) {
     const [first] = pathname.slice(areaRoot.length).split('/').filter(Boolean);
-    if (!first) return isStudioAllPackagesScope(segment) ? 'environment' : 'allTypes';
+    if (!first) return isStudioAllPackagesScope(segment) ? null : 'allTypes';
     if (first === '_diagnostics') return isStudioAllPackagesScope(segment) ? null : 'diagnostics';
     return `type:${decodeURIComponent(first)}`;
   }

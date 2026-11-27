@@ -80,6 +80,7 @@ export const ru: TranslationData = {
         // of `sys_scim_connection_credential.pluralLabel`.
         nav_scim_credentials: { label: 'Учётные данные SCIM' },
         nav_api_keys: { label: 'API-ключи' },
+        nav_access_directory: { label: 'Должности и разрешения' },
 
         // Центр согласований = the Approvals Inbox component (#7234) — the
         // surface with decision actions. The three below are the engine's raw
@@ -138,7 +139,7 @@ export const ru: TranslationData = {
       },
     },
     studio: {
-      label: 'Studio',
+      label: 'App Studio',
       description: 'Мастерская метаданных для разработчиков, аналитиков и интеграторов',
       navigation: {
         group_overview: { label: 'Обзор' },

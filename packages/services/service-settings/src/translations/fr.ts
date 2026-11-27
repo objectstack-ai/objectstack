@@ -501,10 +501,10 @@ export const fr: PlatformTranslationData = {
       title: 'IA et Embedder',
       description: 'Fournisseur LLM, modèle et identifiants utilisés par le service d’IA de la plateforme.',
       groups: {
-        provider: {
-          title: 'Fournisseur',
-          description: 'Choisissez le backend LLM.',
-        },
+        provider: { title: 'Fournisseurs',
+          description: 'Activez chaque fournisseur dont les modèles peuvent être utilisés. Le fournisseur par défaut est toujours activé.' },
+        structured_output: { title: 'Sortie structurée',
+          description: 'Le modèle des appels qui doivent répondre dans une forme de données fixe. Laissez vide pour utiliser le modèle par défaut.' },
         gateway: {
           title: 'Vercel AI Gateway',
           description: 'Routeur multifournisseur. Le modèle s’écrit provider/model, par ex. openai/gpt-4o.',
@@ -548,7 +548,8 @@ export const fr: PlatformTranslationData = {
       },
       keys: {
         provider: {
-          label: 'Fournisseur',
+          label: 'Fournisseur par défaut',
+          help: 'Traite toutes les requêtes qui ne nomment aucun modèle.',
           options: {
             gateway: 'Vercel AI Gateway',
             openai: 'OpenAI',
@@ -640,6 +641,27 @@ export const fr: PlatformTranslationData = {
           label: 'Journaliser les prompts complets',
           help: 'Inclut les prompts rendus (et pas seulement les métadonnées) dans les lignes de trace.',
         },
+        default_model: { label: 'Modèle par défaut', help: 'L\'un des modèles du fournisseur par défaut. Laissez vide pour utiliser son premier modèle.' },
+        gateway_enabled: { label: 'Vercel AI Gateway' },
+        openai_enabled: { label: 'OpenAI' },
+        anthropic_enabled: { label: 'Anthropic' },
+        google_enabled: { label: 'Google Generative AI' },
+        deepseek_enabled: { label: 'DeepSeek' },
+        dashscope_enabled: { label: '阿里通义 DashScope' },
+        cloudflare_enabled: { label: 'Cloudflare AI Gateway' },
+        siliconflow_enabled: { label: '硅基流动 SiliconFlow' },
+        openrouter_enabled: { label: 'OpenRouter' },
+        gateway_models: { label: 'Autres modèles', help: 'Autres ID de modèle de ce fournisseur, un par ligne. Le modèle ci-dessus vient en premier.' },
+        openai_models: { label: 'Autres modèles', help: 'Autres ID de modèle de ce fournisseur, un par ligne. Le modèle ci-dessus vient en premier.' },
+        anthropic_models: { label: 'Autres modèles', help: 'Autres ID de modèle de ce fournisseur, un par ligne. Le modèle ci-dessus vient en premier.' },
+        google_models: { label: 'Autres modèles', help: 'Autres ID de modèle de ce fournisseur, un par ligne. Le modèle ci-dessus vient en premier.' },
+        deepseek_models: { label: 'Autres modèles', help: 'Autres ID de modèle de ce fournisseur, un par ligne. Le modèle ci-dessus vient en premier.' },
+        dashscope_models: { label: 'Autres modèles', help: 'Autres ID de modèle de ce fournisseur, un par ligne. Le modèle ci-dessus vient en premier.' },
+        cloudflare_models: { label: 'Autres modèles', help: 'Autres ID de modèle de ce fournisseur, un par ligne. Le modèle ci-dessus vient en premier.' },
+        siliconflow_models: { label: 'Autres modèles', help: 'Autres ID de modèle de ce fournisseur, un par ligne. Le modèle ci-dessus vient en premier.' },
+        openrouter_models: { label: 'Autres modèles', help: 'Autres ID de modèle de ce fournisseur, un par ligne. Le modèle ci-dessus vient en premier.' },
+        structured_output_provider: { label: 'Fournisseur', help: 'Un fournisseur activé. Laissez vide pour utiliser le fournisseur par défaut.' },
+        structured_output_model: { label: 'Modèle', help: 'L\'un des modèles de ce fournisseur. Laissez vide pour utiliser son premier modèle.' },
         embedder_provider: {
           label: 'Fournisseur',
           help: 'Lu au démarrage du serveur : une modification enregistrée d’un paramètre de l’embedder prend effet au prochain redémarrage.',
@@ -679,6 +701,15 @@ export const fr: PlatformTranslationData = {
       },
       actions: {
         test: { label: 'Tester la connexion' },
+        test_gateway: { label: 'Tester la connexion' },
+        test_openai: { label: 'Tester la connexion' },
+        test_anthropic: { label: 'Tester la connexion' },
+        test_google: { label: 'Tester la connexion' },
+        test_deepseek: { label: 'Tester la connexion' },
+        test_dashscope: { label: 'Tester la connexion' },
+        test_cloudflare: { label: 'Tester la connexion' },
+        test_siliconflow: { label: 'Tester la connexion' },
+        test_openrouter: { label: 'Tester la connexion' },
         test_embedder: { label: 'Tester l’Embedder' },
         reset: { label: 'Rétablir les valeurs de l’environnement' },
       },
@@ -714,7 +745,7 @@ export const fr: PlatformTranslationData = {
         },
         turso_url: {
           label: 'URL de connexion',
-          help: 'Exemples : libsql://your-tenant.turso.io · file:./.objectstack/knowledge.db · :memory:',
+          help: 'Exemples : libsql://your-tenant.turso.io · file:./.objectstack/data/knowledge.db · :memory:',
         },
         turso_auth_token: {
           label: 'Jeton d’authentification',

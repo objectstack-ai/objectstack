@@ -79,6 +79,7 @@ export const zhCN: TranslationData = {
         // the same case as the entry above; see `en.ts` (#31123).
         nav_scim_credentials: { label: 'SCIM 凭据' },
         nav_api_keys: { label: 'API 密钥' },
+        nav_access_directory: { label: '岗位与权限' },
 
         // 审批中心 = the Approvals Inbox component (#7234) — the surface with
         // decision actions. The three below are the engine's raw tables.
@@ -131,7 +132,7 @@ export const zhCN: TranslationData = {
       },
     },
     studio: {
-      label: 'Studio',
+      label: '应用搭建',
       description: '面向开发者、分析师与实施者的元数据工作台',
       navigation: {
         group_overview: { label: '总览' },

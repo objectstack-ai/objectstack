@@ -695,6 +695,8 @@ export function DataPillar({
     // objectstack#36601 — and the published row the buffer was loaded at, for the Save's publish.
     recordPublished: recordObjPublished,
     publish: publishObj,
+    // objectstack#37440 — the version the buffer's own Save wrote, which pins its publish.
+    heldDraftVersion: heldObjDraftVersion,
     dialog: objConflictDialog,
   } = useDraftSaveGuard(client, reloadObjDraft);
   // objectstack#28575 — the extension buffer's own guard, pinned by its draft read at the pair.
@@ -705,6 +707,7 @@ export function DataPillar({
     // objectstack#36726 — and the pair's published extension row, for the Save's publish.
     recordPublished: recordExtPublished,
     publish: publishExt,
+    heldDraftVersion: heldExtDraftVersion,
     dialog: extConflictDialog,
   } = useDraftSaveGuard(client, reloadExt);
   // The pair a READ names is the surface's (`StudioBaseCustomization.pairId`),
@@ -1192,8 +1195,14 @@ export function DataPillar({
       objStoredRef.current = draft;
       setHasDraft(true);
       setSaving('publish');
-      // objectstack#36601 — pinned to the published row this buffer was loaded at.
-      const live = await publishSavedItem(client, { type: 'object', name, packageId: to }, hadDraft, publishObj);
+      // objectstack#36601 — pinned to the published row this buffer was loaded at;
+      // objectstack#37440 — and to the draft this Save just wrote (its receipt).
+      const live = await publishSavedItem(
+        client,
+        { type: 'object', name, packageId: to, draftVersion: heldObjDraftVersion('object', name, to) },
+        hadDraft,
+        publishObj,
+      );
       // The published row moved and the author chose to reload: the load replaces the buffer.
       if (!live.ok && 'reloaded' in live) return { kind: 'declined' };
       if (!live.ok) {
@@ -1229,7 +1238,7 @@ export function DataPillar({
     } finally {
       setSaving(false);
     }
-  }, [saveObjDraft, recordObjRead, publishObj, client, current, objDraft, hasDraft, publishedFieldNames, packageId, locale]);
+  }, [saveObjDraft, recordObjRead, publishObj, heldObjDraftVersion, client, current, objDraft, hasDraft, publishedFieldNames, packageId, locale]);
 
   // objectstack#34931 — Cancel keeps what the refused save would have lost:
   // each field a finding names goes back as the server holds it, and nothing
@@ -1321,7 +1330,8 @@ export function DataPillar({
       // objectstack#36726 — pinned to the published extension row this buffer was loaded at.
       const live = await publishSavedItem(
         client,
-        { type: OBJECT_EXTENSION_TYPE, name, packageId: pair },
+        // objectstack#37440 — pinned to the draft this Save just wrote (its receipt).
+        { type: OBJECT_EXTENSION_TYPE, name, packageId: pair, draftVersion: heldExtDraftVersion(OBJECT_EXTENSION_TYPE, name, pair) },
         hadDraft,
         publishExt,
       );
@@ -1355,7 +1365,7 @@ export function DataPillar({
     } finally {
       setSaving(false);
     }
-  }, [extOpen, customization, extPairFor, saveExtDraft, recordExtRead, recordExtPublished, publishExt, client, extHasDraft, locale]);
+  }, [extOpen, customization, extPairFor, saveExtDraft, recordExtRead, recordExtPublished, publishExt, heldExtDraftVersion, client, extHasDraft, locale]);
   // An edit of the folded object's fields, written into the extension: an
   // extension field whole, a base field's whitelisted change as its patch.
   const onExtFieldsPatch = React.useCallback(

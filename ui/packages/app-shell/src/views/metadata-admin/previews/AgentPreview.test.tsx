@@ -75,6 +75,18 @@ describe('AgentPreview renders what a spec-valid agent declares', () => {
     expect(screen.getByText('You are a helpful sales assistant.')).toBeTruthy();
   });
 
+  it('shows the model name when the block names no provider', () => {
+    renderPreview({ ...VALID_DRAFT, model: { model: 'gpt-4o' } });
+    expect(screen.getByText('gpt-4o')).toBeTruthy();
+    expect(screen.queryByText(/openai/)).toBeNull();
+  });
+
+  it('shows no model pill for a block that names neither, so the environment default is not given a name', () => {
+    renderPreview({ ...VALID_DRAFT, model: { temperature: 0.2 } });
+    expect(screen.queryByText('gpt-4o')).toBeNull();
+    expect(screen.queryByText(/openai/)).toBeNull();
+  });
+
   it('says where tools come from, so the missing TOOLS block is not read as a gap', () => {
     renderPreview(VALID_DRAFT);
     expect(screen.getByText(/tools come from the attached skills/i)).toBeTruthy();

@@ -290,3 +290,71 @@ describe('RuntimeDraftBar — Publish is pinned to the draft it showed (objectst
     await waitFor(() => expect(metadataClient.publish).toHaveBeenCalledWith('view', 'my_view'));
   });
 });
+
+/**
+ * objectstack#37648 — after the host resolves a refused save with "reload"
+ * (`reloadedSignal`), the draft the bar shows is the one the host's reload
+ * read found: the Publish is pinned to that read's version, not to the draft
+ * the bar read before the reload, and never to a re-read of the bar's own.
+ */
+describe('RuntimeDraftBar — after the host\'s reload the Publish is pinned to the reloaded draft (objectstack#37648)', () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it('takes the reloaded draft\'s version, with no re-read', async () => {
+    const metadataClient = makeMetadataClient({ item: { columns: ['name'] }, version: 'hmac-sha256:draft-v1' });
+    const { rerender } = render(
+      <RuntimeDraftBar type="view" name="my_view" metadataClient={metadataClient} reloadedSignal={0} />,
+    );
+    await screen.findByTestId('runtime-draft-publish');
+    // Another writer moved the draft (v2); the host's save was refused and the author chose "reload".
+    rerender(
+      <RuntimeDraftBar
+        type="view"
+        name="my_view"
+        metadataClient={metadataClient}
+        reloadedSignal={1}
+        reloadedDraftVersion="hmac-sha256:moved-v2"
+        reloadedHasDraft
+      />,
+    );
+    fireEvent.click(await screen.findByTestId('runtime-draft-publish'));
+
+    await waitFor(() =>
+      expect(metadataClient.publish).toHaveBeenCalledWith('view', 'my_view', { draftVersion: 'hmac-sha256:moved-v2' }),
+    );
+    expect(metadataClient.getDraft).toHaveBeenCalledTimes(1);
+  });
+
+  it('a reload that found no pending draft takes the indicator down', async () => {
+    const metadataClient = makeMetadataClient({ item: { columns: ['name'] }, version: 'hmac-sha256:draft-v1' });
+    const { rerender } = render(
+      <RuntimeDraftBar type="view" name="my_view" metadataClient={metadataClient} reloadedSignal={0} />,
+    );
+    await screen.findByTestId('runtime-draft-publish');
+    rerender(
+      <RuntimeDraftBar type="view" name="my_view" metadataClient={metadataClient} reloadedSignal={1} reloadedHasDraft={false} />,
+    );
+    await waitFor(() => expect(screen.queryByTestId('runtime-draft-bar')).toBeNull());
+  });
+
+  it('the mount\'s own signal changes nothing (control)', async () => {
+    const metadataClient = makeMetadataClient({ item: { columns: ['name'] }, version: 'hmac-sha256:draft-v1' });
+    render(
+      <RuntimeDraftBar
+        type="view"
+        name="my_view"
+        metadataClient={metadataClient}
+        reloadedSignal={3}
+        reloadedDraftVersion="hmac-sha256:other"
+        reloadedHasDraft={false}
+      />,
+    );
+    fireEvent.click(await screen.findByTestId('runtime-draft-publish'));
+    await waitFor(() =>
+      expect(metadataClient.publish).toHaveBeenCalledWith('view', 'my_view', { draftVersion: 'hmac-sha256:draft-v1' }),
+    );
+  });
+});
+

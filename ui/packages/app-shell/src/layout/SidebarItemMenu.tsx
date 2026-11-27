@@ -325,6 +325,76 @@ export function SidebarItemMenu({
   const offConsole = !!href && (external || ABSOLUTE_URL.test(href));
   const routerHref = useHref(href && !offConsole ? href : '/');
   const [open, setOpen] = React.useState(false);
+
+  const documentAddress = !href ? null : offConsole ? href : routerHref;
+
+  // objectstack#37575 — the menu's Radix tree is drawn by a memoised view, and
+  // what it is handed is plain text and callbacks that stay the same across
+  // renders. The sidebar draws one of these menus per entry, and each one
+  // re-rendered its whole Radix tree whenever its row did, or whenever one of
+  // the hooks above answered again with the same answer (the translation and
+  // the Studio gate do, as boot reads land): on a list page's first load that
+  // was about 1,700 components in one commit, before first paint. The latest
+  // `onToggleFavorite`, `t` and address are kept after every commit and read
+  // when used, so a stable callback never acts on a stale one.
+  const latest = React.useRef({ onToggleFavorite, t, documentAddress });
+  React.useLayoutEffect(() => {
+    latest.current = { onToggleFavorite, t, documentAddress };
+  });
+  const toggleFavorite = React.useCallback(() => latest.current.onToggleFavorite(), []);
+  const copyLink = React.useCallback(async () => {
+    const { documentAddress: address, t: tr } = latest.current;
+    if (!address) return;
+    try {
+      await navigator.clipboard.writeText(new URL(address, window.location.href).href);
+      toast.success(tr('console.nav.linkCopied', { defaultValue: 'Link copied to clipboard' }));
+    } catch {
+      toast.error(tr('console.nav.linkCopyFailed', { defaultValue: 'Failed to copy link' }));
+    }
+  }, []);
+
+  return (
+    <SidebarItemMenuView
+      open={open}
+      onOpenChange={setOpen}
+      triggerLabel={t('console.nav.itemMenu', { defaultValue: 'More actions for {{name}}', name: label })}
+      openInNewTabLabel={t('console.nav.openInNewTab', { defaultValue: 'Open in new tab' })}
+      copyLinkLabel={t('console.nav.copyLink', { defaultValue: 'Copy link' })}
+      isFavorite={isFavorite}
+      onToggleFavorite={toggleFavorite}
+      documentAddress={documentAddress}
+      onCopyLink={copyLink}
+      objectSettings={objectSettings}
+    />
+  );
+}
+
+/** What {@link SidebarItemMenu} hands its Radix tree: text, flags and stable callbacks. */
+interface SidebarItemMenuViewProps {
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  triggerLabel: string;
+  openInNewTabLabel: string;
+  copyLinkLabel: string;
+  isFavorite: boolean;
+  onToggleFavorite: () => void;
+  documentAddress: string | null;
+  onCopyLink: () => void;
+  objectSettings: string | null;
+}
+
+const SidebarItemMenuView = React.memo(function SidebarItemMenuView({
+  open,
+  onOpenChange,
+  triggerLabel,
+  openInNewTabLabel,
+  copyLinkLabel,
+  isFavorite,
+  onToggleFavorite,
+  documentAddress,
+  onCopyLink,
+  objectSettings,
+}: SidebarItemMenuViewProps) {
   const triggerRef = React.useRef<HTMLButtonElement>(null);
 
   // A right-click on the row opens this menu. The listener sits on the row the
@@ -337,32 +407,20 @@ export function SidebarItemMenu({
       const target = event.target instanceof Element ? event.target : null;
       if (target?.closest(ROW_SELECTOR) !== row) return;
       event.preventDefault();
-      setOpen(true);
+      onOpenChange(true);
     };
     row.addEventListener('contextmenu', onContextMenu);
     return () => row.removeEventListener('contextmenu', onContextMenu);
-  }, []);
-
-  const documentAddress = !href ? null : offConsole ? href : routerHref;
-
-  const copyLink = async () => {
-    if (!documentAddress) return;
-    try {
-      await navigator.clipboard.writeText(new URL(documentAddress, window.location.href).href);
-      toast.success(t('console.nav.linkCopied', { defaultValue: 'Link copied to clipboard' }));
-    } catch {
-      toast.error(t('console.nav.linkCopyFailed', { defaultValue: 'Failed to copy link' }));
-    }
-  };
+  }, [onOpenChange]);
 
   return (
-    <DropdownMenu open={open} onOpenChange={setOpen}>
+    <DropdownMenu open={open} onOpenChange={onOpenChange}>
       <DropdownMenuTrigger asChild>
         <SidebarMenuAction
           ref={triggerRef}
           showOnHover
           data-testid="sidebar-item-menu-trigger"
-          aria-label={t('console.nav.itemMenu', { defaultValue: 'More actions for {{name}}', name: label })}
+          aria-label={triggerLabel}
         >
           <MoreHorizontal className="h-3.5 w-3.5" />
         </SidebarMenuAction>
@@ -375,17 +433,17 @@ export function SidebarItemMenu({
             onSelect={() => window.open(documentAddress, '_blank', 'noopener,noreferrer')}
           >
             <ExternalLink className="h-4 w-4" />
-            <span>{t('console.nav.openInNewTab', { defaultValue: 'Open in new tab' })}</span>
+            <span>{openInNewTabLabel}</span>
           </DropdownMenuItem>
         )}
         {documentAddress && (
-          <DropdownMenuItem data-testid="sidebar-item-menu-copy-link" onSelect={() => { void copyLink(); }}>
+          <DropdownMenuItem data-testid="sidebar-item-menu-copy-link" onSelect={() => { void onCopyLink(); }}>
             <Link2 className="h-4 w-4" />
-            <span>{t('console.nav.copyLink', { defaultValue: 'Copy link' })}</span>
+            <span>{copyLinkLabel}</span>
           </DropdownMenuItem>
         )}
         {objectSettings && <ObjectSettingsMenuItem path={objectSettings} testId="sidebar-item-menu-object-settings" />}
       </DropdownMenuContent>
     </DropdownMenu>
   );
-}
+});

@@ -120,7 +120,7 @@ function StudioAppItem({ entry }: { entry: StudioEntry }) {
         </span>
         <span className="flex-1 truncate">
           {view
-            ? t('topbar.viewInStudio', { defaultValue: 'View in Studio' })
+            ? t('topbar.viewInStudio', { defaultValue: 'View in App Studio' })
             : t('topbar.editApp', { defaultValue: 'Edit app' })}
         </span>
       </Link>

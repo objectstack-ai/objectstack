@@ -13,8 +13,9 @@
  */
 
 import '@testing-library/jest-dom/vitest';
+import * as React from 'react';
 import { describe, it, expect, vi, afterEach } from 'vitest';
-import { render, screen, cleanup } from '@testing-library/react';
+import { render, screen, cleanup, within } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 import type { MetadataDiagnosticsSummary } from '@object-ui/data-objectstack';
 import type { RichMetadataTypeEntry } from './useMetadata';
@@ -49,6 +50,7 @@ vi.mock('./useMetadata', async (importOriginal) => {
 });
 
 import { MetadataDirectoryPage } from './DirectoryPage';
+import { StudioTitleRowProvider } from '../studio-design/studioTitleRow';
 
 afterEach(() => {
   cleanup();
@@ -132,5 +134,60 @@ describe('DirectoryPage — the "View all issues" link takes the sweep\'s tone (
     await directoryLoaded();
 
     expect(screen.queryByRole('link', { name: /View all issues/ })).toBeNull();
+  });
+});
+
+// objectstack#37455 put the page's Save and the AI assistant at the end of the
+// directory's title row under Studio; objectstack#37520 (S2) pins them there.
+// The row has no actions of its own, so no hairline comes before the
+// assistant unless Save does. Stubs stand in for the surface's controls.
+describe('DirectoryPage under Studio: the page controls end its title row (objectstack#37520)', () => {
+  const SAVE = (
+    <button type="button" data-testid="studio-save">
+      Save
+    </button>
+  );
+  const ASSISTANT = (
+    <button type="button" data-testid="topbar-ai-assistant">
+      AI
+    </button>
+  );
+
+  function renderUnderStudio(save: React.ReactNode) {
+    render(
+      <MemoryRouter initialEntries={[`/metadata?package=${PKG}`]}>
+        <StudioTitleRowProvider save={save} assistant={ASSISTANT}>
+          <MetadataDirectoryPage />
+        </StudioTitleRowProvider>
+      </MemoryRouter>,
+    );
+  }
+
+  const titleRow = () => screen.getByRole('heading', { level: 1 }).parentElement as HTMLElement;
+  const testIds = (el: Element) =>
+    Array.from(el.querySelectorAll('[data-testid]')).map((n) => n.getAttribute('data-testid'));
+
+  it('nothing unsaved: the assistant ends the title row, with no hairline before it', async () => {
+    answer = () => envelope([]);
+    renderUnderStudio(null);
+    await directoryLoaded();
+    expect(testIds(titleRow())).toEqual(['topbar-ai-assistant']);
+    expect(screen.getAllByTestId('topbar-ai-assistant')).toHaveLength(1);
+  });
+
+  it('unsaved edits: Save, then the hairline, then the assistant', async () => {
+    answer = () => envelope([]);
+    renderUnderStudio(SAVE);
+    await directoryLoaded();
+    expect(testIds(titleRow())).toEqual(['studio-save', 'studio-title-row-divider', 'topbar-ai-assistant']);
+    expect(within(titleRow()).getByRole('heading', { level: 1 })).toBeInTheDocument();
+  });
+
+  it('CONTROL: outside Studio the title row holds the title alone', async () => {
+    answer = () => envelope([]);
+    renderDirectory();
+    await directoryLoaded();
+    expect(testIds(titleRow())).toEqual([]);
+    expect(screen.queryByTestId('topbar-ai-assistant')).toBeNull();
   });
 });

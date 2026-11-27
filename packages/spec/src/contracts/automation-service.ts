@@ -23,6 +23,7 @@ import type { JobRunTrigger } from './job-service';
 import type { FlowRegistration } from '../api/protocol.zod';
 import type { FlowInnerRefusal, RecordUpdateStart } from '../api/automation-api.zod';
 import type { DroppedFieldsEvent } from '../data/data-engine.zod';
+import type { FieldError } from '../api/errors.zod';
 
 /**
  * The write a record-triggered run was dispatched inside (#28251) — see
@@ -690,6 +691,20 @@ export interface AutomationResult {
      * site.
      */
     code?: 'PERMISSION_DENIED' | 'INVALID_SIGNAL' | 'RUN_NOT_FOUND' | 'STORE_UNAVAILABLE' | 'RESUME_IN_PROGRESS' | 'RESUME_CHILD_PENDING' | 'INVALID_SCREEN_INPUT' | 'FLOW_DISABLED' | 'FLOW_NO_START_NODE' | 'FLOW_INPUT_SCHEMA_INVALID';
+    /**
+     * [#37526] The field-addressed findings behind an `'INVALID_SCREEN_INPUT'`
+     * refusal, one entry per violated field: the screen field's `name`, the
+     * `FieldErrorCode` it broke (ADR-0114 D2: `required`, `invalid_type`,
+     * `invalid_value`, `min_value`, `max_value`, `unknown_field`) and the
+     * engine's English line for it. Set with that code only; absent otherwise.
+     *
+     * It is what lets a runner place the refusal AT the field, in its own
+     * language, by the label it shows, instead of reading `error`: `error`
+     * keeps the whole sentence, with the screen's declared field names, for
+     * logs and API callers. A transport serves it as `error.details.fields`,
+     * the slot `VALIDATION_FAILED` already uses for the same entries.
+     */
+    fields?: FieldError[];
     /**
      * Lifecycle status. `'paused'` means the run suspended at a node (e.g.
      * an Approval node awaiting a human decision, ADR-0019) and can be

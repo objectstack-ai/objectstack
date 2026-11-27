@@ -5,16 +5,17 @@
  * (「Period & export」 → Date Range → Default Period) listed each option by its
  * stored preset, `this_month`, in English and in Chinese alike.
  *
- * The spec form now names the options in English, and a zh designer reads the
- * names from the console's locale packs, the rows the report page's period chip
- * shows (`dashboard.filters.range.*`, `dashboard.filters.custom`).
+ * The spec form names the options in English; under zh the metadata-form
+ * overlay names them with the platform pack's words (objectstack#37607, which
+ * retired the console-side renaming this file first pinned).
  *
  *  - en: the options read the spec's names, and never a stored preset.
- *  - zh: the options read the locale pack's names. POSITIVE CONTROL in the same
- *    run: the row's own zh label (默认时间段, from the metadata-form overlay),
- *    so a dead locale channel cannot pass for "not relabelled".
- *  - The spec's English names equal the en pack's rows, so the two surfaces
- *    that name a period (this select and the period chip) cannot drift apart.
+ *  - zh: the options read Chinese names. POSITIVE CONTROL in the same run: the
+ *    row's own zh label (默认时间段, from the same overlay), so a dead locale
+ *    channel cannot pass for "not relabelled".
+ *  - The select's names equal the rows the report page's period chip reads
+ *    (`dashboard.filters.range.*`, `dashboard.filters.custom`), in en and in zh,
+ *    so the two surfaces that name a period cannot drift apart.
  */
 
 import '@testing-library/jest-dom/vitest';
@@ -25,9 +26,10 @@ import { render, screen, fireEvent, cleanup, waitFor } from '@testing-library/re
 import '@objectstack/formula';
 import '@objectstack/lint';
 import { I18nProvider, en } from '@object-ui/i18n';
+import { zh } from '@object-ui/i18n/locales';
 import { reportForm } from '@objectstack/spec/ui';
 import { ReportDefaultInspector } from './ReportDefaultInspector';
-import { defaultPeriodLabelKey } from '../default-period-labels';
+import { getReportForm } from '../report-schema';
 import type { DatasetCatalogEntry } from '../previews/useDatasetCatalog';
 import { loadStudioCatalogue } from '@object-ui/i18n/namespaces/studio';
 await loadStudioCatalogue('zh');
@@ -99,12 +101,35 @@ async function openDefaultPeriod(sectionTitle: string, rowLabel: string): Promis
 
 const VALUES = specOptions().map((o) => o.value);
 
+/** The console row the period chip reads for a Default Period value. */
+const chipKey = (value: string) =>
+  value === 'custom' ? 'dashboard.filters.custom' : `dashboard.filters.range.${value}`;
+
+/** The Default Period options of the report form as `getReportForm` names them for `locale`. */
+function namedOptions(locale: string): Array<{ label: string; value: string }> {
+  for (const section of getReportForm(locale)?.sections ?? []) {
+    for (const field of (section.fields ?? []) as any[]) {
+      if (field?.field !== 'dateRange') continue;
+      const child = (field.fields ?? []).find((c: any) => c?.field === 'defaultRange');
+      if (child?.options) return child.options;
+    }
+  }
+  throw new Error('the report form names no dateRange.defaultRange options');
+}
+
+const readPack = (pack: unknown, key: string) =>
+  key.split('.').reduce((node: any, seg) => node?.[seg], pack as Record<string, any>);
+
 describe('#36835 — the Default Period select names its periods', () => {
   it('the spec English names are the en locale pack rows the period chip reads', () => {
-    const pack = en as unknown as Record<string, any>;
-    const read = (key: string) => key.split('.').reduce((node, seg) => node?.[seg], pack);
     for (const { value, label } of specOptions()) {
-      expect(read(defaultPeriodLabelKey(value)), value).toBe(label);
+      expect(readPack(en, chipKey(value)), value).toBe(label);
+    }
+  });
+
+  it('the zh names are the zh locale pack rows the period chip reads', () => {
+    for (const { value, label } of namedOptions('zh-CN')) {
+      expect(readPack(zh, chipKey(value)), value).toBe(label);
     }
   });
 
@@ -116,7 +141,7 @@ describe('#36835 — the Default Period select names its periods', () => {
     for (const value of VALUES) expect(offered, value).not.toContain(value);
   });
 
-  it('zh: every option reads the locale pack name', async () => {
+  it('zh: every option reads its Chinese name', async () => {
     renderIn('zh', 'zh-CN');
     // POSITIVE CONTROL: the row label comes through the zh overlay.
     const offered = await openDefaultPeriod('时间段与导出', '默认时间段');

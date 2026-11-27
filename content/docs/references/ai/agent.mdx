@@ -28,8 +28,8 @@ const result = AIModelConfigSchema.parse(data);
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **provider** | `Enum<'openai' \| 'azure_openai' \| 'anthropic' \| 'local'>` | optional (default: `"openai"`) |  |
-| **model** | `string` | ✅ | Model name (e.g. gpt-4, claude-3-opus) |
+| **provider** | `Enum<'openai' \| 'azure_openai' \| 'anthropic' \| 'local'>` | optional |  |
+| **model** | `string` | optional | Model name (e.g. gpt-4, claude-3-opus). Optional: when absent, the agent runs on the host's default model for this environment, so an agent that only tunes sampling (e.g. `temperature`) need not name a model. |
 | **temperature** | `number` | optional (default: `0.7`) |  |
 | **maxTokens** | `number` | optional |  |
 | **topP** | `number` | optional |  |
@@ -48,7 +48,7 @@ const result = AIModelConfigSchema.parse(data);
 | **avatar** | `string` | optional |  |
 | **role** | `string` | ✅ | The persona/role (e.g. "Senior Support Engineer") |
 | **instructions** | `string` | ✅ | System Prompt / Prime Directives |
-| **model** | `{ provider?: Enum<'openai' \| 'azure_openai' \| 'anthropic' \| 'local'>; model: string; temperature?: number; maxTokens?: number; … }` | optional |  |
+| **model** | `{ provider?: Enum<'openai' \| 'azure_openai' \| 'anthropic' \| 'local'>; model?: string; temperature?: number; maxTokens?: number; … }` | optional |  |
 | **lifecycle** | `never` | optional | [REMOVED] `agent.lifecycle` was removed in @objectstack/spec 17.7.0 (ADR-0049 enforce-or-remove) — no runtime ever read it: no agent moved through a declared state and no transition was ever refused. Delete the key. A phase of a conversation is a skill with its own `instructions` and `tools`, selected by its `triggerConditions` (ADR-0064); multi-step process orchestration is a Flow (ADR-0019); a record's status transitions are a `state_machine` validation rule on the object (ADR-0020). Run `os migrate meta --from 17` to list the mechanical edits for existing sources; `--write` applies the ones it can prove, and you apply the rest by hand. |
 | **surface** | `Enum<'ask' \| 'build'>` | optional (default: `"ask"`) | Product surface this agent binds ('ask' \| 'build') — ADR-0063 §1 |
 | **skills** | `string[]` | optional | Skill names to attach (Agent→Skill→Tool architecture) |
@@ -72,8 +72,8 @@ const result = AIModelConfigSchema.parse(data);
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **provider** | `Enum<'openai' \| 'azure_openai' \| 'anthropic' \| 'local'>` | optional (default: `"openai"`) |  |
-| **model** | `string` | ✅ | Model name (e.g. gpt-4, claude-3-opus) |
+| **provider** | `Enum<'openai' \| 'azure_openai' \| 'anthropic' \| 'local'>` | optional |  |
+| **model** | `string` | optional | Model name (e.g. gpt-4, claude-3-opus). Optional: when absent, the agent runs on the host's default model for this environment, so an agent that only tunes sampling (e.g. `temperature`) need not name a model. |
 | **temperature** | `number` | optional (default: `0.7`) |  |
 | **maxTokens** | `number` | optional |  |
 | **topP** | `number` | optional |  |
@@ -82,7 +82,7 @@ const result = AIModelConfigSchema.parse(data);
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **maxIterations** | `integer` | optional (default: `10`) | Maximum planning loop iterations |
+| **maxIterations** | `integer` | optional (default: `10`) | Runaway fuse counted in model calls (one call plus its tool batch), 1 to 1000; not a quality knob |
 
 ### Nested Shape: `Agent.memory`
 

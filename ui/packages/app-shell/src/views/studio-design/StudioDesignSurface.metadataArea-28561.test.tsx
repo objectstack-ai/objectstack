@@ -279,10 +279,10 @@ describe('the area\'s form editor in the builder (objectstack#28569)', () => {
     renderAt(`/studio/${PACKAGE_ID}/metadata/translation/ui_en?package=${PACKAGE_ID}`);
     const editor = await screen.findByTestId('form-editor', undefined, { timeout: 8000 });
     expect(editor).toHaveAttribute('data-customization', 'null');
-    expect(screen.queryByTestId('studio-changes-count')).toBeNull();
+    expect(screen.queryByTestId('studio-menu-overview-pending')).toBeNull();
     fireEvent.click(within(editor).getByRole('button', { name: 'save a draft' }));
     // The header counts the draft the save wrote, before its own re-read answers.
-    expect(await screen.findByTestId('studio-changes-count')).toHaveTextContent('1');
+    expect(await screen.findByTestId('studio-menu-overview-pending')).toHaveTextContent('1');
   });
 });
 
@@ -316,14 +316,17 @@ describe('⌘K on the builder (objectstack#36900)', () => {
     expect(current()).toHaveAttribute('data-testid', 'studio-menu-entry-type:flow');
   });
 
+  // objectstack#37565 — the leg's root redirects to Setup now, and the menu has no environment entry:
+  // the leg's cross-package list is a page it still draws, and its menu is the environment's.
   it('on the cross-package leg, Ctrl+K opens the palette again, with the environment menu', async () => {
     servePackages();
-    renderAt('/studio/~all/metadata');
+    renderAt('/studio/~all/metadata/flow?package=all');
     await areaPage();
 
     fireEvent.keyDown(document, { key: 'k', ctrlKey: true });
     await waitFor(() => expect(overlay()).not.toBeNull());
-    await waitFor(() => expect(paletteItem('studio-entry environment')).not.toBeNull());
+    await waitFor(() => expect(paletteItem('studio-entry orgFlows')).not.toBeNull());
+    expect(paletteItem('studio-entry environment')).toBeNull();
     expect(paletteItem('studio-entry diagnostics')).toBeNull();
   });
 
@@ -387,7 +390,7 @@ describe('⌘K and the header ask before they drop edits the item page holds (ob
     servePackages();
     renderAt(ITEM_URL);
     expect((await areaPage()).page).toBe('item');
-    fireEvent.click(await screen.findByTestId('studio-back-to-app'));
+    fireEvent.click(await screen.findByTestId('studio-package-back'));
     expect(confirmSpy).toHaveBeenCalledWith(ITEM_QUESTION);
     expect(where()).toBe(ITEM_URL);
   });

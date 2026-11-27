@@ -9624,6 +9624,10 @@ export class AutomationEngine implements IAutomationService {
             error:
                 `Invalid screen input: ${summary} — declared fields: ` +
                 `${declared.map((n) => `'${n}'`).join(', ') || '(none)'}`,
+            // [#37526] The same findings, one per field, so a runner can place
+            // each at its field in its own language rather than show `error`,
+            // which names the screen's declared fields for logs and API callers.
+            fields: issues.map(({ field, code, message }) => ({ field, code, message })),
         };
     }
 

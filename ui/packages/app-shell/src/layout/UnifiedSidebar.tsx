@@ -224,6 +224,28 @@ function isOverviewGroup(item: NavigationItem): boolean {
   return id === 'overview' || label === 'overview';
 }
 
+/**
+ * The ⋯ menu every entry carries (objectui#12427), as the `renderItemAction`
+ * the navigation renderer calls per row. Built once per pin store and app
+ * (objectstack#37575), so the memoised rows see the same callback across
+ * renders.
+ */
+function navItemActionRenderer(
+  togglePin: ReturnType<typeof useNavPins>['togglePin'],
+  activeApp: Parameters<typeof sidebarItemDesignPath>[1],
+) {
+  return (item: NavigationItem, row: NavItemActionContext) => (
+    <SidebarItemMenu
+      label={row.label}
+      href={row.href}
+      external={row.external}
+      isFavorite={!!item.pinned}
+      onToggleFavorite={() => togglePin(item.id, !item.pinned, item, row.basePath)}
+      designPath={sidebarItemDesignPath(item, activeApp)}
+    />
+  );
+}
+
 export function UnifiedSidebar({
   activeAppName,
   onAppChange,
@@ -385,11 +407,22 @@ export function UnifiedSidebar({
   // The template context every navigation href here resolves with; the area
   // election below matches routes with it too, so it agrees with the drawn
   // highlight.
-  const navTemplateContext = {
-    currentUserId: user?.id ?? null,
-    currentOrgId: activeOrganization?.id ?? null,
-    contextValues,
-  };
+  //
+  // objectstack#37575 — kept by content, not rebuilt per render: every row of
+  // the menu takes it as a prop and is memoised (`NavigationItemRenderer`), so
+  // a fresh object here redrew all of them each time the shell re-rendered.
+  // `contextValues` is a fresh map every render, so it is keyed by its text.
+  const contextValuesKey = JSON.stringify(contextValues);
+  const currentUserId = user?.id ?? null;
+  const currentOrgId = activeOrganization?.id ?? null;
+  const navTemplateContext = React.useMemo(
+    () => ({
+      currentUserId,
+      currentOrgId,
+      contextValues: JSON.parse(contextValuesKey) as Record<string, string>,
+    }),
+    [currentUserId, currentOrgId, contextValuesKey],
+  );
 
   // Area management.
   //
@@ -609,16 +642,10 @@ export function UnifiedSidebar({
   // draws no per-entry control (objectui#1055) and pinning stays off. Its
   // Design entry opens what the app bar's Edit app opens for the entry, in the
   // app whose navigation this is (objectui#12520).
-  const renderNavItemAction = (item: NavigationItem, row: NavItemActionContext) => (
-    <SidebarItemMenu
-      label={row.label}
-      href={row.href}
-      external={row.external}
-      isFavorite={!!item.pinned}
-      onToggleFavorite={() => togglePin(item.id, !item.pinned, item, row.basePath)}
-      designPath={sidebarItemDesignPath(item, activeApp)}
-    />
-  );
+  //
+  // objectstack#37575 — one callback across renders while the pin store and
+  // the app are the same, for the same reason as `navTemplateContext` above.
+  const renderNavItemAction = React.useMemo(() => navItemActionRenderer(togglePin, activeApp), [togglePin, activeApp]);
 
   // The favorites that are not navigation entries (an object, a record, a
   // dashboard, a page or an app the user starred) are rows of the same

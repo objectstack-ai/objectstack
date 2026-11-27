@@ -1,19 +1,21 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 //
-// [ADR-0066 D2 ⑧ note of 2026-11-15] A permission set's own explicit
-// `readable: false` row on a field binds that set's holders over the set's own
-// View All vote. Pinned here on a real boot, at the two doors a consumer
-// meets the rule on:
+// [ADR-0066 D2 ⑧ note of 2026-11-15; v19 #36055] A permission set's own
+// explicit `readable: false` row on a field binds that set's holders beside the
+// set's own View All. From v19 View All casts no field vote at all, so only
+// `viewAllFields` in another set reads the field. Pinned here on a real boot,
+// at the two doors a consumer meets the rule on:
 //
 //   - row-blind merge     `GET /auth/me/permissions` → `fields`
 //   - list projection     `GET /data/sys_business_unit`
 //
-// Two members are asked at each door. The first holds the pair alone (a set
+// Three members are asked at each door. The first holds the pair alone (a set
 // granting View All on the object and hiding four of its fields in its own
 // rows): the fields are not served. The second also holds a set that grants
-// View All on the object and names no field (the control the 2026-11-02 note
-// keeps, ruling of record 6573563853): another set's View All still reads
-// every field, and never edits one.
+// View All on the object with `viewAllFields: true` beside it (the ADR-0087
+// conversion's output) and names no field: it reads every field, and never
+// edits one. The third holds the pair and the same set UNCONVERTED, View All
+// alone: from v19 it reads none of the hidden fields (#36055 acceptance).
 //
 // The pure merges are pinned in
 // `packages/plugins/plugin-security/src/fls-own-field-mask-33828.test.ts` and
@@ -36,25 +38,30 @@ const MASKED = ['code', 'kind', 'manager_user_id', 'active'] as const;
 const STORED = ['code', 'kind', 'active'] as const;
 /** View All on the object, and the set's own rows hiding fields of it. */
 const PAIR_SET = 'showcase_scratch_bu_own_field_mask';
-/** View All on the object, and no field row. */
+/** View All and viewAllFields on the object (the converted shape), and no field row. */
 const SECOND_SET = 'showcase_scratch_bu_view_all';
+/** View All alone on the object (the unconverted shape), and no field row. */
+const UNCONVERTED_SET = 'showcase_scratch_bu_view_all_unconverted';
 const HOLDER = 'fls-own-field-mask.holder@verify.test';
 const BOTH = 'fls-own-field-mask.both@verify.test';
+const UNCONVERTED = 'fls-own-field-mask.unconverted@verify.test';
 
 const rowsOf = (b: any) => b?.records ?? b?.data ?? (Array.isArray(b) ? b : []);
 const has = (row: any, key: string) => Object.prototype.hasOwnProperty.call(row ?? {}, key);
 
-describe('[ADR-0066 ⑧ note of 2026-11-15] a set\'s own readable: false row binds its holders beside its own View All; a second View All set still reads', () => {
+describe('[ADR-0066 ⑧, v19 #36055] a set\'s own readable: false row binds its holders beside its own View All; only a second set\'s viewAllFields reads', () => {
   let stack: VerifyStack;
   let ql: any;
   let holderTok: string;
   let bothTok: string;
+  let unconvertedTok: string;
 
   beforeAll(async () => {
     stack = await bootShowcase({ security: showcaseAppDefaultSecurity() });
     const adminTok = await stack.signIn(); // the seeded platform admin first, so the sign-ups are plain members
     holderTok = await stack.signUp(HOLDER);
     bothTok = await stack.signUp(BOTH);
+    unconvertedTok = await stack.signUp(UNCONVERTED);
     ql = await stack.kernel.getServiceAsync('objectql');
 
     // Both sets are authored through the metadata door (ADR-0131 D3/D4).
@@ -68,8 +75,14 @@ describe('[ADR-0066 ⑧ note of 2026-11-15] a set\'s own readable: false row bin
       },
       {
         name: SECOND_SET,
-        label: 'Scratch: View All on business units',
-        description: 'Test-authored (ADR-0066 D2 ⑧ note of 2026-11-15): View All on the object, no field row.',
+        label: 'Scratch: View All and View All Fields on business units',
+        description: 'Test-authored (#36055): View All on the object with viewAllFields beside it, no field row.',
+        objects: { [OBJ]: { allowRead: true, viewAllRecords: true, viewAllFields: true } },
+      },
+      {
+        name: UNCONVERTED_SET,
+        label: 'Scratch: View All on business units, unconverted',
+        description: 'Test-authored (#36055): View All on the object alone, no field row.',
         objects: { [OBJ]: { allowRead: true, viewAllRecords: true } },
       },
     ];
@@ -82,11 +95,15 @@ describe('[ADR-0066 ⑧ note of 2026-11-15] a set\'s own readable: false row bin
     const holderId = (await ql.findOne('sys_user', { where: { email: HOLDER }, context: SYS }))?.id;
     const bothId = (await ql.findOne('sys_user', { where: { email: BOTH }, context: SYS }))?.id;
     expect(holderId, 'holder provisioned').toBeTruthy();
+    const unconvertedId = (await ql.findOne('sys_user', { where: { email: UNCONVERTED }, context: SYS }))?.id;
     expect(bothId, 'second member provisioned').toBeTruthy();
+    expect(unconvertedId, 'third member provisioned').toBeTruthy();
     const grants: Array<[string, string]> = [
       [holderId, PAIR_SET],
       [bothId, PAIR_SET],
       [bothId, SECOND_SET],
+      [unconvertedId, PAIR_SET],
+      [unconvertedId, UNCONVERTED_SET],
     ];
     for (const [user_id, permission_set] of grants) {
       await ql.insert('sys_user_permission_set', { user_id, permission_set }, { context: SYS });
@@ -109,7 +126,7 @@ describe('[ADR-0066 ⑧ note of 2026-11-15] a set\'s own readable: false row bin
     return body?.data ?? body;
   };
 
-  it('premise: the holder holds the pair alone; the second member holds the pair and the plain View All set; neither holds admin_full_access', async () => {
+  it('premise: the holder holds the pair alone; the second member holds the pair and the converted set; the third the pair and the unconverted set; none holds admin_full_access', async () => {
     const holder = await mePermissions(holderTok);
     expect(holder.permissionSets).toContain(PAIR_SET);
     expect(holder.permissionSets).not.toContain(SECOND_SET);
@@ -117,6 +134,9 @@ describe('[ADR-0066 ⑧ note of 2026-11-15] a set\'s own readable: false row bin
     const both = await mePermissions(bothTok);
     expect(both.permissionSets).toEqual(expect.arrayContaining([PAIR_SET, SECOND_SET]));
     expect(both.permissionSets).not.toContain('admin_full_access');
+    const unconverted = await mePermissions(unconvertedTok);
+    expect(unconverted.permissionSets).toEqual(expect.arrayContaining([PAIR_SET, UNCONVERTED_SET]));
+    expect(unconverted.permissionSets).not.toContain('admin_full_access');
   });
 
   // ── /auth/me/permissions — the row-blind merge ─────────────────────────────
@@ -125,9 +145,14 @@ describe('[ADR-0066 ⑧ note of 2026-11-15] a set\'s own readable: false row bin
     for (const f of MASKED) expect(fields?.[`${OBJ}.${f}`], f).toEqual({ readable: false, editable: false });
   });
 
-  it('[control] /auth/me/permissions: the second set\'s View All reads every hidden field, and edits none', async () => {
+  it('[control] /auth/me/permissions: the second set\'s viewAllFields reads every hidden field, and edits none', async () => {
     const { fields } = await mePermissions(bothTok);
     for (const f of MASKED) expect(fields?.[`${OBJ}.${f}`], f).toEqual({ readable: true, editable: false });
+  });
+
+  it('[v19 #36055] /auth/me/permissions: an unconverted View All set reads none of the hidden fields', async () => {
+    const { fields } = await mePermissions(unconvertedTok);
+    for (const f of MASKED) expect(fields?.[`${OBJ}.${f}`], f).toEqual({ readable: false, editable: false });
   });
 
   // ── list projection ─────────────────────────────────────────────────────────
@@ -148,5 +173,13 @@ describe('[ADR-0066 ⑧ note of 2026-11-15] a set\'s own readable: false row bin
     const row = rowsOf(await r.json()).find((candidate: any) => candidate.id === UNIT);
     expect(row, 'the second member lists the seeded unit').toBeTruthy();
     for (const f of STORED) expect(has(row, f), `second member list carries ${f}`).toBe(true);
+  });
+
+  it('[v19 #36055] list: the third member is served none of the hidden fields', async () => {
+    const r = await stack.apiAs(unconvertedTok, 'GET', `/data/${OBJ}`);
+    expect(r.status).toBe(200);
+    const rows = rowsOf(await r.json());
+    expect(rows.map((row: any) => row.id), 'the third member lists the seeded unit (vacuity guard)').toContain(UNIT);
+    for (const row of rows) for (const f of MASKED) expect(has(row, f), `third member list strips ${f} (row ${row.id})`).toBe(false);
   });
 });

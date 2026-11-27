@@ -34,8 +34,12 @@ export const AIModelConfigSchema = lazySchema(() => strictObject({
     top_p: 'topP', nucleus: 'topP',
   },
 }, {
-  provider: z.enum(['openai', 'azure_openai', 'anthropic', 'local']).default('openai'),
-  model: z.string().describe('Model name (e.g. gpt-4, claude-3-opus)'),
+  provider: z.enum(['openai', 'azure_openai', 'anthropic', 'local']).optional(),
+  model: z.string().optional().describe(
+    'Model name (e.g. gpt-4, claude-3-opus). Optional: when absent, the agent runs on the '
+    + 'host\'s default model for this environment, so an agent that only tunes sampling '
+    + '(e.g. `temperature`) need not name a model.',
+  ),
   temperature: z.number().min(0).max(2).default(0.7),
   maxTokens: z.number().optional(),
   topP: z.number().optional(),
@@ -414,8 +418,18 @@ export const AgentSchema = lazySchema(() => strictObject({
     history: AGENT_HISTORY,
     aliases: { maxSteps: 'maxIterations', maxLoops: 'maxIterations', iterations: 'maxIterations', maxTurns: 'maxIterations' },
   }, {
-    /** Maximum reasoning iterations before stopping */
-    maxIterations: z.number().int().min(1).max(100).default(10).describe('Maximum planning loop iterations'),
+    /**
+     * Runaway fuse for the agent's reasoning loop, counted in model calls: one
+     * iteration is one model call plus the batch of tool calls it requests. It
+     * stops a loop that would otherwise never end; it is not a quality knob, and
+     * raising it does not make the agent reason better.
+     *
+     * Any whole number from 1 to 1000 (default 10). The ceiling is 1000 so a
+     * long-running agent can declare a fuse of a few hundred rounds (300, say)
+     * while no value can switch the fuse off.
+     */
+    maxIterations: z.number().int().min(1).max(1000).default(10)
+      .describe('Runaway fuse counted in model calls (one call plus its tool batch), 1 to 1000; not a quality knob'),
   }).optional().describe('Autonomous reasoning and planning configuration'),
 
   /** Memory Management */

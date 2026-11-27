@@ -354,35 +354,36 @@ resolves keys with fallback:
 import type { II18nService } from '@objectstack/spec/contracts';
 ```
 
-(The contract's source `.ts` is not part of the published package — only
-`src/**/*.zod.ts` ships — so there is no `node_modules` source to read.)
+(Only `src/**/*.zod.ts` ships, so the contract's `.ts` source is not in `node_modules`.)
 
-Methods implemented by both shipped adapters (`FileI18nAdapter` from
+Methods both shipped adapters implement (`FileI18nAdapter` from
 `@objectstack/service-i18n`, and the in-memory fallback `@objectstack/core`
 registers when no i18n plugin is present):
 
 - **`t(key, locale, params?)`** — dot-path resolution (e.g. `objects.account.label`)
   with `{{param}}` interpolation and fallback-locale lookup
-- **`getTranslations(locale)`** — full snapshot for a locale
+- **`getTranslations(locale)`** — a locale's full snapshot
 - **`loadTranslations(locale, data)`** — programmatic load (deep-merge)
-- **`getLocales()`** / **`setSupportedLocales()`** / **`getDefaultLocale()`** / **`setDefaultLocale()`**
+- **`getLocales()`** / **`setSupportedLocales()`** / **`getDefaultLocale()`** / **`setDefaultLocale()`** / **`getSourceLocale()`** / **`setSourceLocale()`**
 
 The in-memory fallback additionally resolves locale codes through `resolveLocaleAmong`
 (`@objectstack/spec/system`), the one ladder `resolveBundleLocale` also runs: exact →
 case-insensitive → same platform-table language (`zh-TW` → `zh-Hant`) → base language
 `zh-CN` → `zh` → first registered variant `zh` → `zh-CN`.
 
-The contract also declares optional methods — `getFieldLabels`, `getCoverage`,
-`suggestTranslations` — that **no shipped implementation provides**. Treat them
-as extension points for a custom workbench or TMS adapter. (`getAppBundle` /
+The contract declares optional methods — `getFieldLabels`, `getCoverage`,
+`suggestTranslations` — that **no shipped implementation provides**: extension
+points for a custom workbench or TMS adapter. (`getAppBundle` /
 `loadAppBundle` went with the `o.*` shape they returned.)
 
 ### Registration
 
-You do not wire this plugin: `os serve` registers `I18nServicePlugin` itself whenever the
+Don't wire this plugin: `os serve` registers `I18nServicePlugin` itself whenever the
 stack config carries `translations` or `i18n` (kernel bootstrap is
-**objectstack-platform → Runtime Boot Sequence**). It self-registers
-`GET /api/v1/i18n/locales`, `/translations/:locale` and `/labels/:object/:locale`.
+**objectstack-platform → Runtime Boot Sequence**). The runtime's HTTP dispatcher,
+which `os serve` composes, mounts `GET /api/v1/i18n/locales`, `/translations/:locale` and
+`/labels/:object/:locale`, served from the i18n service; the locales
+answer marks the default locale (`isDefault`) and names `sourceLocale` (the declared one, else the default).
 
 ---
 

@@ -2698,7 +2698,7 @@ const STUDIO_EN: Record<string, string> = {
   'engine.studio.data.columnMenu': 'Sort and hide',
   'engine.studio.data.draftObjectTitle': 'Unpublished new object',
   'engine.studio.data.draftObjectHint':
-    'The Records grid queries real data, but this object has no table until it’s published. Design fields and groups in “Form · Layout” first, then click “Publish” in the top bar — after publishing, this becomes its live data grid.',
+    'The Records grid queries real data, but this object has no table until it’s published. Design fields and groups in “Form · Layout” first, then publish it from Overview › Pending — after publishing, this becomes its live data grid.',
   'engine.studio.data.goDesignFields': 'Go to “Form · Layout” to design fields',
   'engine.studio.data.form.layout': 'Layout',
   'engine.studio.data.form.preview': 'Preview',
@@ -2832,7 +2832,7 @@ const STUDIO_EN: Record<string, string> = {
   'engine.studio.access.title': 'Permission matrix',
   'engine.studio.access.subtitle': 'Object permissions · field-level read/write',
   'engine.studio.access.bannerTitle':
-    'Only this app’s objects are listed here, and saving changes only this app’s grants — grants from other apps stay as they are. Changes go live when you press Save in the top bar, as in Data and Interfaces.',
+    'Only this app’s objects are listed here, and saving changes only this app’s grants — grants from other apps stay as they are. Changes go live when you press Save in the page header, as in Data and Interfaces.',
   'engine.studio.access.banner': 'This app’s objects · live on save',
   // objectstack#29674 — the note on an open set the base's pair adds: its matrix lists the base's objects too.
   'engine.studio.access.bannerPair': 'This app’s and {package}’s objects · live on save',
@@ -2842,7 +2842,7 @@ const STUDIO_EN: Record<string, string> = {
   'engine.studio.copilot.subject.access': 'Access',
   'engine.studio.copilot.subject.flow': 'Flow',
   'engine.studio.access.bannerTitlePair':
-    'This permission set is part of the customization of {package}, so {package}’s objects are listed as well as this app’s, and saving changes only these grants — grants from other apps stay as they are. Changes go live when you press Save in the top bar.',
+    'This permission set is part of the customization of {package}, so {package}’s objects are listed as well as this app’s, and saving changes only these grants — grants from other apps stay as they are. Changes go live when you press Save in the page header.',
   // objectui#11781 — a read-only package saves no draft; objectui#12453 makes this the header link's title.
   'engine.studio.access.bannerTitleReadOnly':
     'Only this app’s objects are listed here. This app is read-only: you can view its permission sets but not change them.',
@@ -3519,8 +3519,9 @@ const STUDIO_EN: Record<string, string> = {
   // where Studio's entries that name no package land since the Studio home went.
   'engine.studio.notFound.packageList': 'Open the package list',
   // The same way out for a principal who may enter Studio but not open
-  // Setup → Packages: the "All metadata" area across packages.
-  'engine.studio.notFound.allMetadata': 'Open All metadata',
+  // Setup → Packages: the organization's flows (`~org`), which every
+  // principal who may enter Studio may open (objectstack#37565).
+  'engine.studio.notFound.allMetadata': 'Open organization flows',
   'engine.studio.notFound.pillar': 'This page does not exist. Studio has no "{pillar}" section; pick Data, Automations, Interfaces, Access or All metadata above.',
   'engine.studio.aiCopilot': 'AI Assistant',
   // objectui#12725 — the Studio right slot: properties OR the copilot.
@@ -3555,6 +3556,7 @@ const STUDIO_EN: Record<string, string> = {
   'engine.studio.menu.owd': 'Default sharing',
   'engine.studio.menu.diagnostics': 'Diagnostics',
   'engine.studio.menu.environment': 'Positions and permissions',
+  'engine.setup.accessDirectory.notAllowed': 'Opening this page needs the {capability} capability, the one Studio asks.',
   // objectstack#37201 — the 「高级」 fold (ADR-0084, amended 2026-11-25), and a 常用 type with no item yet.
   'engine.studio.menu.advanced': 'Advanced',
   'engine.studio.menu.emptyType': 'None yet: open the list to make the first',
@@ -3596,7 +3598,18 @@ const STUDIO_EN: Record<string, string> = {
   'engine.studio.backToApp': 'Back to app',
   'engine.studio.backToAppTitle': 'Leave Studio and go back to {app}',
   'engine.studio.backToAppTitleNoApp': 'Leave Studio and go back to your apps',
-  'engine.studio.mark': 'Studio',
+  // The Studio brand (ADR-0084): App Studio; a Chinese interface reads 应用搭建.
+  'engine.studio.mark': 'App Studio',
+  // objectstack#37456 — the package row of the top left (ADR-0084, amended
+  // 2026-11-26): the way back, then the package switcher. Studio's row reads
+  // `engine.studio.mark` for its name.
+  'engine.studio.pkg.switcher': 'Switch package',
+  'engine.studio.pkg.search': 'Search packages',
+  'engine.studio.pkg.noMatches': 'No package matches',
+  'engine.studio.pkg.newPackage': 'New package',
+  // The switcher's name for the package-less scope (`~org`): its menu lists more
+  // than flows, so it is not named after its flow entry.
+  'engine.studio.pkg.orgScope': 'Organization metadata',
   // objectstack#37139 — the 「⋯」 package menu beside the app or package name:
   // the development face's whole-package actions, for a manage_metadata holder.
   'engine.studio.packageMenu.trigger': 'Package actions',
@@ -3648,8 +3661,8 @@ const STUDIO_EN: Record<string, string> = {
   'engine.studio.customize.overrides': 'Overrides {package}',
   'engine.studio.customize.overridesTitle': 'This item replaces {package}’s item of the same name on this deployment. It was taken from {package} {basedOn}.',
   'engine.studio.customize.draftFooter': 'Edits save as a draft of this deployment’s customization; Publish applies them.',
-  // objectstack#36511 — the same footer in a Studio pillar, where the top bar's Save makes an edit live.
-  'engine.studio.customize.saveFooter': 'Edits go into this deployment’s customization when you press Save in the top bar.',
+  // objectstack#36511 — the same footer in a Studio pillar, where the header's Save makes an edit live (objectstack#37455).
+  'engine.studio.customize.saveFooter': 'Edits go into this deployment’s customization when you press Save in the page header.',
   'engine.studio.customize.restore': 'Restore package original',
   'engine.studio.customize.restoreConfirm': 'Restore {package}’s “{item}”?',
   'engine.studio.customize.restoreBody': 'This deployment’s customization of “{item}” is deleted, and {package}’s version is served again.',
@@ -3692,7 +3705,7 @@ const STUDIO_EN: Record<string, string> = {
   // objectstack#36748 — the new-app step of the package dialog (`newAppDoor.ts`),
   // run by the create-package dialog's 「同时创建应用」 (objectstack#37134).
   'engine.studio.newApp.nameTaken': 'The app “{label}” already uses the identifier “{name}”. Change the namespace under Advanced.',
-  'engine.studio.newApp.appFailed': '“{name}” was created, but its app could not go live: {reason}. Use Create app in the Studio top bar to try again.',
+  'engine.studio.newApp.appFailed': '“{name}” was created, but its app could not go live: {reason}. Open Application in the package’s menu and use New to try again.',
   // objectstack#28561 — assignments are Setup's (ADR-0146 D7): the area links
   // the Setup page in place of the section.
   'engine.studio.area.assignments.position': 'The people who hold this position are assigned in Setup.',
@@ -4431,6 +4444,7 @@ const STUDIO_EN: Record<string, string> = {
   'engine.bookPreview.tree': 'Resolved tree',
   'engine.bookPreview.audience.public': 'Public',
   'engine.bookPreview.audience.permissionSet': 'Permission set: {name}',
+  'engine.bookPreview.audience.systemPermission': 'Capability: {name}',
   'engine.bookPreview.audience.org': 'Org',
   'engine.bookPreview.slug': 'Slug: {slug}',
   'engine.bookPreview.noGroups': 'No groups yet',
@@ -4700,7 +4714,7 @@ const STUDIO_EN: Record<string, string> = {
   'engine.draftConflict.publishedOverwriteDescription':
     'Your version of {type} “{name}” will go live in place of the saved one, and the changes saved after you opened it will be lost.',
   'engine.studio.inspector.props': 'Properties',
-  'engine.studio.inspector.draftFooter': 'Edits go live when you press Save in the top bar.',
+  'engine.studio.inspector.draftFooter': 'Edits go live when you press Save in the page header.',
   'engine.studio.inspector.collapse': 'Collapse properties',
   'engine.studio.inspector.expand': 'Show properties',
   'engine.studio.inspector.emptyLine1': 'Click a block on the canvas,',

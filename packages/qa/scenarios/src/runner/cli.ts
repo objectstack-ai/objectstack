@@ -18,10 +18,12 @@
  *                        the app's MCP draft door with no project, publishes
  *                        the drafts as a person, then scores and runs the Run
  *                        half (`door.ts`, `doorMode`); the live `claude`
- *                        driver or a replay only
+ *                        driver, an external command on contract
+ *                        `objectstack-scenario-driver/2`, or a replay only
  *   --door-skills DIR    door mode: give the client the Claude Code skills in
  *                        DIR (the published `skills/`), as --ask-skills gives
- *                        them; absent ⇒ none
+ *                        them (an external command: in `door.skillsDir`);
+ *                        absent ⇒ none
  *   --door-skill-omit N[,N]
  *                        door mode: leave these skills of --door-skills out,
  *                        the arm without them; a name DIR holds no skill of
@@ -33,7 +35,8 @@
  *                        instead, a rules file the maintainer supplies from
  *                        outside the repository (`door.ts` states the format);
  *                        default the OS_SCENARIOS_DOOR_RULES variable (a file
- *                        or `builtin`); absent ⇒ none
+ *                        or `builtin`); absent ⇒ none; the live `claude`
+ *                        driver only
  *   --door-rules-omit S[,S]
  *                        door mode: leave these rule ids or named sets of the
  *                        rules out, the arm without them (the built-in sets:
@@ -345,7 +348,7 @@ export type DriverModels = Pick<CliArgs, 'model' | 'authorModel' | 'askModel'>;
 /** The effort levels a run may ask the live driver for: `--effort`, `--author-effort`, `--ask-effort`. */
 export type DriverEfforts = Pick<CliArgs, 'effort' | 'authorEffort' | 'askEffort'>;
 
-/** The skills a run may give the live `claude` driver: `--ask-skills`, and door mode's arm (`--door-*`). */
+/** The skills a run may give the live driver: `--ask-skills` (`claude` only), and door mode's arm (`--door-*`; an external command takes its skills, not its rules). */
 export type DriverSkills = Pick<CliArgs, 'askSkills' | 'doorSkills' | 'doorSkillOmit' | 'doorRules' | 'doorRulesOmit'>;
 
 const LIVE_FLAGS: ReadonlyArray<readonly [keyof (DriverLimits & DriverModels & DriverEfforts & DriverSkills), string]> = [
@@ -400,7 +403,12 @@ export function makeDriver(spec: string, opts: DriverLimits & DriverModels & Dri
     throw new Error(`--ask-skills applies to the live \`claude\` driver only: it places Claude Code skills where a \`claude\` session discovers them and allows its \`Skill\` tool, and \`${spec}\` has neither`);
   }
   const door = givenFlags(opts, ['doorSkills', 'doorSkillOmit', 'doorRules', 'doorRulesOmit']);
-  if (door.length && spec !== 'claude' && !spec.startsWith('recorded:')) throw new Error(`${door.join(', ')}: ${doorModeRefusal(`\`${spec}\``)}`);
+  if (door.length && spec !== 'claude' && !spec.startsWith('recorded:') && !spec.startsWith('external:')) throw new Error(`${door.join(', ')}: ${doorModeRefusal(`\`${spec}\``)}`);
+  // An external command takes door mode's skills (contract `/2`, `drivers/external.ts`); the rules arm is a Claude Code session's `CLAUDE.md`.
+  const rules = givenFlags(opts, ['doorRules', 'doorRulesOmit']);
+  if (rules.length && spec.startsWith('external:')) {
+    throw new Error(`${rules.join(', ')} ${rules.length === 1 ? 'applies' : 'apply'} to the live \`claude\` driver only: the rules reach its client as the \`CLAUDE.md\` a Claude Code session reads, and the external driver contract carries no rules (\`--door-skills\` reaches an external command)`);
+  }
   if (spec.startsWith('recorded:')) {
     const given = givenFlags(opts);
     if (given.length) throw new Error(`${given.join(', ')} ${given.length === 1 ? 'applies' : 'apply'} to the live driver only: a replay re-reads each turn as it was recorded`);
@@ -434,6 +442,8 @@ export function makeDriver(spec: string, opts: DriverLimits & DriverModels & Dri
       ...(opts.effort !== undefined ? { effort: opts.effort } : {}),
       ...(opts.authorEffort !== undefined ? { authorEffort: opts.authorEffort } : {}),
       ...(opts.askEffort !== undefined ? { askEffort: opts.askEffort } : {}),
+      ...(opts.doorSkills !== undefined ? { doorSkillsDir: opts.doorSkills } : {}),
+      ...(opts.doorSkillOmit !== undefined ? { doorSkillOmit: opts.doorSkillOmit } : {}),
     });
   }
   throw new Error(`unknown driver \`${spec}\` (claude, codex, external:COMMAND, recorded:FILE)`);
@@ -559,8 +569,13 @@ export async function main(argv: readonly string[]): Promise<number> {
     args.doorRules = envRules;
     console.log(`door rules: ${DOOR_RULES_ENV} names the rules file`);
   }
-  if (args.modes.includes('door') && args.driver !== 'claude' && !args.driver.startsWith('recorded:')) throw new Error(doorModeRefusal(`\`--driver ${args.driver}\``));
+  if (args.doorRules === undefined && envRules && args.modes.includes('door') && args.driver.startsWith('external:')) {
+    console.log(`door rules: ${DOOR_RULES_ENV} is set and not used — the rules arm is the live \`claude\` driver's, and an external command is given none`);
+  }
+  if (args.modes.includes('door') && args.driver !== 'claude' && !args.driver.startsWith('recorded:') && !args.driver.startsWith('external:')) throw new Error(doorModeRefusal(`\`--driver ${args.driver}\``));
   const live = makeDriver(args.driver, args, checkout ? { repoRoot: repo } : {});
+  // Door mode hands an external command a door only on contract `/2`: a `/1` command is refused here, before any card runs.
+  if (args.modes.includes('door') && live instanceof ExternalDriver) live.assertDoor();
   // A replay reads the first N asks of each question turn: refused here, before any card runs, when it holds fewer.
   if (args.askRepeats !== undefined && live instanceof RecordedDriver) live.assertAskRepeats(args.askRepeats, chosen.map((c) => c.card));
   // A replay under other prompts than its recording's would grade one choice's answers as another's: refused here, before any card runs.

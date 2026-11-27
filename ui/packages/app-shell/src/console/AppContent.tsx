@@ -80,6 +80,8 @@ import {
   setupMetadataRest,
   setupMetadataStudioPath,
 } from '../views/studio-design/setupMetadataRedirect.js';
+import { usePermissions } from '@object-ui/permissions';
+import { holdsSetupAccess } from '../views/setup/accessDirectoryRef.js';
 import { NO_RECORD_DRAWERS_OPENING, NO_RECORD_PAGE_DRAWERS_OPEN, RecordDrawerOpeningProvider, RecordPageDrawerOpenProvider, useRecordFormOpensOverDrawers, type RecordDrawersOpening, type RecordPageDrawersOpen } from '../views/recordDrawerStack.js';
 import { SkeletonGrid } from '../skeletons/index.js';
 
@@ -279,13 +281,15 @@ function DraftReviewNavigator({ appName }: { appName: string | undefined }) {
   const { reviewSeq, reviewTarget } = useAssistant();
   const navigate = useNavigate();
   const lastSeq = useRef(reviewSeq);
+  // objectstack#37565 — the environment directory is Setup's page only for whoever may open Setup.
+  const setupAccess = holdsSetupAccess(usePermissions().systemPermissions);
   useEffect(() => {
     if (reviewSeq === lastSeq.current || !reviewTarget || !appName) return;
     lastSeq.current = reviewSeq;
     const { type, name } = reviewTarget;
     const item = `${encodeURIComponent(type)}/${encodeURIComponent(name)}`;
-    navigate(setupMetadataStudioPath(item, 'review=1') ?? `/apps/${appName}/metadata/${item}?review=1`);
-  }, [reviewSeq, reviewTarget, appName, navigate]);
+    navigate(setupMetadataStudioPath(item, 'review=1', '', setupAccess) ?? `/apps/${appName}/metadata/${item}?review=1`);
+  }, [reviewSeq, reviewTarget, appName, navigate, setupAccess]);
   return null;
 }
 
@@ -327,9 +331,17 @@ export { buildExpressionUser };
  */
 export const RECORD_NAMED_PAGE_ROUTE = ':objectName/record/:recordId/page/:pageName';
 
+/** The `data` the console's expression scope binds: none, one object for every render (objectstack#37575). */
+const NO_EXPRESSION_DATA: Record<string, unknown> = {};
 export function AppContent({ extraRoutes, extraRoutesNoApp }: AppContentProps = {}) {
   const [connectionState, setConnectionState] = useState<ConnectionState>('disconnected');
   const { user, getAuthConfig, activeOrganization } = useAuth();
+  // objectstack#37575 — built once per signed-in user, not once per render:
+  // `ExpressionProvider` rebuilds its evaluator whenever `user` or `data` is a
+  // new object, and every navigation row, action and field predicate under it
+  // re-evaluates against the new evaluator. On a list page's first load this
+  // component re-renders about ten times as boot reads land.
+  const expressionUser = useMemo(() => buildExpressionUser(user), [user]);
   // objectui#4473 — read at the top (hooks are unconditional); consumed by the
   // no-app guard far below, where the comment explains what it decides.
   const { isAdmin: isWorkspaceAdmin, isResolved: isWorkspaceAdminResolved } = useWorkspaceAdminStatus();
@@ -1579,10 +1591,8 @@ export function AppContent({ extraRoutes, extraRoutesNoApp }: AppContentProps = 
     );
   }
 
-  const expressionUser = buildExpressionUser(user);
-
   return (
-    <ExpressionProvider user={expressionUser} app={activeApp} data={{}} features={features}>
+    <ExpressionProvider user={expressionUser} app={activeApp} data={NO_EXPRESSION_DATA} features={features}>
       {/* Session scope for `{current_user_id}` / `{current_org_id}` filter
           placeholders. Mounted here rather than folded into the expression
           scope above: that one is the predicate evaluation context (it carries
@@ -2193,7 +2203,9 @@ function looksLikeRecordId(segment: string | undefined): boolean {
 function SetupMetadataRoute({ children }: { children?: ReactNode }) {
   const location = useLocation();
   const rest = setupMetadataRest(location.pathname) ?? '';
-  const target = setupMetadataStudioPath(rest, location.search, location.hash);
+  // objectstack#37565 — the environment directory is Setup's page only for whoever may open Setup.
+  const setupAccess = holdsSetupAccess(usePermissions().systemPermissions);
+  const target = setupMetadataStudioPath(rest, location.search, location.hash, setupAccess);
   if (target === null) return <>{children ?? <RouteNotFound />}</>;
   return <Navigate to={target} replace />;
 }
@@ -2236,7 +2248,9 @@ function LegacyMetadataRedirect({ mode }: { mode: 'directory' | 'resource' }) {
     ? (location.pathname.match(/\/component\/metadata\/resource(\/.*)?$/)?.[1] ?? '').replace(/^\/+/, '')
     : '';
   const rest = type ? [encodeURIComponent(type), tail].filter(Boolean).join('/') : '';
-  const target = setupMetadataStudioPath(rest, mode === 'directory' ? location.search : sp.toString(), location.hash);
+  // objectstack#37565 — the environment directory is Setup's page only for whoever may open Setup.
+  const setupAccess = holdsSetupAccess(usePermissions().systemPermissions);
+  const target = setupMetadataStudioPath(rest, mode === 'directory' ? location.search : sp.toString(), location.hash, setupAccess);
   if (target === null) {
     return <Navigate to={`${appBase}/metadata/${rest}${location.hash}`} replace />;
   }

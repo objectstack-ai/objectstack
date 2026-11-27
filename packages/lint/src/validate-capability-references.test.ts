@@ -335,3 +335,28 @@ describe('[#22161] one-line verdicts — capability-reference-unknown', () => {
     expect(text).toContain('fails CLOSED');
   });
 });
+
+// [ADR-0046 §6.7] A `{ systemPermission }` book audience is a capability gate
+// on a manual: the docs reads serve its pages only to a holder, so a typo hides
+// the manual from everyone. It resolves against the same known set.
+describe('book audience — a { systemPermission } manual is resolved like every capability gate', () => {
+  it('warns on a typo at the book audience, at its own path, and passes a built-in and a granted one', () => {
+    const findings = validateCapabilityReferences({
+      permissions: [{ name: 'crm_docs', systemPermissions: ['crm.read_runbook'] }],
+      books: [
+        { name: 'setup_manual', audience: { systemPermission: 'setup.access' }, groups: [] },
+        { name: 'crm_runbook', audience: { systemPermission: 'crm.read_runbook' }, groups: [] },
+        { name: 'crm_typo', audience: { systemPermission: 'crm.read_runbok' }, groups: [] },
+        // Not capability gates: nothing to resolve.
+        { name: 'crm_sets', audience: { permissionSet: 'crm_docs' }, groups: [] },
+        { name: 'crm_org', audience: 'org', groups: [] },
+        { name: 'crm_public', audience: 'public', groups: [] },
+      ],
+    });
+    expect(findings.map((f) => [f.where, f.path])).toEqual([
+      ['book "crm_typo"', 'books[2].audience.systemPermission'],
+    ]);
+    expect(findings[0]).toMatchObject({ severity: 'warning', rule: CAPABILITY_REFERENCE_UNKNOWN });
+    expect(findings[0].message).toContain('audience.systemPermission names capability "crm.read_runbok"');
+  });
+});

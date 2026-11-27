@@ -114,7 +114,12 @@ export const enMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       },
       "fieldGroups.collapse": {
         label: "Collapse",
-        helpText: "Whether the section can be collapsed. The entry form follows it as set. The default record page lets the reader fold every titled group, so there it only sets the first state: Collapsed starts closed, the others start open. Unset: none."
+        helpText: "Whether the section can be collapsed. The entry form follows it as set. The default record page lets the reader fold every titled group, so there it only sets the first state: Collapsed starts closed, the others start open. Unset: none.",
+        options: {
+          none: "None — always open on the entry form, no toggle",
+          expanded: "Expanded — collapsible, starts open",
+          collapsed: "Collapsed — collapsible, starts closed"
+        }
       },
       "fieldGroups.visibleWhen": {
         label: "Visible When",
@@ -134,7 +139,56 @@ export const enMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       },
       "fields.type": {
         label: "Type",
-        helpText: "Field type"
+        helpText: "Field type",
+        options: {
+          text: "Text",
+          textarea: "Textarea",
+          email: "Email",
+          url: "URL",
+          phone: "Phone",
+          password: "Password",
+          markdown: "Markdown",
+          html: "HTML",
+          richtext: "Rich Text",
+          number: "Number",
+          currency: "Currency",
+          percent: "Percent",
+          date: "Date",
+          datetime: "Date & Time",
+          time: "Time",
+          boolean: "Boolean",
+          toggle: "Toggle",
+          select: "Select",
+          multiselect: "Multiselect",
+          radio: "Radio",
+          checkboxes: "Checkboxes",
+          lookup: "Lookup (reference)",
+          master_detail: "Master–Detail",
+          tree: "Tree",
+          image: "Image",
+          file: "File",
+          avatar: "Avatar",
+          video: "Video",
+          audio: "Audio",
+          formula: "Formula (computed)",
+          summary: "Summary (rollup)",
+          autonumber: "Autonumber",
+          composite: "Composite (embedded)",
+          repeater: "Repeater (embedded array)",
+          record: "Record (keyed map)",
+          location: "Location (GPS)",
+          address: "Address",
+          code: "Code",
+          json: "JSON",
+          color: "Color",
+          rating: "Rating",
+          slider: "Slider",
+          signature: "Signature",
+          qrcode: "QR / Barcode",
+          progress: "Progress",
+          tags: "Tags",
+          vector: "Vector embedding"
+        }
       },
       "fields.description": {
         label: "Description",
@@ -186,7 +240,12 @@ export const enMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       },
       "fields.valueDomain": {
         label: "Value Domain",
-        helpText: "Standard the written value must belong to; a write carrying a non-member is refused"
+        helpText: "Standard the written value must belong to; a write carrying a non-member is refused",
+        options: {
+          iana_time_zone: "IANA time zone",
+          iso_4217_currency: "ISO 4217 currency code",
+          iso_3166_alpha2: "ISO 3166-1 alpha-2 country code"
+        }
       },
       "fields.rows": {
         label: "Rows",
@@ -226,7 +285,12 @@ export const enMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       },
       "fields.options.kind": {
         label: "Kind",
-        helpText: "Lifecycle category (single-value select / radio only): a step on the way, the successful end, or the unsuccessful end. Required on every option of the stage field."
+        helpText: "Lifecycle category (single-value select / radio only): a step on the way, the successful end, or the unsuccessful end. Required on every option of the stage field.",
+        options: {
+          open: "Open",
+          won: "Won",
+          lost: "Lost"
+        }
       },
       "fields.reference": {
         label: "Reference",
@@ -238,11 +302,20 @@ export const enMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       },
       "fields.deleteBehavior": {
         label: "Delete Behavior",
-        helpText: "What happens when the referenced record is deleted"
+        helpText: "What happens when the referenced record is deleted",
+        options: {
+          set_null: "Set null",
+          cascade: "Cascade (delete children)",
+          restrict: "Restrict (block the delete)"
+        }
       },
       "fields.transferBehavior": {
         label: "Transfer Behavior",
-        helpText: "Whether Change Owner on the referenced record can also move the records that point at it through this field"
+        helpText: "Whether Change Owner on the referenced record can also move the records that point at it through this field",
+        options: {
+          none: "None (stay with their owner)",
+          cascade: "Cascade (offer to move with the referenced record)"
+        }
       },
       "fields.multiple": {
         label: "Multiple",
@@ -254,7 +327,15 @@ export const enMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       },
       "fields.returnType": {
         label: "Return Type",
-        helpText: "Result type for formulas"
+        helpText: "Result type for formulas",
+        options: {
+          text: "Text",
+          number: "Number",
+          boolean: "Boolean",
+          date: "Date",
+          currency: "Currency",
+          percent: "Percent"
+        }
       },
       "fields.summaryOperations": {
         label: "Summary Operations",
@@ -270,7 +351,14 @@ export const enMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       },
       "fields.summaryOperations.function": {
         label: "Function",
-        helpText: "Aggregation function"
+        helpText: "Aggregation function",
+        options: {
+          count: "Count",
+          sum: "Sum",
+          avg: "Avg",
+          min: "Min",
+          max: "Max"
+        }
       },
       "fields.autonumberFormat": {
         label: "Autonumber Format",
@@ -375,15 +463,31 @@ export const enMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       },
       "indexes.unique": {
         label: "Unique",
-        helpText: "Uniqueness scope (ADR-0120). Unset: not unique. The deprecated bare true (it means global) is not offered; an index that carries it keeps it until you pick a scope."
+        helpText: "Uniqueness scope (ADR-0120). Unset: not unique. The deprecated bare true (it means global) is not offered; an index that carries it keeps it until you pick a scope.",
+        options: {
+          global: "Global — one holder across the installation, over exactly these columns",
+          organization: "Organization — one holder per organization (the driver prepends the organization column)"
+        }
       },
       ownership: {
         label: "Ownership",
-        helpText: "Record-ownership model. Absent resolves to user."
+        helpText: "Record-ownership model. Absent resolves to user.",
+        options: {
+          user: "User — reassignable owner_id plus owning_business_unit_id",
+          business_unit: "Business unit — owning_business_unit_id only, no owner_id",
+          org: "Organization",
+          none: "None — no per-record owner, neither anchor"
+        }
       },
       sharingModel: {
         label: "Sharing Model",
-        helpText: "Org-Wide Default record visibility for internal users. A custom object that omits it resolves to private at runtime (ADR-0090 D1)."
+        helpText: "Org-Wide Default record visibility for internal users. A custom object that omits it resolves to private at runtime (ADR-0090 D1).",
+        options: {
+          private: "Private — owner only",
+          public_read: "Public read — everyone reads, owner writes",
+          public_read_write: "Public read/write — everyone reads and writes",
+          controlled_by_parent: "Controlled by parent — derived from the master record"
+        }
       },
       sharing: {
         label: "Sharing",
@@ -407,7 +511,11 @@ export const enMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       },
       "access.default": {
         label: "Default",
-        helpText: "public: covered by '*' wildcard grants. private: needs an explicit per-object grant, and is exempt from wildcard row-level security."
+        helpText: "public: covered by '*' wildcard grants. private: needs an explicit per-object grant, and is exempt from wildcard row-level security.",
+        options: {
+          public: "Public — covered by wildcard (*) grants",
+          private: "Private — needs an explicit per-object grant"
+        }
       },
       requiredPermissions: {
         label: "Required Permissions",
@@ -423,11 +531,22 @@ export const enMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       },
       "publicSharing.allowedAudiences": {
         label: "Allowed Audiences",
-        helpText: "Audiences a new link may name; any other is refused. Unset: link only. Every audience still needs the link itself: signed in also needs a signed-in user, and email also needs the recipient's address on the link's list."
+        helpText: "Audiences a new link may name; any other is refused. Unset: link only. Every audience still needs the link itself: signed in also needs a signed-in user, and email also needs the recipient's address on the link's list.",
+        options: {
+          public: "Public",
+          link_only: "Link only — anyone with the link",
+          signed_in: "Signed in — signed-in users with the link",
+          email: "Email — listed recipients with the link"
+        }
       },
       "publicSharing.allowedPermissions": {
         label: "Allowed Permissions",
-        helpText: "Permission levels a new link may grant; any other is refused. Unset: view only."
+        helpText: "Permission levels a new link may grant; any other is refused. Unset: view only.",
+        options: {
+          view: "View",
+          comment: "Comment",
+          edit: "Edit"
+        }
       },
       "publicSharing.maxExpiryDays": {
         label: "Max Expiry Days",
@@ -487,7 +606,11 @@ export const enMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       },
       editMode: {
         label: "Edit Mode",
-        helpText: "Edit-interaction intent for records of this object. Absent, the renderer picks its own default. Cross-renderer intent, not styling."
+        helpText: "Edit-interaction intent for records of this object. Absent, the renderer picks its own default. Cross-renderer intent, not styling.",
+        options: {
+          modal: "Modal — edit form as a dialog over the current view",
+          page: "Page — navigate to a dedicated full-page edit route"
+        }
       },
       fileAccessDelegate: {
         label: "File Access Delegate",
@@ -499,7 +622,14 @@ export const enMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       },
       "lifecycle.class": {
         label: "Class",
-        helpText: "Persistence contract for the rows of this object"
+        helpText: "Persistence contract for the rows of this object",
+        options: {
+          record: "Record (business truth — permanent)",
+          audit: "Audit (compliance ledger — retain → archive → delete)",
+          telemetry: "Telemetry (high-frequency log — short retention)",
+          transient: "Transient (ephemeral state — TTL expiry)",
+          event: "Event (bus messages — very short TTL)"
+        }
       },
       "lifecycle.retention": {
         label: "Retention",
@@ -527,7 +657,10 @@ export const enMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       },
       "lifecycle.storage.strategy": {
         label: "Strategy",
-        helpText: "Storage strategy"
+        helpText: "Storage strategy",
+        options: {
+          rotation: "Rotation (time-shard + drop oldest)"
+        }
       },
       "lifecycle.storage.shards": {
         label: "Shards",
@@ -535,7 +668,12 @@ export const enMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       },
       "lifecycle.storage.unit": {
         label: "Unit",
-        helpText: "Time width of one shard"
+        helpText: "Time width of one shard",
+        options: {
+          day: "Day",
+          week: "Week",
+          month: "Month"
+        }
       },
       "lifecycle.archive": {
         label: "Archive",
@@ -666,7 +804,11 @@ export const enMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       },
       percentDisplay: {
         label: "Percent Display",
-        helpText: "How the value is shown read-only, in list cells and on the record page. Unset: a progress bar beside the percentage. Bar: always the progress bar, for progress. Plain: the percentage alone, for a rate or a probability."
+        helpText: "How the value is shown read-only, in list cells and on the record page. Unset: a progress bar beside the percentage. Bar: always the progress bar, for progress. Plain: the percentage alone, for a rate or a probability.",
+        options: {
+          bar: "Bar",
+          plain: "Plain"
+        }
       },
       currencyConfig: {
         label: "Currency Config",
@@ -674,7 +816,12 @@ export const enMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       },
       "currencyConfig.currencyMode": {
         label: "Currency Mode",
-        helpText: "dynamic (the default): the field has no currency of its own, and amounts display in the tenant default currency (the localization.currency setting). fixed: the field has one currency, defaultCurrency. record: each record has its own currency, stored in the field currencyField names."
+        helpText: "dynamic (the default): the field has no currency of its own, and amounts display in the tenant default currency (the localization.currency setting). fixed: the field has one currency, defaultCurrency. record: each record has its own currency, stored in the field currencyField names.",
+        options: {
+          dynamic: "Dynamic — the tenant default currency",
+          fixed: "Fixed — one currency for this field",
+          record: "Record — each record names its currency"
+        }
       },
       "currencyConfig.currencyField": {
         label: "Currency Field",
@@ -771,11 +918,19 @@ export const enMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       },
       deleteBehavior: {
         label: "Delete Behavior",
-        helpText: "What happens when referenced record is deleted"
+        helpText: "What happens when referenced record is deleted",
+        options: {
+          cascade: "Cascade (delete children)",
+          restrict: "Restrict (block the delete)"
+        }
       },
       transferBehavior: {
         label: "Transfer Behavior",
-        helpText: "Whether Change Owner on the referenced record can also move the records that point at it through this field"
+        helpText: "Whether Change Owner on the referenced record can also move the records that point at it through this field",
+        options: {
+          none: "None (stay with their owner)",
+          cascade: "Cascade (offer to move with the referenced record)"
+        }
       },
       relatedListFilter: {
         label: "Related List Filter",
@@ -819,7 +974,11 @@ export const enMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       },
       inlineEdit: {
         label: "Inline Edit",
-        helpText: "How the parent's form edits this child's rows when a field group of the parent names this child (fieldGroups[].relatedList). Unset: picked from this object's fields."
+        helpText: "How the parent's form edits this child's rows when a field group of the parent names this child (fieldGroups[].relatedList). Unset: picked from this object's fields.",
+        options: {
+          grid: "Grid (edit rows in a table)",
+          form: "Form (open each row in its full form)"
+        }
       },
       inlineTitle: {
         label: "Inline Title",
@@ -855,7 +1014,15 @@ export const enMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       },
       returnType: {
         label: "Return Type",
-        helpText: "Declared value type of the formula, stamped from the inferred CEL type. Consumers read it instead of re-parsing the expression. Currency: an amount of money, in the currency the Currency Config of this field declares (dynamic when unset). Percent: a ratio, shown as a percent field shows it — a fraction, so 0.25 reads 25%."
+        helpText: "Declared value type of the formula, stamped from the inferred CEL type. Consumers read it instead of re-parsing the expression. Currency: an amount of money, in the currency the Currency Config of this field declares (dynamic when unset). Percent: a ratio, shown as a percent field shows it — a fraction, so 0.25 reads 25%.",
+        options: {
+          text: "Text",
+          number: "Number",
+          boolean: "Boolean",
+          date: "Date",
+          currency: "Currency",
+          percent: "Percent"
+        }
       },
       summaryOperations: {
         label: "Summary Operations",
@@ -867,7 +1034,14 @@ export const enMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       },
       "summaryOperations.function": {
         label: "Function",
-        helpText: "Aggregation function"
+        helpText: "Aggregation function",
+        options: {
+          count: "Count",
+          sum: "Sum",
+          min: "Min",
+          max: "Max",
+          avg: "Average"
+        }
       },
       "summaryOperations.field": {
         label: "Field",
@@ -1007,7 +1181,11 @@ export const enMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       },
       "body.language": {
         label: "Language",
-        helpText: "expression = pure formula; js = sandboxed JavaScript"
+        helpText: "expression = pure formula; js = sandboxed JavaScript",
+        options: {
+          expression: "Expression (L1)",
+          js: "JavaScript (L2 sandboxed)"
+        }
       },
       "body.source": {
         label: "Source",
@@ -1070,7 +1248,11 @@ export const enMetadataForms: NonNullable<TranslationData['metadataForms']> = {
         helpText: "Run in background, do not block the transaction"
       },
       onError: {
-        label: "On Error"
+        label: "On Error",
+        options: {
+          abort: "Abort",
+          log: "Log"
+        }
       },
       timeoutMs: {
         label: "Timeout Ms",
@@ -1078,7 +1260,12 @@ export const enMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       },
       runAs: {
         label: "Run As",
-        helpText: "Identity for ctx.api data operations: inherit the triggering write (default), system (elevated), or user (the triggering user)"
+        helpText: "Identity for ctx.api data operations: inherit the triggering write (default), system (elevated), or user (the triggering user)",
+        options: {
+          inherit: "Inherit (triggering write)",
+          system: "System (elevated)",
+          user: "User (triggering user)"
+        }
       },
       condition: {
         label: "Condition",
@@ -1516,7 +1703,14 @@ export const enMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       },
       type: {
         label: "Type",
-        helpText: "Page kind. \"List / Interface\" binds a source view into a curated surface — how it looks (grid / kanban / calendar / …) is a visualization set under Interface, not a page type."
+        helpText: "Page kind. \"List / Interface\" binds a source view into a curated surface — how it looks (grid / kanban / calendar / …) is a visualization set under Interface, not a page type.",
+        options: {
+          list: "List / Interface page",
+          record: "Record page",
+          home: "Home page",
+          app: "App page",
+          utility: "Utility panel"
+        }
       },
       template: {
         label: "Template",
@@ -1629,7 +1823,12 @@ export const enMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       },
       "interfaceConfig.recordAction": {
         label: "Record Action",
-        helpText: "How clicking a record opens its detail"
+        helpText: "How clicking a record opens its detail",
+        options: {
+          drawer: "Drawer (right-side peek)",
+          page: "Full page",
+          none: "Not clickable"
+        }
       },
       "interfaceConfig.showRecordCount": {
         label: "Show Record Count",
@@ -1794,7 +1993,26 @@ export const enMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       },
       "dateRange.defaultRange": {
         label: "Default Period",
-        helpText: "The period the dashboard opens with."
+        helpText: "The period the dashboard opens with.",
+        options: {
+          today: "Today",
+          yesterday: "Yesterday",
+          this_week: "This week",
+          last_week: "Last week",
+          this_month: "This month",
+          last_month: "Last month",
+          next_month: "Next month",
+          this_quarter: "This quarter",
+          last_quarter: "Last quarter",
+          next_quarter: "Next quarter",
+          this_year: "This year",
+          last_year: "Last year",
+          last_7_days: "Last 7 days",
+          last_30_days: "Last 30 days",
+          last_90_days: "Last 90 days",
+          next_30_days: "Next 30 days",
+          custom: "Custom…"
+        }
       },
       "dateRange.allowCustomRange": {
         label: "Allow Custom Range",
@@ -1970,7 +2188,13 @@ export const enMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       },
       mode: {
         label: "Mode",
-        helpText: "Semantic mode of the action. Read today by the AI human-in-the-loop heuristic only — no renderer branches on it."
+        helpText: "Semantic mode of the action. Read today by the AI human-in-the-loop heuristic only — no renderer branches on it.",
+        options: {
+          create: "Create",
+          edit: "Edit",
+          delete: "Delete",
+          custom: "Custom"
+        }
       },
       order: {
         label: "Order",
@@ -1990,7 +2214,11 @@ export const enMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       },
       "body.language": {
         label: "Language",
-        helpText: "expression = pure formula; js = sandboxed JavaScript"
+        helpText: "expression = pure formula; js = sandboxed JavaScript",
+        options: {
+          expression: "Expression (L1)",
+          js: "JavaScript (L2 sandboxed)"
+        }
       },
       "body.source": {
         label: "Source",
@@ -2107,7 +2335,10 @@ export const enMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       },
       operation: {
         label: "Operation",
-        helpText: "Declarative single-record field write: 'update' applies `patch`, merged under the collected `params`, to the current record AS THE CALLER — never system-elevated, so the caller's permissions, the object's hooks and its validations all fire as for a user edit."
+        helpText: "Declarative single-record field write: 'update' applies `patch`, merged under the collected `params`, to the current record AS THE CALLER — never system-elevated, so the caller's permissions, the object's hooks and its validations all fire as for a user edit.",
+        options: {
+          update: "Update the current record"
+        }
       },
       patch: {
         label: "Patch",
@@ -2353,7 +2584,26 @@ export const enMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       },
       "dateRange.defaultRange": {
         label: "Default Period",
-        helpText: "The period the report opens with."
+        helpText: "The period the report opens with.",
+        options: {
+          today: "Today",
+          yesterday: "Yesterday",
+          this_week: "This week",
+          last_week: "Last week",
+          this_month: "This month",
+          last_month: "Last month",
+          next_month: "Next month",
+          this_quarter: "This quarter",
+          last_quarter: "Last quarter",
+          next_quarter: "Next quarter",
+          this_year: "This year",
+          last_year: "Last year",
+          last_7_days: "Last 7 days",
+          last_30_days: "Last 30 days",
+          last_90_days: "Last 90 days",
+          next_30_days: "Next 30 days",
+          custom: "Custom…"
+        }
       },
       "dateRange.allowCustomRange": {
         label: "Allow Custom Range",
@@ -3026,7 +3276,11 @@ export const enMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       },
       surface: {
         label: "Surface",
-        helpText: "Product surface this agent binds (ADR-0063 §1). Only skills whose own surface matches — or is 'both' — attach, and the agent's tool set is the union of those skills' tools. Default 'ask'."
+        helpText: "Product surface this agent binds (ADR-0063 §1). Only skills whose own surface matches — or is 'both' — attach, and the agent's tool set is the union of those skills' tools. Default 'ask'.",
+        options: {
+          ask: "Ask (conversational surfaces)",
+          build: "Build (authoring surfaces)"
+        }
       },
       instructions: {
         label: "Instructions",
@@ -3038,7 +3292,7 @@ export const enMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       },
       planning: {
         label: "Planning",
-        helpText: "Autonomous reasoning configuration: the maximum number of reasoning iterations before the agent stops (1–100, default 10)."
+        helpText: "Autonomous reasoning configuration: a runaway fuse counted in model calls, each one model call plus its tool batch, after which the agent stops (1–1000, default 10)."
       },
       memory: {
         label: "Memory",
@@ -3143,7 +3397,12 @@ export const enMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       },
       surface: {
         label: "Surface",
-        helpText: "Agent surface this skill binds to (ADR-0063 §3). Binding it to an agent whose surface disagrees is a hard failure at resolve time, not a silent skip. Default 'ask'."
+        helpText: "Agent surface this skill binds to (ADR-0063 §3). Binding it to an agent whose surface disagrees is a hard failure at resolve time, not a silent skip. Default 'ask'.",
+        options: {
+          ask: "Ask (conversational surfaces)",
+          build: "Build (authoring surfaces)",
+          both: "Both"
+        }
       },
       instructions: {
         label: "Instructions",
@@ -3152,6 +3411,10 @@ export const enMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       tools: {
         label: "Tools",
         helpText: "Tool names (supports wildcard: action_*)"
+      },
+      context: {
+        label: "Context",
+        helpText: "Context pack this skill works from (its name). Requires get_record_context in Tools. Over MCP the prompt then takes an optional record id"
       },
       triggerConditions: {
         label: "Trigger Conditions",

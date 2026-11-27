@@ -86,13 +86,17 @@ const permissionModifyAllAllowDeleteFalseToTrue: MetadataConversion = {
       permissions: [{
         name: 'sales_manager',
         label: 'Sales Manager',
+        // `viewAllFields: true` beside every Modify All keeps this fixture
+        // disjoint from the protocol-19 entry
+        // `permission-view-all-fields-beside-record-bypass`, which writes it
+        // wherever it is absent; it plays no part in this conversion.
         objects: {
           // The pair, authored or filled in by an earlier parse.
-          crm_forecast: { allowRead: true, allowEdit: true, allowDelete: false, viewAllRecords: true, modifyAllRecords: true },
+          crm_forecast: { allowRead: true, allowEdit: true, allowDelete: false, viewAllRecords: true, modifyAllRecords: true, viewAllFields: true },
           // No Modify All: the false is enforced and is left alone.
           crm_contact: { allowRead: true, allowEdit: true, allowDelete: false },
           // Already consistent: untouched.
-          crm_account: { allowRead: true, allowEdit: true, allowDelete: true, modifyAllRecords: true },
+          crm_account: { allowRead: true, allowEdit: true, allowDelete: true, modifyAllRecords: true, viewAllFields: true },
         },
       }],
     },
@@ -101,9 +105,9 @@ const permissionModifyAllAllowDeleteFalseToTrue: MetadataConversion = {
         name: 'sales_manager',
         label: 'Sales Manager',
         objects: {
-          crm_forecast: { allowRead: true, allowEdit: true, allowDelete: true, viewAllRecords: true, modifyAllRecords: true },
+          crm_forecast: { allowRead: true, allowEdit: true, allowDelete: true, viewAllRecords: true, modifyAllRecords: true, viewAllFields: true },
           crm_contact: { allowRead: true, allowEdit: true, allowDelete: false },
-          crm_account: { allowRead: true, allowEdit: true, allowDelete: true, modifyAllRecords: true },
+          crm_account: { allowRead: true, allowEdit: true, allowDelete: true, modifyAllRecords: true, viewAllFields: true },
         },
       }],
     },

@@ -37,7 +37,7 @@ import { t as tr, tFormat } from '../i18n.js';
 import { PreviewShell, PreviewErrorBoundary, PreviewEmptyState } from './PreviewShell.js';
 import { withNodes } from './row-nodes.js';
 
-type Audience = 'org' | 'public' | { permissionSet: string } | undefined;
+type Audience = 'org' | 'public' | { permissionSet: string } | { systemPermission: string } | undefined;
 type Include = string | { tag: string } | undefined;
 
 interface PageNode {
@@ -129,10 +129,18 @@ function audienceChip(
       tone: 'text-emerald-700 bg-emerald-50 border-emerald-200',
     };
   }
-  if (audience && typeof audience === 'object' && typeof audience.permissionSet === 'string') {
+  if (audience && typeof audience === 'object' && 'permissionSet' in audience && typeof audience.permissionSet === 'string') {
     return {
       icon: <Lock className="h-3 w-3" />,
       label: tFormat('engine.bookPreview.audience.permissionSet', locale, { name: audience.permissionSet }),
+      tone: 'text-amber-800 bg-amber-50 border-amber-200',
+    };
+  }
+  // ADR-0046 §6.7 — readers holding the capability, through any permission set.
+  if (audience && typeof audience === 'object' && 'systemPermission' in audience && typeof audience.systemPermission === 'string') {
+    return {
+      icon: <Lock className="h-3 w-3" />,
+      label: tFormat('engine.bookPreview.audience.systemPermission', locale, { name: audience.systemPermission }),
       tone: 'text-amber-800 bg-amber-50 border-amber-200',
     };
   }

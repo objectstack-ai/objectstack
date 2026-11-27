@@ -10,8 +10,10 @@ export {
   DEFAULT_REQUEST_TIMEOUT_MS,
   KnowledgeTursoPlugin,
   PLATFORM_DATABASE_FILES,
+  dataDirectoryOf,
   defaultStoreUrl,
   requestBoundFor,
+  resolveSettingsStoreUrl,
   resolveStoreUrl,
   type KnowledgeTursoPluginOptions,
 } from './plugin.js';

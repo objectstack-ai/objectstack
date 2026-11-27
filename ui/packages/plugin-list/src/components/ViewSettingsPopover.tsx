@@ -221,6 +221,10 @@ export interface ViewSettingsKanban {
   showFieldLabels?: ViewSettingsToggle;
   /** Whether a card leaves out a field that holds nothing. */
   hideEmptyFields?: ViewSettingsToggle;
+  /** objectstack#36423 — whether a card shows its open comment threads at its foot. */
+  footerComments?: ViewSettingsToggle;
+  /** objectstack#36423 — whether a card shows its attachments at its foot. */
+  footerAttachments?: ViewSettingsToggle;
   /**
    * The statistic each lane shows at its foot: none, a count, a number
    * field's sum or average, or the minimum or maximum of a number or a date.
@@ -701,6 +705,8 @@ export function ViewSettingsContent(props: ViewSettingsPopoverProps & { closeMen
     addCardField: t('list.optionsMenu.kanbanAddCardField', { defaultValue: 'Add field' }),
     showFieldLabels: t('list.optionsMenu.kanbanShowFieldLabels', { defaultValue: 'Show field names' }),
     hideEmptyFields: t('list.optionsMenu.kanbanHideEmptyFields', { defaultValue: 'Hide empty fields' }),
+    footerComments: t('list.optionsMenu.kanbanFooterComments', { defaultValue: 'Show comment count' }),
+    footerAttachments: t('list.optionsMenu.kanbanFooterAttachments', { defaultValue: 'Show attachment count' }),
     summary: t('list.optionsMenu.kanbanSummary', { defaultValue: 'Column summary' }),
   };
   const kanbanFieldLabel = (name: string) =>
@@ -794,10 +800,12 @@ export function ViewSettingsContent(props: ViewSettingsPopoverProps & { closeMen
           </button>
         )}
       </div>
-      {(kanban.showFieldLabels || kanban.hideEmptyFields) && (
+      {(kanban.showFieldLabels || kanban.hideEmptyFields || kanban.footerComments || kanban.footerAttachments) && (
         <div className="border-b p-1" data-testid="options-card-toggles">
           {kanban.showFieldLabels && toggleRow(kanbanTitles.showFieldLabels, kanban.showFieldLabels, 'options-toggle-field-labels')}
           {kanban.hideEmptyFields && toggleRow(kanbanTitles.hideEmptyFields, kanban.hideEmptyFields, 'options-toggle-hide-empty')}
+          {kanban.footerComments && toggleRow(kanbanTitles.footerComments, kanban.footerComments, 'options-toggle-footer-comments')}
+          {kanban.footerAttachments && toggleRow(kanbanTitles.footerAttachments, kanban.footerAttachments, 'options-toggle-footer-attachments')}
         </div>
       )}
       <div className="p-1">

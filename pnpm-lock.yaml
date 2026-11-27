@@ -616,6 +616,9 @@ importers:
       '@objectstack/formula':
         specifier: workspace:*
         version: link:../formula
+      '@objectstack/knowledge-pgvector':
+        specifier: workspace:*
+        version: link:../plugins/knowledge-pgvector
       '@objectstack/lint':
         specifier: workspace:*
         version: link:../lint
@@ -688,6 +691,9 @@ importers:
       '@objectstack/service-job':
         specifier: workspace:*
         version: link:../services/service-job
+      '@objectstack/service-knowledge':
+        specifier: workspace:*
+        version: link:../services/service-knowledge
       '@objectstack/service-mailbox':
         specifier: workspace:*
         version: link:../services/service-mailbox
@@ -798,6 +804,9 @@ importers:
         specifier: ^4.1.11
         version: 4.1.12(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(@vitest/coverage-v8@4.1.12)(@vitest/ui@4.1.10)(happy-dom@21.0.4)(jsdom@30.1.1(@noble/hashes@2.4.0))(msw@2.15.0(@types/node@26.6.5)(typescript@6.0.3))(vite@8.3.5(@types/node@26.6.5)(esbuild@0.28.2)(jiti@2.7.0)(tsx@4.23.15(patch_hash=4d1d35da1809be2a945519cb26890e48107810b9b66c6913a6a89abb5ad6a1e6))(yaml@2.9.1))
     optionalDependencies:
+      '@objectstack/knowledge-turso':
+        specifier: workspace:*
+        version: link:../plugins/knowledge-turso
       better-sqlite3:
         specifier: ^13.0.3
         version: 13.0.3
@@ -1710,6 +1719,9 @@ importers:
         specifier: workspace:*
         version: link:../spec
     devDependencies:
+      '@objectstack/types':
+        specifier: workspace:*
+        version: link:../types
       '@types/node':
         specifier: ^26.6.5
         version: 26.6.5
@@ -3468,6 +3480,9 @@ importers:
       '@objectstack/spec':
         specifier: workspace:*
         version: link:../../spec
+      '@objectstack/types':
+        specifier: workspace:*
+        version: link:../../types
     devDependencies:
       '@types/node':
         specifier: ^26.6.5
@@ -3743,6 +3758,9 @@ importers:
       '@objectstack/core':
         specifier: workspace:*
         version: link:../core
+      '@objectstack/knowledge-pgvector':
+        specifier: workspace:*
+        version: link:../plugins/knowledge-pgvector
       '@objectstack/mcp':
         specifier: workspace:*
         version: link:../mcp
@@ -3803,6 +3821,9 @@ importers:
       '@objectstack/service-job':
         specifier: workspace:*
         version: link:../services/service-job
+      '@objectstack/service-knowledge':
+        specifier: workspace:*
+        version: link:../services/service-knowledge
       '@objectstack/service-mailbox':
         specifier: workspace:*
         version: link:../services/service-mailbox
@@ -3858,6 +3879,10 @@ importers:
       vitest:
         specifier: ^4.1.11
         version: 4.1.12(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(@vitest/coverage-v8@4.1.12)(@vitest/ui@4.1.10)(happy-dom@21.0.4)(jsdom@30.1.1(@noble/hashes@2.4.0))(msw@2.15.0(@types/node@26.6.5)(typescript@6.0.3))(vite@8.3.5(@types/node@26.6.5)(esbuild@0.28.2)(jiti@2.7.0)(tsx@4.23.15(patch_hash=4d1d35da1809be2a945519cb26890e48107810b9b66c6913a6a89abb5ad6a1e6))(yaml@2.9.1))
+    optionalDependencies:
+      '@objectstack/knowledge-turso':
+        specifier: workspace:*
+        version: link:../plugins/knowledge-turso
 
   ui:
     devDependencies:

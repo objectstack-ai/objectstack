@@ -28,7 +28,7 @@
  */
 
 import * as React from 'react';
-import { List, Building2, Share2, Activity, KeyRound, LayoutGrid, type LucideIcon } from 'lucide-react';
+import { List, Building2, Share2, Activity, LayoutGrid, type LucideIcon } from 'lucide-react';
 import { CommandGroup, CommandItem } from '@object-ui/components';
 import { useObjectTranslation } from '@object-ui/i18n';
 import { matchesPaletteQuery } from '../../chrome/paletteMatch.js';
@@ -55,7 +55,6 @@ const ENTRY_ICONS: Record<StudioMenuEntry['kind'], LucideIcon> = {
   orgFlows: Building2,
   owd: Share2,
   diagnostics: Activity,
-  environment: KeyRound,
   // objectstack#37360 — the menu's 全部类型 row; the palette lists only the menu's groups, so it draws none today.
   allTypes: LayoutGrid,
 };

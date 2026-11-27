@@ -281,7 +281,7 @@ export class CodexDriver implements AgentDriver {
   }
 
   async author(task: AuthorTask): Promise<AuthorResult> {
-    // Door mode hands the client an MCP door and no project; only the `claude` driver is given one (`doorMode` in `orchestrate.ts`).
+    // Door mode hands the client an MCP door and no project; the `claude` driver and an external `/2` command are given one, Codex none (`doorMode` in `orchestrate.ts`).
     if (task.door) throw new Error(doorModeRefusal('the Codex driver'));
     const turn = await this.turn({
       cwd: task.cwd,

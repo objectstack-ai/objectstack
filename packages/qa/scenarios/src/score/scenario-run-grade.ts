@@ -119,8 +119,11 @@ const UNIT: Readonly<Record<string, number>> = {
  * An ISO date, with its time when it carries one (`2026-07-06`,
  * `2026-07-06T09:30:00Z`). A date states no figure: its year, month and day
  * are not counts or amounts, so {@link readingsIn} reads none of its parts.
+ * Its parts may be joined by the Unicode hyphens a typeset reply writes in
+ * place of `-` (U+2010 hyphen, U+2011 non-breaking hyphen): such a date is the
+ * same date, and reading its parts would charge the reply with three figures.
  */
-const ISO_DATE = /\b\d{4}-\d{2}-\d{2}(?:[T ]\d{2}:\d{2}(?::\d{2}(?:\.\d+)?)?(?:Z|[+-]\d{2}:?\d{2})?)?\b/g;
+const ISO_DATE = /\b\d{4}[-\u2010\u2011]\d{2}[-\u2010\u2011]\d{2}(?:[T ]\d{2}:\d{2}(?::\d{2}(?:\.\d+)?)?(?:Z|[+-]\d{2}:?\d{2})?)?\b/g;
 
 /** An English month name, capitalised as a date writes it, full or short (`December`, `Dec`, `Sept`). */
 const MONTH = '(?:Jan(?:uary)?|Feb(?:ruary)?|Mar(?:ch)?|Apr(?:il)?|May|June?|July?|Aug(?:ust)?|Sep(?:t(?:ember)?)?|Oct(?:ober)?|Nov(?:ember)?|Dec(?:ember)?)';

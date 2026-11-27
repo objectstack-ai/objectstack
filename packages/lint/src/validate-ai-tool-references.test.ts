@@ -3,6 +3,8 @@
 import { describe, it, expect } from 'vitest';
 import {
   validateAiToolReferences as validateAiToolReferencesUnrecorded,
+  AI_SKILL_CONTEXT_OMITTED,
+  AI_SKILL_CONTEXT_UNKNOWN,
   AI_SKILL_TOOL_UNRESOLVED,
 } from './validate-ai-tool-references.js';
 import {
@@ -613,5 +615,131 @@ describe('[#22161] one-line fixes — ai-skill-tool-unresolved', () => {
     // The ask tools the explanation names are exactly the ones the door lacks.
     const askOnly = (PLATFORM_TOOLS_BY_PACKAGE['service-ai'] ?? []).filter((n) => !MCP_DOOR_TOOL_NAMES.includes(n));
     expect(text).toContain(`(${askOnly.sort().map((n) => `\`${n}\``).join(', ')})`);
+  });
+});
+
+describe('[ADR-0160 D8] a skill\'s context pack reference', () => {
+  const policyPack = { name: 'policy_document', label: 'Policy document', object: 'policy' };
+  const reviewPack = { name: 'policy_review', label: 'Policy review', object: 'policy' };
+  const casePack = { name: 'case_brief', label: 'Case brief', object: 'case' };
+  const skill = (extra: Record<string, unknown>) => ({
+    name: 'policy_inquiry',
+    label: 'Policy inquiry',
+    instructions: 'Answer questions about one policy.',
+    tools: ['get_record_context'],
+    ...extra,
+  });
+  const contextFindings = (stack: Record<string, unknown>) =>
+    validateAiToolReferences(stack).filter((f) => f.rule !== AI_SKILL_TOOL_UNRESOLVED);
+
+  it('reports a context that names no pack the stack defines, located on the key', () => {
+    const findings = contextFindings({ aiContexts: [policyPack], skills: [skill({ context: 'policy_documnt' })] });
+    expect(findings.map((f) => [f.rule, f.severity, f.path])).toEqual([[AI_SKILL_CONTEXT_UNKNOWN, 'warning', 'skills[0].context']]);
+    expect(findings[0].message).toContain('"policy_documnt"');
+    expect(findings[0].message).toContain('Did you mean "policy_document"?');
+  });
+
+  it('CONTROL — a context that names a pack the stack defines is clean, even beside a second pack on its object', () => {
+    expect(contextFindings({ aiContexts: [policyPack, reviewPack], skills: [skill({ context: 'policy_document' })] })).toEqual([]);
+  });
+
+  it('a stack with no packs reports the reference as unknown', () => {
+    expect(contextFindings({ skills: [skill({ context: 'policy_document' })] }).map((f) => f.rule)).toEqual([AI_SKILL_CONTEXT_UNKNOWN]);
+  });
+
+  it('advises a skill that binds get_record_context without context when an object has several packs (ADR-0160 D1, point 1)', () => {
+    const findings = contextFindings({ aiContexts: [policyPack, casePack, reviewPack], skills: [skill({})] });
+    expect(findings.map((f) => [f.rule, f.severity, f.path])).toEqual([[AI_SKILL_CONTEXT_OMITTED, 'warning', 'skills[0]']]);
+    expect(findings[0].message).toContain("object 'policy' has 2 packs (policy_document, policy_review)");
+    expect(findings[0].message).not.toContain('case');
+  });
+
+  it('a wildcard that matches get_record_context is a binding for the advisory too', () => {
+    const findings = contextFindings({ aiContexts: [policyPack, reviewPack], skills: [skill({ tools: ['get_*'] })] });
+    expect(findings.map((f) => f.rule)).toEqual([AI_SKILL_CONTEXT_OMITTED]);
+  });
+
+  it('CONTROL — no advisory when every object has one pack, or when the skill does not bind the tool', () => {
+    expect(contextFindings({ aiContexts: [policyPack, casePack], skills: [skill({})] })).toEqual([]);
+    expect(contextFindings({ aiContexts: [policyPack, reviewPack], skills: [skill({ tools: ['get_record'] })] })).toEqual([]);
+  });
+
+  describe('[ADR-0150 D3] a pack another package of the artifact ships, judged in the per-package pass', () => {
+    // The stack the CLI's per-package pass hands a package (`packageBodyAsStack`):
+    // the package's own body, its manifest, and the artifact's `packages[]`.
+    const shipper = { id: 'com.acme.shipper', name: 'shipper', version: '1.0.0', aiContexts: [policyPack] };
+    const reader = (extra: Record<string, unknown>) => ({
+      id: 'com.acme.reader',
+      name: 'reader',
+      version: '1.0.0',
+      skills: [skill({ context: 'policy_document' })],
+      ...extra,
+    });
+    const asPackageStack = (body: Record<string, unknown>, others: Record<string, unknown>[] = [shipper]) => ({
+      ...body,
+      manifest: body,
+      packages: [...others, body].map((manifest) => ({ manifest })),
+    });
+    const dependsOnShipper = { dependencies: { 'com.acme.shipper': '^1.0.0' } };
+
+    it('a pack a declared dependency ships resolves: no warning', () => {
+      expect(contextFindings(asPackageStack(reader(dependsOnShipper)))).toEqual([]);
+    });
+
+    it('CONTROL — the own-stack pack resolves: no warning', () => {
+      expect(contextFindings(asPackageStack(reader({ aiContexts: [policyPack] }), []))).toEqual([]);
+    });
+
+    it('CONTROL — a pack no holder ships still warns, beside a declared dependency', () => {
+      const body = reader({ ...dependsOnShipper, skills: [skill({ context: 'no_such_pack' })] });
+      const findings = contextFindings(asPackageStack(body));
+      expect(findings.map((f) => [f.rule, f.path])).toEqual([[AI_SKILL_CONTEXT_UNKNOWN, 'skills[0].context']]);
+      expect(findings[0].message).toContain('"no_such_pack"');
+    });
+
+    it('CONTROL — a sibling package\'s pack outside the closure still warns, naming the holder and the remedy', () => {
+      const findings = contextFindings(asPackageStack(reader({})));
+      expect(findings.map((f) => [f.rule, f.path])).toEqual([[AI_SKILL_CONTEXT_UNKNOWN, 'skills[0].context']]);
+      expect(findings[0].message).toContain('"com.acme.shipper"');
+      expect(findings[0].hint).toContain('Declare a dependency');
+    });
+
+    it('two packages in the closure shipping the pack: warns, nothing picked', () => {
+      const twin = { ...shipper, id: 'com.acme.twin', name: 'twin' };
+      const body = reader({ dependencies: { 'com.acme.shipper': '^1.0.0', 'com.acme.twin': '^1.0.0' } });
+      const findings = contextFindings(asPackageStack(body, [shipper, twin]));
+      expect(findings.map((f) => f.rule)).toEqual([AI_SKILL_CONTEXT_UNKNOWN]);
+      expect(findings[0].message).toContain('"com.acme.shipper"');
+      expect(findings[0].message).toContain('"com.acme.twin"');
+    });
+
+    it('each refusal verdict and fix is one line of at most 200 characters', () => {
+      const twin = { ...shipper, id: 'com.acme.twin', name: 'twin' };
+      const findings = [
+        ...contextFindings(asPackageStack(reader({}))),
+        ...contextFindings(asPackageStack(reader({ dependencies: { 'com.acme.shipper': '^1.0.0', 'com.acme.twin': '^1.0.0' } }), [shipper, twin])),
+      ];
+      expect(findings).toHaveLength(2);
+      for (const f of findings) {
+        for (const line of [f.message, f.hint]) {
+          expect(line).not.toContain('\n');
+          expect(line.length, line).toBeLessThanOrEqual(200);
+        }
+      }
+    });
+  });
+
+  it('each verdict and fix is one line of at most 200 characters', () => {
+    const findings = contextFindings({
+      aiContexts: [policyPack, reviewPack],
+      skills: [skill({ context: 'policy_documnt' }), skill({ name: 'other' })],
+    });
+    expect(findings.map((f) => f.rule).sort()).toEqual([AI_SKILL_CONTEXT_OMITTED, AI_SKILL_CONTEXT_UNKNOWN]);
+    for (const f of findings) {
+      for (const line of [f.message, f.hint]) {
+        expect(line).not.toContain('\n');
+        expect(line.length, line).toBeLessThanOrEqual(200);
+      }
+    }
   });
 });

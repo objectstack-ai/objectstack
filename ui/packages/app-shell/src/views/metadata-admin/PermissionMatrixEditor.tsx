@@ -1013,6 +1013,8 @@ export function PermissionMatrixEditPage({ type, name, packageId, onDraftSaved, 
     save: saveVersioned,
     recordRead: recordSetRead,
     forget: forgetSetVersion,
+    // objectstack#37440 — the version the set's own Save wrote, which pins its publish.
+    heldDraftVersion: heldSetDraftVersion,
     dialog: draftConflictDialog,
   } = useDraftSaveGuard(client, reloadSet);
   // The header's label as the published list serves it: that read is
@@ -1784,7 +1786,12 @@ export function PermissionMatrixEditPage({ type, name, packageId, onDraftSaved, 
         // objectstack#36511 — the draft just written is published alone, so
         // the set is live; a refused publish drops the draft this Save wrote
         // (one that was pending before stays, listed under Changes).
-        const live = await publishSavedItem(client, { type, name: payload.name, packageId }, hadDraftRef.current);
+        // objectstack#37440 — pinned to the draft this Save just wrote (its receipt).
+        const live = await publishSavedItem(
+          client,
+          { type, name: payload.name, packageId, draftVersion: heldSetDraftVersion(type, payload.name, packageId) },
+          hadDraftRef.current,
+        );
         if (!live.ok) {
           hadDraftRef.current = !live.draftDiscarded;
           if (live.draftDiscarded) recordSetRead(type, payload.name, packageId, { ifNoneMatch: '*' });

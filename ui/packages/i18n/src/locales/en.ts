@@ -1097,6 +1097,9 @@ const en = {
       errorRowPrefix: 'Row {{row}}: ',
       referenceNotFound: 'No matching record for "{{value}}"',
       referenceAmbiguous: '"{{value}}" matches more than one record — use a unique value or the record id',
+      referenceOutOfScope: '"{{value}}" was found, but not under {{scope}}',
+      scopeEntry: '{{label}} "{{value}}"',
+      scopeSeparator: ', ',
       invalidBoolean: '"{{value}}" is not a valid true/false value',
       invalidNumber: '"{{value}}" is not a valid number',
       invalidDate: '"{{value}}" is not a valid date',
@@ -1362,6 +1365,8 @@ const en = {
       kanbanAddCardField: "Add field",
       kanbanShowFieldLabels: "Show field names",
       kanbanHideEmptyFields: "Hide empty fields",
+      kanbanFooterComments: "Show comment count",
+      kanbanFooterAttachments: "Show attachment count",
       kanbanSummary: "Column summary",
       kanbanSummaryAvg: "Average",
       kanbanSummaryMin: "Minimum",
@@ -1420,6 +1425,11 @@ const en = {
       hideHint: "Its cards move to Uncategorized",
       createIn: "New record in {{column}}",
       create: "New",
+    },
+    // objectstack#36423 — a card's foot counts (`kanban.cardFooter`).
+    cardFooter: {
+      comments: "Open comments: {{count}}",
+      attachments: "Attachments: {{count}}",
     },
     addCard: 'Add card',
     addColumn: 'Add column',
@@ -2647,9 +2657,10 @@ const en = {
   console: {
     // The fixed crumb `AppHeader`'s `studio` variant draws on the Studio front
     // door (objectui#11863), as `organizations.title` is the `orgs` variant's.
-    // A product name, which every pack writes as is.
+    // A product name (ADR-0084): App Studio, which a Chinese pack writes as
+    // 应用搭建 and every other pack writes as is.
     studio: {
-      title: 'Studio',
+      title: 'App Studio',
       // What a principal without `studio.access` reads at the Studio URL they
       // opened (objectui#12035), in place of the silent redirect home.
       accessRequired: 'You need Studio access to open Studio. An administrator can grant it with a permission set in Setup → Permission Set Assignment.',
@@ -4473,11 +4484,11 @@ const en = {
   },
   topbar: {
     aiAssistant: 'AI Assistant',
-    designInStudio: 'Design in Studio',
+    designInStudio: 'Design in App Studio',
     designLayout: 'Design layout',
     editApp: 'Edit app',
-    openAppInStudio: 'Open {{app}} in Studio',
-    viewInStudio: 'View in Studio',
+    openAppInStudio: 'Open {{app}} in App Studio',
+    viewInStudio: 'View in App Studio',
     openAssistant: 'Open {{name}} assistant',
     offline: 'Offline',
     usersOnline: 'Users currently online',
@@ -4637,8 +4648,8 @@ const en = {
       backToAppHome: 'Back to the app menu',
       appsAvailable: '{{count}} apps available',
       allApps: 'All apps',
-      editAppInStudio: 'Edit {{app}} in Studio',
-      openAppInStudio: 'Open {{app}} in Studio',
+      editAppInStudio: 'Edit {{app}} in App Studio',
+      openAppInStudio: 'Open {{app}} in App Studio',
       backToHome: 'Back to app start page',
       settings: 'Settings',
       productHome: '{{product}} home',
@@ -6474,6 +6485,13 @@ const en = {
     alreadySubmitted: 'Your previous submission went through. The flow has moved on to this step.',
     // ...or the run waits on no screen any more, so Submit is withdrawn.
     noLongerWaiting: 'This step may already have been processed. Close this dialog and check the record before trying again.',
+    // The engine refused this step's values (objectstack#37526): the banner,
+    // beside a message under each field it names. The engine's own sentence
+    // names API field names and is never shown.
+    invalidScreenInput: "Some values on this step weren't accepted. Check them and try again.",
+    // Under a field the engine refused for a reason other than `required` or a
+    // declared bound (a wrong value type, a value the field takes none of).
+    fieldNotAccepted: "{{field}}: this value isn't accepted",
   },
   // Console › System › Applications (objectui#4307). The page's OWN chrome —
   // headings, controls, badges and the frames of its toasts.

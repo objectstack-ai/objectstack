@@ -183,7 +183,10 @@ export const ExecutivePermissionSet = definePermissionSet({
 /**
  * Compliance read-only: `viewAllRecords` bypasses OWD/sharing/depth on the
  * named objects — the auditor sees every private note, inquiry, and invoice,
- * but holds no write bit anywhere. High-privilege by definition: suggested
+ * but holds no write bit anywhere. `viewAllFields` is the field half: View
+ * All widens records only, so without it a field another set hides stays
+ * hidden from the auditor too (the protocol 19 field-axis split; written by
+ * `os migrate meta --from 18`, which keeps the reads this set had). High-privilege by definition: suggested
  * for the `everyone` anchor (`isDefault: true`) it would fail the publish
  * lint's anchor rule, and no door binds a set to `everyone` or `guest` by hand.
  */
@@ -191,10 +194,10 @@ export const AuditorPermissionSet = definePermissionSet({
   name: 'showcase_auditor',
   label: 'Showcase Auditor',
   objects: {
-    showcase_private_note: { allowRead: true, viewAllRecords: true },
-    showcase_inquiry: { allowRead: true, viewAllRecords: true },
-    showcase_invoice: { allowRead: true, viewAllRecords: true },
-    showcase_invoice_line: { allowRead: true, viewAllRecords: true },
+    showcase_private_note: { allowRead: true, viewAllRecords: true, viewAllFields: true },
+    showcase_inquiry: { allowRead: true, viewAllRecords: true, viewAllFields: true },
+    showcase_invoice: { allowRead: true, viewAllRecords: true, viewAllFields: true },
+    showcase_invoice_line: { allowRead: true, viewAllRecords: true, viewAllFields: true },
   },
 });
 
@@ -221,7 +224,7 @@ export const OpsPermissionSet = definePermissionSet({
   name: 'showcase_ops',
   label: 'Showcase Operations',
   objects: {
-    showcase_announcement: { allowRead: true, allowCreate: true, allowEdit: true, modifyAllRecords: true },
+    showcase_announcement: { allowRead: true, allowCreate: true, allowEdit: true, modifyAllRecords: true, viewAllFields: true },
     showcase_inquiry: { allowRead: true, allowEdit: true, readScope: 'org', writeScope: 'org' },
     showcase_invoice: { allowRead: true },
     // Shared reference data — the org geometry and the tagging tree every

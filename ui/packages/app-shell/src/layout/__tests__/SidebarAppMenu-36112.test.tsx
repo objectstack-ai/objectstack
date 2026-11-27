@@ -21,7 +21,7 @@
  * objectstack#36758 — the design mode edits the layout only, so its door reads
  * 「Design layout」 (zh 「设计布局」), the bar's own word; 「Edit app」 beside
  * it opens this app's package in Studio on the app switcher's target and
- * posture, and reads 「View in Studio」 (zh 「在 Studio 中查看」) for an
+ * posture, and reads 「View in App Studio」 (zh 「在应用搭建中查看」) for an
  * installed (read-only) package. Real subject added: the built-in en and
  * zh-Hans packs, for the words.
  *
@@ -224,7 +224,7 @@ describe('the sidebar app menu only switches apps (objectstack#36112)', () => {
   it('offers no way home and no 「All apps」; a member gets no Studio entry', () => {
     apps = [CRM, SERVICE, SETUP];
     renderMenu('crm');
-    for (const text of ['Back to home', 'All apps', 'Edit app', 'View in Studio', 'Edit CRM in Studio', 'Open CRM in Studio']) {
+    for (const text of ['Back to home', 'All apps', 'Edit app', 'View in App Studio', 'Edit CRM in App Studio', 'Open CRM in App Studio']) {
       expect(menu().queryByText(text)).toBeNull();
     }
   });
@@ -318,10 +318,11 @@ describe('「Add app」 offers 「New blank app」 whatever the catalog serves, 
     ]);
   });
 
-  it('an author who may enter Studio but not Setup → Packages is sent to the "All metadata" area, never Setup (objectstack#36908)', () => {
+  // objectstack#37565 — the cross-package directory moved to Setup; the door is Studio's package-less scope, for now.
+  it('an author who may enter Studio but not Setup → Packages is sent to Studio\'s package-less scope, never Setup (objectstack#36908)', () => {
     setupPair = false;
     const choices = addChoices();
-    expect(choices.getByTestId('sidebar-app-menu-add-new-in-studio')).toHaveAttribute('href', '/studio/~all/metadata');
+    expect(choices.getByTestId('sidebar-app-menu-add-new-in-studio')).toHaveAttribute('href', '/studio/~org/metadata/flow?source=runtime');
   });
 
   it.each([
@@ -497,7 +498,7 @@ describe('「Edit app」 in the app menu opens this app in Studio (objectstack#3
     expect(editInStudio()).toBeNull();
     const item = viewInStudio();
     expect(item).not.toBeNull();
-    expect(item).toHaveTextContent(/^View in Studio$/);
+    expect(item).toHaveTextContent(/^View in App Studio$/);
     expect(item!.querySelector('svg.lucide-eye')).not.toBeNull();
     expect(item).toHaveAttribute('href', '/studio/com.acme.crm/metadata/object/crm_lead');
   });
@@ -532,11 +533,11 @@ describe('the words: the door and the bar share one name (objectstack#36758)', (
   const EN = builtInLocales.en as unknown as Pack;
   const ZH = builtInLocales['zh-Hans'] as unknown as Pack;
 
-  it('zh-Hans: 「设计布局」 for the door and the bar, 「编辑应用」 and 「在 Studio 中查看」 for Studio', () => {
+  it('zh-Hans: 「设计布局」 for the door and the bar, 「编辑应用」 and 「在应用搭建中查看」 for Studio', () => {
     expect(ZH.topbar.designLayout).toBe('设计布局');
     expect(ZH.designMode.title).toBe('设计布局');
     expect(ZH.topbar.editApp).toBe('编辑应用');
-    expect(ZH.topbar.viewInStudio).toBe('在 Studio 中查看');
+    expect(ZH.topbar.viewInStudio).toBe('在应用搭建中查看');
   });
 
   it('every built-in pack names the door as its bar', () => {
@@ -659,7 +660,7 @@ describe('the docs portal\'s head names no app and only switches apps (objectsta
     for (const id of ['sidebar-app-menu-design-layout', 'sidebar-app-menu-edit-app', 'sidebar-app-menu-view-in-studio']) {
       expect(portalMenu().queryByTestId(id), id).toBeNull();
     }
-    for (const text of ['Design layout', 'Edit app', 'View in Studio']) expect(portalMenu().queryByText(text)).toBeNull();
+    for (const text of ['Design layout', 'Edit app', 'View in App Studio']) expect(portalMenu().queryByText(text)).toBeNull();
   });
 
   it('control: a member gets the list and no 「Add app」', () => {
@@ -685,14 +686,14 @@ describe('the docs portal\'s head names no app and only switches apps (objectsta
     expect(choices.queryByText('Build with AI')).toBeNull();
   });
 
-  it('an author who may not open Setup → Packages gets 「New blank app」 to the "All metadata" area', () => {
+  it('an author who may not open Setup → Packages gets 「New blank app」 to Studio\'s package-less scope (objectstack#37565)', () => {
     setupPair = false;
     apps = [CRM];
     admin = true;
     renderPortalMenu();
     expect(
       within(screen.getByTestId('add-app-choices')).getByTestId('sidebar-app-menu-add-new-in-studio'),
-    ).toHaveAttribute('href', '/studio/~all/metadata');
+    ).toHaveAttribute('href', '/studio/~org/metadata/flow?source=runtime');
   });
 
   it('guard: handed no entries, it draws no 「Add app」 and no separator for it', () => {

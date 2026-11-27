@@ -161,11 +161,10 @@ export const TaskWorkbenchPage = definePage({
 
 ## Record Presentation — surface, width & columns are auto-derived
 
-A record's create / edit / detail **presents itself adaptively**. You do **not**
-author the surface, the overlay width, or the column count — all three are derived
-at runtime from the client viewport, because an author
-(especially an AI) cannot know the client's screen. **Write the data (fields,
-`fieldGroups`); let the platform lay it out.**
+An object's New / Edit / detail is built from its `fieldGroups`, never a form view:
+you do **not** author its surface, overlay width or column count, all derived from
+the client's screen. **Write the data (fields, `fieldGroups`); let the platform lay
+it out.**
 
 - **Surface.** On an object's list the record's name opens the **page**, the
   hover icon beside it the **drawer** ([Record Page](./record-page.md) §5–6). Create /
@@ -176,9 +175,11 @@ at runtime from the client viewport, because an author
   `span: 'full'` resolves to the form grid's full column count, but the shipped
   renderer emits it at the widest tier only (a 3-column form: one cell of two
   in a modal).
-- **Column count.** Not authored. The form grid follows its **real rendered width**
-  via container queries — the same form is 1 column in a narrow drawer and up to 4
-  on a wide page. Author *grouping* with `fieldGroups`.
+- **Column count.** On those forms, not authored: the grid follows its **real
+  rendered width**, 1 column in a narrow drawer to 4 on a wide page. On a named or
+  public form, authored per section: `{ group: 'contact_info', columns: 2 }`
+  (1–4; 1 on a phone). A form view's own `columns` is not read by the form page
+  today.
 - **`sections` are the escape hatch — reach for them last.** New and Edit
   never read them ([Form Views](./list-views.md#form-views)); a named or
   public form and a page's `record:details` or form block do. The ladder:

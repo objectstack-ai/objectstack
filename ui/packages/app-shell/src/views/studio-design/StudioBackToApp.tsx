@@ -1,12 +1,13 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 /**
- * The Studio top bar's left end (objectstack#36501): 「‹ Back to app」, the
- * app's name, and the Studio mark. It is Studio's one way out to the running
- * app; it replaced the Studio-home button, the package switcher and the
- * top-right Open app.
+ * Studio's way back to the running app (objectstack#36501). It was the top
+ * bar's left end, 「‹ Back to app」 with the app's name; objectstack#37456 took
+ * the bar away, and the way back is now one control, the first of the left
+ * column's package row ({@link StudioBackButton}), the open package named by
+ * the switcher beside it (ADR-0084, amended 2026-11-26).
  *
- * What it names is the CURRENT PACKAGE's app, never the app the author
+ * What it leads to is the CURRENT PACKAGE's app, never the app the author
  * happened to come from (objectstack#36890 decision 5): Studio is the
  * development surface of that package's app (ADR-0084, amended 2026-11-24).
  * Where it goes, first match wins ({@link studioBackTarget}):
@@ -21,17 +22,7 @@
  *      (`useHomePath`), with no app name. A draft app has no running
  *      front-end yet, so it counts as none.
  *
- * With no app to name, the name slot names the open package — or the scope —
- * instead (objectstack#36748, and the maintainer's ruling on #36899: show the
- * package's name, go back to the apps home), so the bar still says what the
- * author is building.
- *
- * Leaving asks first when a pillar holds unsaved work, like every other
- * header departure (`beforeNavigate`).
- *
- * objectstack#37454 — the package's 「⋯」 menu, which sat right of the name
- * (objectstack#37139), moved to 概览 Overview's header (ADR-0084, amended
- * 2026-11-26).
+ * Leaving asks first when a pillar holds unsaved work (`beforeNavigate`).
  */
 
 import * as React from 'react';
@@ -81,81 +72,52 @@ export function studioBackTarget({
   return { path: `/apps/${segment}`, appLabel: labelOf(first) };
 }
 
-export function StudioBackToApp({
+/**
+ * The way back as one control (objectstack#37456; ADR-0084, amended
+ * 2026-11-26, `#amendment-2026-11-26-frame`): the first control of the top
+ * left's package row, and of the collapsed rail. It leads where
+ * {@link studioBackTarget} says, where the retired top bar's 「‹ Back to app」 went;
+ * the name beside it is the package switcher's, so the button carries the
+ * name only in its accessible name and tooltip.
+ */
+export function StudioBackButton({
   packageId,
-  packageLabel,
   apps,
   locale,
   beforeNavigate,
   navigate,
+  className,
 }: {
-  /** The open package, or `null` in the package-less scope. */
   packageId: string | null;
-  /**
-   * The open package's display name, or in the package-less scope and the
-   * cross-package leg the scope's: the name slot shows it when there is no
-   * app to name (objectstack#36748). Absent while the package list loads.
-   */
-  packageLabel?: string | null;
-  /** The package's published apps. */
   apps: readonly StudioAppTarget[];
   locale: string;
-  /** The header's unsaved-work veto: return false to stay in Studio. */
   beforeNavigate: () => boolean;
   navigate: (path: string) => void;
+  className?: string;
 }): React.ReactElement {
-  // Read once per visit: nothing in Studio is an app page, so the record
-  // cannot change while the author is here.
   const [remembered] = React.useState(readAppReturnPage);
   const homePath = useHomePath();
   const target = studioBackTarget({ remembered, packageId, apps, locale, landingPath: homePath });
   const title = target.appLabel
     ? tFormat('engine.studio.backToAppTitle', locale, { app: target.appLabel })
     : t('engine.studio.backToAppTitleNoApp', locale);
-  // objectstack#36748 — no app to name: the slot names the open package, or
-  // the scope (the ruling on #36899 treats the package-less entry the same way).
-  const fallbackLabel = packageLabel?.trim() || null;
-  const name = target.appLabel ?? fallbackLabel;
-
   return (
-    <div className="flex min-w-0 items-center gap-1.5 whitespace-nowrap text-[13px]" data-testid="studio-back">
-      <button
-        type="button"
-        data-testid="studio-back-to-app"
-        data-target={target.path}
-        onClick={() => {
-          if (!beforeNavigate()) return;
-          navigate(target.path);
-        }}
-        title={title}
-        className="inline-flex h-8 shrink-0 items-center gap-0.5 rounded-md pl-1 pr-2 font-medium text-foreground hover:bg-muted"
-      >
-        <ChevronLeft className="h-4 w-4 text-muted-foreground" aria-hidden="true" />
-        {t('engine.studio.backToApp', locale)}
-      </button>
-      {name && (
-        <>
-          <span aria-hidden="true" className="shrink-0 text-muted-foreground">
-            ·
-          </span>
-          {/* The one piece that gives way on a narrow bar. `data-names` says
-              whether it names the app or, with none, the package. */}
-          <span
-            data-testid="studio-back-app-name"
-            data-names={target.appLabel ? 'app' : 'package'}
-            className="min-w-0 truncate font-semibold"
-            title={name}
-          >
-            {name}
-          </span>
-        </>
-      )}
-      <span aria-hidden="true" className="shrink-0 text-muted-foreground">
-        ·
-      </span>
-      <span data-testid="studio-mark" className="shrink-0 text-muted-foreground">
-        {t('engine.studio.mark', locale)}
-      </span>
-    </div>
+    <button
+      type="button"
+      data-testid="studio-package-back"
+      data-target={target.path}
+      onClick={() => {
+        if (!beforeNavigate()) return;
+        navigate(target.path);
+      }}
+      aria-label={title}
+      title={title}
+      className={
+        className ??
+        'inline-flex size-8 shrink-0 items-center justify-center rounded-md text-muted-foreground outline-none hover:bg-sidebar-accent hover:text-sidebar-accent-foreground focus-visible:ring-2 focus-visible:ring-sidebar-ring'
+      }
+    >
+      <ChevronLeft className="h-4 w-4" aria-hidden="true" />
+    </button>
   );
 }

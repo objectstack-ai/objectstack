@@ -3,12 +3,13 @@
   "evals": [
     {
       "id": 1,
-      "prompt": "On the lead record page, put the Tasks tab first: our reps want the open tasks before anything else when they open a lead. The `task` object already has a `lead` master_detail field, `event` has a `lead` lookup, and leads keep their attachments.",
-      "expected_output": "No page file. The lead's `relatedLists` is its record page's tab list, so it names every tab the page keeps, Tasks first: `relatedLists: ['task', 'event', 'sys_attachment', 'sys_approval_request', 'sys_activity']`. Once declared, only the named lists show: listing the task alone would take the Events and Attachments tabs away. `relatedListFilter: { status: { $ne: 'done' } }` on `task.lead` keeps the tab to open tasks. Not a field group naming the task list (that moves the table into the Details, which was not asked), not `inlineEdit`, not a `kind: 'full'` page, and no tabs slot.",
+      "prompt": "On the lead record page, put the Tasks tab first, and have that tab list only the open tasks (a task whose `status` is not `done`): our reps want those before anything else when they open a lead. The `task` object already has a `lead` master_detail field, `event` has a `lead` lookup, and leads keep their attachments.",
+      "expected_output": "No page file. The lead's `relatedLists` is its record page's tab list, so it names the lists the page keeps, Tasks first: `relatedLists: ['task', 'event', 'sys_attachment']`. Once declared, only the named lists show: listing the task alone would take the Events and Attachments tabs away. Approvals and the activity stream still follow when unlisted, so they need no entry (naming `'sys_approval_request'` and `'sys_activity'` is right too). The request also asks for open tasks only: `relatedListFilter: { status: { $ne: 'done' } }` on the child's `task.lead` field keeps the tab to them. Not a field group naming the task list (that moves the table into the Details, which was not asked), not `inlineEdit`, not a `kind: 'full'` page, and no tabs slot.",
       "files": [],
       "assertions": {
         "must_contain": [
           "relatedLists",
+          "'event'",
           "'sys_attachment'",
           "relatedListFilter"
         ],
@@ -53,20 +54,20 @@
         ],
         "must_not_contain": [
           "slots: { tabs",
-          "actions: ['"
+          "actions: ['open"
         ]
       }
     },
     {
       "id": 4,
       "prompt": "Nobody attaches files to opportunities. Remove the Attachments tab from the opportunity record page, and keep every other tab as it is. Today the page shows Quotes (`quote.opportunity`), Contact roles (`opportunity_contact_role.opportunity`), Attachments, Approvals and Activity.",
-      "expected_output": "Declare the tab list on `opportunity` and leave the attachments built-in out: `relatedLists: ['quote', 'opportunity_contact_role', 'sys_approval_request', 'sys_activity']`. A declared list shows only the lists it names, and the attachments tab shows only when named, so it goes and the rest stay in their order. The files capability (`enable.files`) can stay. No page file, and not `relatedList: false` on a child's reference field (that hides a related list, not the attachments tab).",
+      "expected_output": "Declare the tab list on `opportunity` and leave the attachments built-in out: `relatedLists: ['quote', 'opportunity_contact_role']`. Declared, only the named lists show, in order, and the attachments tab shows only when named, so it goes. Approvals and the activity stream still follow when unlisted, so both stay without an entry (naming `'sys_approval_request'` and `'sys_activity'` after the two lists is right too). The files capability (`enable.files`) can stay. No page file, and not `relatedList: false` on a child's reference field (that hides a related list, not the attachments tab).",
       "files": [],
       "assertions": {
         "must_contain": [
           "relatedLists",
           "'quote'",
-          "'sys_activity'"
+          "'opportunity_contact_role'"
         ],
         "must_not_contain": [
           "'sys_attachment',",

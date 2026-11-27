@@ -122,6 +122,7 @@
     "@objectstack/driver-sql": "workspace:*",
     "@objectstack/driver-sqlite-wasm": "workspace:*",
     "@objectstack/formula": "workspace:*",
+    "@objectstack/knowledge-pgvector": "workspace:*",
     "@objectstack/lint": "workspace:*",
     "@objectstack/mcp": "workspace:*",
     "@objectstack/metadata": "workspace:*",
@@ -146,6 +147,7 @@
     "@objectstack/service-cache": "workspace:*",
     "@objectstack/service-datasource": "workspace:*",
     "@objectstack/service-job": "workspace:*",
+    "@objectstack/service-knowledge": "workspace:*",
     "@objectstack/service-mailbox": "workspace:*",
     "@objectstack/service-messaging": "workspace:*",
     "@objectstack/service-package": "workspace:*",
@@ -184,6 +186,7 @@
     }
   },
   "optionalDependencies": {
+    "@objectstack/knowledge-turso": "workspace:*",
     "better-sqlite3": "^13.0.3"
   },
   "devDependencies": {

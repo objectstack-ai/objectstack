@@ -202,7 +202,8 @@ function renderAt(entry: string, perms = AUTHOR) {
 }
 
 const overviewHeader = () => screen.getByTestId('studio-package-overview-header');
-const topBar = () => screen.getByTestId('studio-shell-header');
+/** objectstack#37456 — the top bar is gone; the left column's top rows stand where it was. */
+const topLeft = () => screen.getByTestId('studio-top-left');
 
 /** The overview has read its row: the Info card lists its fields. */
 async function overviewRead(name: string) {
@@ -252,11 +253,12 @@ describe('the overview header: name, two chips, the description, and the ⋯ men
     await waitFor(() => expect(within(overviewHeader()).getByTestId('studio-overview-chip-access')).toHaveTextContent('可写'));
   });
 
-  it('the ⋯ menu is in the header with its six rows; the top bar no longer draws it', async () => {
+  it('the ⋯ menu is in the header with its six rows; the left column draws none', async () => {
     renderAt(`/studio/${OWN}/overview`);
     await overviewRead('Sales');
     const trigger = await within(overviewHeader()).findByTestId('studio-package-menu', undefined, { timeout: 8000 });
-    expect(within(topBar()).queryByTestId('studio-package-menu')).toBeNull();
+    expect(within(topLeft()).queryByTestId('studio-package-menu')).toBeNull();
+    expect(screen.getAllByTestId('studio-package-menu')).toHaveLength(1);
     fireEvent.pointerDown(trigger, { button: 0, ctrlKey: false, pointerType: 'mouse' });
     const content = await screen.findByTestId('studio-package-menu-content');
     expect(within(content).getAllByRole('menuitem').map((i) => i.getAttribute('data-testid'))).toEqual(

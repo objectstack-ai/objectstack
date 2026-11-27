@@ -27,7 +27,7 @@
  * is read as a shipped one is.
  */
 
-import { afterAll, beforeAll, describe, it, expect, vi } from 'vitest';
+import { afterAll, beforeAll, describe, it, expect, vi, type Mock } from 'vitest';
 // Paid during collection, not inside a clocked case: the dispatcher reaches
 // `standalone-stack.ts`, whose function body `import()`s it (`scripts/check-test-source-alias.mjs`).
 import '@objectstack/metadata';
@@ -404,6 +404,8 @@ describe('[ADR-0149 D7 · ADR-0160 D4] get_record_context over one real kernel: 
     let rpc: (method: string, params?: unknown) => Promise<any>;
     /** The real `security` service both doors resolve. */
     let securityService: any;
+    /** [#37666] The stdio door's plugin-context logger: the door writes its 5xx fault lines here. */
+    let stdioLogger: { info: Mock; warn: Mock; error: Mock; debug: Mock };
     /** The execution context the stdio door handed the engine, per object read. */
     const stdioReads: Array<{ object: string; context: any }> = [];
 
@@ -619,7 +621,7 @@ describe('[ADR-0149 D7 · ADR-0160 D4] get_record_context over one real kernel: 
             getServices: vi.fn(() => stdioServices),
             hook: vi.fn(),
             trigger: vi.fn(async () => {}),
-            logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() },
+            logger: (stdioLogger = { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() }),
             getKernel: vi.fn(() => ({})),
         };
         const plugin = new MCPServerPlugin({ autoStart: true });
@@ -774,6 +776,129 @@ describe('[ADR-0149 D7 · ADR-0160 D4] get_record_context over one real kernel: 
         expect(answer.isError).toBe(true);
         expect(answer.payload.error).toMatchObject({ code: 'PERMISSION_DENIED', status: 403 });
         expect(answer.text).not.toContain('rc_off');
+    });
+
+    it('[ADR-0112] a related child whose list read fails (an outage, no coded refusal) fails the call INTERNAL_ERROR on both doors, naming nothing, never as a refusal', async () => {
+        const OUTAGE = 'disk I/O error reading rc_revision.version';
+        const real = engine.find.bind(engine);
+        const failing = vi.spyOn(engine, 'find').mockImplementation(async (object: string, ...rest: any[]) => {
+            if (object === 'rc_revision') throw new Error(OUTAGE);
+            return (real as any)(object, ...rest);
+        });
+        // The doors' fault log (`logServerFault`, `@objectstack/types`): the /mcp door's runtime here
+        // has no logger, so its lines take the console fallback; the stdio door's plugin hands the
+        // runtime its context logger, so its lines go there (#37666).
+        const errorLines = vi.spyOn(console, 'error').mockImplementation(() => {});
+        const warnLines = vi.spyOn(console, 'warn').mockImplementation(() => {});
+        stdioLogger.error.mockClear();
+        stdioLogger.warn.mockClear();
+        try {
+            const answer = await both({ objectName: 'rc_policy', recordId: 'p1', context: 'rc_main' });
+            await both({ objectName: 'rc_policy', recordId: 'p1', context: 'rc_main' });
+            // An outage is a fault, never a declared capability absence: each door logs it at error,
+            // with the outage as its cause, on every call, the second included.
+            expect(warnLines.mock.calls.filter(([line]) => String(line).includes('capability absence'))).toEqual([]);
+            expect(stdioLogger.warn.mock.calls.filter(([line]) => String(line).includes('capability absence'))).toEqual([]);
+            const isFault = ([line]: unknown[]) =>
+                typeof line === 'string' && line.startsWith('[5xx] 500') && line.includes('get_record_context rc_policy');
+            const faults = errorLines.mock.calls.filter(isFault);
+            expect(faults).toHaveLength(2);
+            const stdioFaults = stdioLogger.error.mock.calls.filter(isFault);
+            expect(stdioFaults).toHaveLength(2);
+            for (const [, err, meta] of stdioFaults) {
+                expect(meta).toMatchObject({ status: 500, code: 'INTERNAL_ERROR' });
+                // The logger renders the cause chain itself; the original rides on `cause`.
+                expect(((err as Error).cause as Error | undefined)?.message).toBe(OUTAGE);
+            }
+            for (const [, meta] of faults) {
+                expect(meta).toMatchObject({ status: 500, code: 'INTERNAL_ERROR' });
+                // The original reaches the line through the fault log's own `cause` rendering,
+                // not through a suffix on the failure's stack.
+                const { causes, stack } = meta as { causes?: Array<{ message: string; stack?: string }>; stack?: unknown };
+                expect(causes?.[0]?.message).toBe(`Error: ${OUTAGE}`);
+                expect(causes?.[0]?.stack).toContain(OUTAGE);
+                expect(String(stack)).not.toContain('Caused by:');
+            }
+            // Reached through each door, so the answer is the outage's on both.
+            expect(failing.mock.calls.filter(([object]) => object === 'rc_revision').length).toBeGreaterThanOrEqual(4);
+            expect(answer.isError).toBe(true);
+            expect(answer.payload.error).toMatchObject({ code: 'INTERNAL_ERROR', status: 500 });
+            // The wire carries no cause text: the fault line is the operator's alone.
+            for (const word of ['rc_revision', 'disk I/O', 'version', 'causes', 'Caused by']) expect(answer.text).not.toContain(word);
+        } finally {
+            failing.mockRestore();
+            errorLines.mockRestore();
+            warnLines.mockRestore();
+        }
+        // Control: the same call reads once the list read answers.
+        const control = await both({ objectName: 'rc_policy', recordId: 'p1', context: 'rc_main' });
+        expect(control.isError).toBe(false);
+        expect(control.payload.data.related[0]).toMatchObject({ object: 'rc_revision' });
+    });
+
+    it.each<[string, () => unknown, Record<string, unknown>]>([
+        [
+            'a sandboxed beforeFind hook\'s plain throw stays 400 HOOK_ABORTED, in the hook\'s words',
+            () => Object.assign(new Error("beforeFind hook 'rc_gate' threw: Revisions are closed for review"), { innerMessage: 'Revisions are closed for review' }),
+            { code: 'HOOK_ABORTED', status: 400, message: 'Revisions are closed for review' },
+        ],
+        [
+            'a PERMISSION_DENIED with no status stays PERMISSION_DENIED, as the door renders it',
+            () => Object.assign(new Error('Permission denied'), { code: 'PERMISSION_DENIED' }),
+            { code: 'PERMISSION_DENIED' },
+        ],
+    ])('[ADR-0112] at the related list read, a throw the /data door answers as a refusal stays that refusal on both doors: %s', async (_label, thrown, expected) => {
+        const real = engine.find.bind(engine);
+        const refusing = vi.spyOn(engine, 'find').mockImplementation(async (object: string, ...rest: any[]) => {
+            if (object === 'rc_revision') throw thrown();
+            return (real as any)(object, ...rest);
+        });
+        try {
+            const answer = await both({ objectName: 'rc_policy', recordId: 'p1', context: 'rc_main' });
+            expect(refusing.mock.calls.filter(([object]) => object === 'rc_revision').length).toBeGreaterThanOrEqual(2);
+            expect(answer.isError).toBe(true);
+            expect(answer.payload.error).toMatchObject(expected);
+            // The door's refusal, as main answered it: never the fault's 500.
+            expect([undefined, 400, 403]).toContain(answer.payload.error.status);
+        } finally {
+            refusing.mockRestore();
+        }
+        const control = await both({ objectName: 'rc_policy', recordId: 'p1', context: 'rc_main' });
+        expect(control.isError).toBe(false);
+        expect(control.payload.data.related[0]).toMatchObject({ object: 'rc_revision' });
+    });
+
+    it('[ADR-0112] at the related list read, a fault the /data door codes stays the door\'s answer on both doors: ERR_DATASOURCE_UNAVAILABLE 503 with its sentence, never INTERNAL_ERROR', async () => {
+        const SENTENCE = 'The datasource for this object is not available';
+        const real = engine.find.bind(engine);
+        const unavailable = vi.spyOn(engine, 'find').mockImplementation(async (object: string, ...rest: any[]) => {
+            if (object === 'rc_revision') throw Object.assign(new Error(SENTENCE), { code: 'ERR_DATASOURCE_UNAVAILABLE' });
+            return (real as any)(object, ...rest);
+        });
+        const errorLines = vi.spyOn(console, 'error').mockImplementation(() => {});
+        stdioLogger.error.mockClear();
+        try {
+            const answer = await both({ objectName: 'rc_policy', recordId: 'p1', context: 'rc_main' });
+            expect(unavailable.mock.calls.filter(([object]) => object === 'rc_revision').length).toBeGreaterThanOrEqual(2);
+            expect(answer.isError).toBe(true);
+            expect(answer.payload.error).toMatchObject({ code: 'ERR_DATASOURCE_UNAVAILABLE', status: 503, message: SENTENCE });
+            // Each door still logs the fault it answered, under the door's own code: the /mcp door on
+            // the console fallback, the stdio door on its plugin-context logger (#37666).
+            const isFault = ([line]: unknown[]) =>
+                typeof line === 'string' && line.startsWith('[5xx]') && line.includes('get_record_context rc_policy');
+            const faults = [...errorLines.mock.calls.filter(isFault), ...stdioLogger.error.mock.calls.filter(isFault)];
+            expect(faults).toHaveLength(2);
+            expect(errorLines.mock.calls.filter(isFault)).toHaveLength(1);
+            for (const [line] of faults) expect(String(line)).toMatch(/^\[5xx\] 503\b/);
+            expect(JSON.stringify(errorLines.mock.calls.map(([, meta]) => meta))).not.toContain('INTERNAL_ERROR');
+            expect(JSON.stringify(stdioLogger.error.mock.calls.map(([, , meta]) => meta))).not.toContain('INTERNAL_ERROR');
+        } finally {
+            unavailable.mockRestore();
+            errorLines.mockRestore();
+        }
+        const control = await both({ objectName: 'rc_policy', recordId: 'p1', context: 'rc_main' });
+        expect(control.isError).toBe(false);
+        expect(control.payload.data.related[0]).toMatchObject({ object: 'rc_revision' });
     });
 
     it('[ADR-0160 D3, second amendment] where, orderBy and limit on a related list answer the same bytes on both doors: filtered, ordered, cut at the limit and stated', async () => {

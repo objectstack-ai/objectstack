@@ -24,6 +24,9 @@
  */
 
 import { describe, it, expect, vi } from 'vitest';
+// Paid at collection, not inside a case's clock: the dispatcher's reach loads
+// it lazily (`check:test-source-alias`).
+import '@objectstack/metadata';
 
 import { HttpDispatcher } from '../http-dispatcher.js';
 import { SandboxError } from '../sandbox/quickjs-runner.js';
@@ -95,7 +98,7 @@ describe('a deliberate REJECTION is a 400 (#3962)', () => {
         const response = await invoke(
             new SandboxError(
                 "action 'submit_signoff' threw: ValidationError: issued_on is required",
-                'ValidationError: issued_on is required',
+                'issued_on is required',
                 { code: 'VALIDATION_FAILED', fields },
             ),
         );

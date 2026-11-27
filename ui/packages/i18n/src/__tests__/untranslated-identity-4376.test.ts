@@ -102,7 +102,7 @@ const LEGITIMATE_IDENTITIES: Record<string, string> = {
   // (no such key in `en`) — which is that guard doing its job.
   'publicForm.poweredBy': 'Powered by ObjectStack — product attribution; ja keeps the English wordmark line.',
   'auth.shell.poweredBy': 'Powered by ObjectStack — the Community Console sign-in page attribution; ja keeps the English wordmark line, as publicForm.poweredBy does.',
-  'console.studio.title': 'Studio — the product name, which every pack writes in Latin script in its own Studio strings (objectui#11863).',
+  'console.studio.title': 'App Studio — the product name (ADR-0084); zh writes 应用搭建, the other packs keep the Latin one (objectui#11863).',
   'connectAgent.apiKey.badge': 'headless — the literal mode name the CLI and API use.',
   'connectAgent.doubao.title': 'Doubao Work — the product name; zh writes the vendor\'s own Chinese name, the other packs keep the Latin one.',
   'connectAgent.qwenwork.title': 'QwenWork — the product name; zh writes the vendor\'s own Chinese name, the other packs keep the Latin one.',
@@ -129,6 +129,7 @@ const LEGITIMATE_IDENTITIES: Record<string, string> = {
   'detail.fieldChangeLabel': 'Activity field-change line label — the field hole and a separator, no prose; zh-Hans, zh-Hant and ja set a fullwidth colon, fr its space-before-colon, ko/ru/ar keep `:` as their punctuation (objectstack#36290).',
   'console.firstRunChecklist.pill.count': 'Sidebar 「Get started」 pill count — the done and total holes joined by a slash, a format string with no word to translate (objectstack#36739).',
   'console.changeOwner.failure': 'Change Owner report row — the row id and the server\'s own sentence joined by a colon, a format string with no word to translate; zh-Hans and fr use their own colon (objectstack#35403).',
+  'grid.import.scopeEntry': 'Import Wizard scope entry — the column label and the row\'s cell in quotes, a format string with no word to translate; de, es, fr, ja, ru and ar use their own quotes, zh-Hans, zh-Hant and ko keep the straight quotes their `grid.import.*` lines use (objectstack#36794).',
   'console.changeOwner.cascadeOption': 'Change Owner cascade tick — the related object and its reference field, the field in parentheses, a format string with no word to translate; zh-Hans, zh-Hant and ja use fullwidth parentheses (objectstack#35315).',
 
   // Loanwords these packs have adopted as their OWN vocabulary (checked against
