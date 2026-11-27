@@ -488,7 +488,8 @@ import {
   CHANGE_KIND_ROWS,
   UI_SCRIPTS_SUITE_ROOTS,
   SPEC_MIGRATION_ENTRY_ROOTS,
-  FIELD_SCHEMA_KEY_DECLARATIONS,
+  SERVED_KEY_SET_DECLARATIONS,
+  SERVED_KEY_SET_PINS,
   MANDATORY_TIER_GLOB_ROWS,
   SUSPECT_TIER_GLOB_ROWS,
   GENERATED_MODULE_SOURCES,
@@ -509,7 +510,8 @@ export {
   GENERATED_MODULE_SOURCES,
   UI_SCRIPTS_SUITE_ROOTS,
   SPEC_MIGRATION_ENTRY_ROOTS,
-  FIELD_SCHEMA_KEY_DECLARATIONS,
+  SERVED_KEY_SET_DECLARATIONS,
+  SERVED_KEY_SET_PINS,
 };
 
 // Re-exported so this tool's self-test drives the SAME predicates the gate
@@ -12209,7 +12211,7 @@ export function objectLiteralMembers(source, open, masked = maskCommentsAndLiter
 }
 
 /**
- * The key set one `FIELD_SCHEMA_KEY_DECLARATIONS` row reads, sorted, or null when the declaration is not where
+ * The key set one `SERVED_KEY_SET_DECLARATIONS` row reads, sorted, or null when the declaration is not where
  * the row says it is. `declares` names the binding; `call` (when set) names the call whose argument number
  * `argument` (from 0) is the object literal; with no `call` the literal follows the `=` directly.
  */
@@ -12245,36 +12247,72 @@ export function declaredKeySet(source, { declares, call = null, argument = 0 }) 
 }
 
 /**
- * Does this change set change FieldSchema's key set? The trigger for the closure pins outside the spec package
- * (`CHANGE_KIND_ROWS`, the `field-schema-key-set` row): two tables in other packages classify every FieldSchema
- * key and a third counts them, so a key added, removed or renamed reds their suites while the spec package's
- * own stay green.
+ * Does this change set change the key set of a type a served key-set pin holds? The trigger for the whole-set pins
+ * outside the spec package (`CHANGE_KIND_ROWS`, the four key-set rows, one per pin, each bound here to its
+ * `SERVED_KEY_SET_PINS` entry): a table both ways, a property count or a fixture held equal to a type's property list,
+ * in another package, so a key added, removed or renamed reds that suite while the spec package's own stay green.
  *
- * Read from the DIFF, as the README claim net is: the declaration's members at the change set's base (the merge
- * base `readReadmeNetBase` reads, memoised once) against the working tree, per declaring file. An edit that
- * leaves the members alone (prose, a `.describe()`, a refine, a nested schema) derives nothing; a file created
- * or deleted, or a declaration this reader cannot find on either side, derives the row, because a reader that
- * lost its place must read wide, never quiet. A surface named before its code (the PM's derivation at
- * dispatch, where the file is unchanged) derives nothing either, and that asymmetry is the honest one: the
- * question is about a diff, and the dev's re-derivation off the merge base is where the missed suites cost the
+ * Read from the DIFF, as the README claim net is: each declaration's members at the change set's base (the merge
+ * base `readReadmeNetBase` reads, memoised once) against the working tree, per declaring file, for the rows that
+ * file holds. A type's own row derives when its members differ and the pin holds the type. A spread row (a member
+ * object the declarations spread) derives when its members differ, the pin reads through spreads, and a type the pin
+ * holds spreads it at the base or in the working tree, read from that type's own declaration so the spreaders are
+ * never a second list. An edit that leaves the members alone (prose, a `.describe()`, a refine, a nested schema)
+ * derives nothing; a file created or deleted, or a declaration this reader cannot find on either side, derives the
+ * row, because a reader that lost its place must read wide, never quiet. A surface named before its code (the PM's
+ * derivation at dispatch, where the file is unchanged) derives nothing either, and that asymmetry is the honest one:
+ * the question is about a diff, and the dev's re-derivation off the merge base is where the missed suites cost the
  * CI round trip.
  *
  * @param {string} path repo-relative
+ * @param {{ types: readonly string[], throughSpreads: boolean }} pin one `SERVED_KEY_SET_PINS` entry
  * @param {{ readHead?: (rel: string) => string|null, readBase?: (rel: string) => string|null,
- *           declarations?: typeof FIELD_SCHEMA_KEY_DECLARATIONS }} [io] injectable for the self-test
+ *           declarations?: typeof SERVED_KEY_SET_DECLARATIONS }} [io] injectable for the self-test
  */
-export function changesFieldSchemaKeySet(path, { readHead = readTrackedSource, readBase = readReadmeNetBase, declarations = FIELD_SCHEMA_KEY_DECLARATIONS } = {}) {
+export function changesServedKeySet(path, pin, { readHead = readTrackedSource, readBase = readReadmeNetBase, declarations = SERVED_KEY_SET_DECLARATIONS } = {}) {
   const rel = path.replace(/^\.\//, '');
-  const row = declarations.find((d) => d.path === rel);
-  if (!row) return false;
+  const rows = declarations.filter((d) => d.path === rel && (d.type !== undefined ? pin.types.includes(d.type) : pin.throughSpreads));
+  if (rows.length === 0) return false;
   const head = readHead(rel) ?? null;
   const base = readBase(rel) ?? null;
   if (head === base) return false;
   if (head === null || base === null) return true;
-  const after = declaredKeySet(head, row);
-  const before = declaredKeySet(base, row);
-  if (after === null || before === null) return true;
-  return JSON.stringify(after) !== JSON.stringify(before);
+  for (const row of rows) {
+    const after = declaredKeySet(head, row);
+    const before = declaredKeySet(base, row);
+    if (after === null || before === null) return true;
+    if (JSON.stringify(after) === JSON.stringify(before)) continue;
+    if (row.type !== undefined || spreadByAPinnedType(row.spread, pin, { readHead, readBase, declarations })) return true;
+  }
+  return false;
+}
+
+/**
+ * Does a type the pin holds spread `spread` (a member object's name) at the base or in the working tree? Read from
+ * each type's own declaration. A type with no row, or whose declaration this reader cannot find on any side it
+ * can read, answers yes: the reader lost its place, so it reads wide.
+ */
+function spreadByAPinnedType(spread, pin, { readHead, readBase, declarations }) {
+  const member = `...${spread}`;
+  for (const type of pin.types) {
+    const own = declarations.find((d) => d.type === type);
+    if (!own) return true;
+    const sides = [readHead(own.path) ?? null, readBase(own.path) ?? null].filter((text) => text !== null);
+    if (sides.length === 0) return true;
+    for (const text of sides) {
+      const keys = declaredKeySet(text, own);
+      if (keys === null || keys.includes(member)) return true;
+    }
+  }
+  return false;
+}
+
+/**
+ * The pinned types that have no declaration row, as `pin-key: type`, for the load-time refusal below: a pin naming a
+ * type the reader cannot read would derive nothing for it, in silence.
+ */
+export function servedKeySetPinGaps(pins = SERVED_KEY_SET_PINS, declarations = SERVED_KEY_SET_DECLARATIONS) {
+  return Object.entries(pins).flatMap(([key, pin]) => pin.types.filter((type) => !declarations.some((d) => d.type === type)).map((type) => `${key}: ${type}`));
 }
 
 /**
@@ -12327,6 +12365,14 @@ export function ciJobRunsRunner({ ciJob, ciRunner }, workflowEntries) {
   return false;
 }
 
+// Refused at load: a pin naming a type with no declaration row would derive nothing for it, in silence.
+{
+  const gaps = servedKeySetPinGaps();
+  if (gaps.length > 0) {
+    throw new Error(`dispatch-gates: a served key-set pin names a type no SERVED_KEY_SET_DECLARATIONS row declares — ${gaps.join(', ')}`);
+  }
+}
+
 /**
  * The change-kind roster is data: `CHANGE_KIND_ROWS` in `dispatch-gates.data.mjs` carries each kind, the
  * NAME of the predicate that recognises it, and the gates it names — with the docblock that governs the
@@ -12346,7 +12392,8 @@ const CHANGE_KIND_PREDICATES = Object.freeze({
   'adr-anchored-file': (path) => breaksAnAdrAnchor(path),
   'ui-scripts-suite-input': (path) => readByUiScriptsSuite(path),
   'spec-migration-entry': (path) => readBySpecMigrationEntryConsumers(path),
-  'field-schema-key-set': (path) => changesFieldSchemaKeySet(path),
+  // One per served key-set pin, each bound to the types its test holds.
+  ...Object.fromEntries(Object.entries(SERVED_KEY_SET_PINS).map(([key, pin]) => [key, (path) => changesServedKeySet(path, pin)])),
   // One per population net (#31257), each bound to its own net.
   ...Object.fromEntries(Object.entries(POPULATION_NETS).map(([key, net]) => [key, (path) => reachesPopulationNet(path, net)])),
   'published-readme-claim': (path) => takesAReadmeClaim(path),

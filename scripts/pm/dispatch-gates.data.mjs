@@ -977,18 +977,19 @@ export const ESCAPABLE_LITERAL_LEDGER_ROWS = Object.freeze([
  *     published migrations subpath does NOT qualify as a repair of anything:
  *     that import is a syntactic reach, not a reading of the entries' prose
  *     (see `SPEC_MIGRATION_ENTRY_ROOTS`).
- *   - field-schema-key-set entry: when the closure tables move next to the
- *     schema (the spec package's own suite then reds on the key it was not
- *     told about), or when a workflow runs these three tests as a step of
- *     their own under an invocation the discovery reads, the row is redundant;
- *     and when the job stops running the package test task, or a pinned test
- *     file is moved or deleted, its binding goes STALE by itself. ⛔ Widening
- *     it to every test that reads `FieldSchema.shape` does NOT qualify as a
- *     repair: the others check that a key they read is declared, which a new
- *     key cannot red, and only these three pin the whole set (see
- *     `FIELD_SCHEMA_KEY_DECLARATIONS`). ⛔ Nor does falling back to a path
- *     match on the declaring files: four in five edits there leave the key
- *     set alone, and each would owe a closure build for nothing.
+ *   - the four key-set entries (field-schema, object-reference, served-type,
+ *     report-inspector): each is deletable on its own, when its pin's table or
+ *     count moves next to the schema (the spec package's own suite then reds
+ *     on the key it was not told about), or when a workflow runs its test as a
+ *     step of its own under an invocation the discovery reads; and when the
+ *     job stops running the test task, or a pinned test file is moved or
+ *     deleted, its binding goes STALE by itself. ⛔ Widening one to every test
+ *     that reads a schema's shape does NOT qualify as a repair: the others
+ *     check that a key they read is declared, which a new key cannot red, and
+ *     only these four pin a whole set (see `SERVED_KEY_SET_PINS`). ⛔ Nor does
+ *     falling back to a path match on the declaring files: four in five edits
+ *     there leave the key set alone, and each would owe a closure build for
+ *     nothing.
  *   - population-net entries (#31257, fifteen): when the gate's own source
  *     declares a population this derivation can MATCH (a subtree it really
  *     walks, beside a filter the derivation reads), the ordinary path match
@@ -1364,19 +1365,43 @@ export const CHANGE_KIND_ROWS = [
         ciSubset: 'packages/drivers/driver-sql/src/builtin-column-collision.test.ts',
         why: "it holds FIELD_KEY_STORAGE_CLASS equal to Object.keys(FieldSchema.shape), both directions, so every key added, removed or renamed in the schema reds it until the driver classifies the key as storage or presentation. It is a driver-sql test, so no check family and no spec package test covers it: CI runs it only inside the Test Core shards' package test task, and two cards adding a field key learned of it a CI round later, after a fully green local ledger. Its vitest config aliases every spec namespace to SOURCE and the test imports nothing else from the workspace, so it needs NO build and reads your edit as written. Repair by classifying the key in FIELD_KEY_STORAGE_CLASS (a changeset entry for the driver is owed with it)",
       },
+    ],
+  },
+  {
+    kind: "changes FieldSchema's or ObjectSchema's KEY SET (a key added, removed or renamed in either schema or in the protection fields both spread, read from the DIFF against the merge base)",
+    matches: 'object-reference-key-set',
+    gates: [
       {
         name: 'pnpm --filter @objectstack/metadata-core exec vitest run src/object-schema-fls-references.test.ts',
         ciJob: 'Test Core',
         ciRunner: 'set -- pnpm turbo run test',
         ciSubset: 'packages/metadata-core/src/object-schema-fls-references.test.ts',
-        why: "it holds FIELD_REFERENCE_POSITIONS equal to FieldSchema's declared keys, both directions, so a key added, removed or renamed reds it until the field-level-security scrub says whether the key can name another field. CI runs it only inside the Test Core shards' package test task, as above. Its vitest config does NOT alias the spec package, so the test reads the BUILT spec dist and a stale dist answers green for your edit: build the closure first, pnpm --filter '@objectstack/metadata-core^...' build . Repair by classifying the key in FIELD_REFERENCE_POSITIONS (a changeset entry for the package is owed with it)",
+        why: "it holds FIELD_REFERENCE_POSITIONS equal to FieldSchema's declared keys, and OBJECT_REFERENCE_POSITIONS equal to ObjectSchema's (less `fields`, the projection itself), both directions, so a key added, removed or renamed in either schema reds it until the field-level-security scrub says whether the key can name another field. It is a metadata-core test, so no check family and no spec package test covers it: CI runs it only inside the Test Core shards' package test task. Its vitest config does NOT alias the spec package, so the test reads the BUILT spec dist and a stale dist answers green for your edit: build the closure first, pnpm --filter '@objectstack/metadata-core^...' build . Repair by classifying the key in the table for its schema (a changeset entry for the package is owed with it)",
       },
+    ],
+  },
+  {
+    kind: "changes the top-level KEY SET of a metadata type the protocol's property-count pins count (action, agent, app, dashboard, dataset, field, flow, hook, object, page, position, report, skill or tool: a key added, removed or renamed in the type's schema or in the protection fields or override declaration it spreads, read from the DIFF against the merge base)",
+    matches: 'served-type-key-set',
+    gates: [
       {
         name: 'pnpm --filter @objectstack/metadata-protocol exec vitest run src/protocol.meta-types-degenerate-derivation.test.ts',
         ciJob: 'Test Core',
         ciRunner: 'set -- pnpm turbo run test',
         ciSubset: 'packages/metadata-protocol/src/protocol.meta-types-degenerate-derivation.test.ts',
-        why: "its CARD_PROPERTY_COUNTS control counts the top-level properties the protocol serves for `field`, so every key added or removed moves the count by one and reds it until the pin is moved with a line naming the key. CI runs it only inside the Test Core shards' package test task, as above. Its vitest config aliases only the sdui-parser, so the spec and six other workspace packages are read from their BUILT dist and a stale one answers for your edit: build the closure first, pnpm --filter '@objectstack/metadata-protocol^...' build . The same control counts other metadata types; a key added to one of those is not this row. Repair by moving the `field` count and its comment line in the test",
+        why: "its CARD_PROPERTY_COUNTS control counts the top-level properties the protocol serves for thirteen metadata types, and a sibling case counts `action`'s, so a key added to or removed from one of those schemas, or from the protection fields or override declaration they spread, moves a count by one and reds it until the pin is moved with a line naming the key. A rename moves no count, and the row still names the test for one: the question it answers is the key set, read the same way for every pin. It is a metadata-protocol test, so no check family and no spec package test covers it: CI runs it only inside the Test Core shards' package test task. Its vitest config aliases only the sdui-parser, so the spec and six other workspace packages are read from their BUILT dist and a stale one answers for your edit: build the closure first, pnpm --filter '@objectstack/metadata-protocol^...' build . Repair by moving that type's count and its comment line in the test",
+      },
+    ],
+  },
+  {
+    kind: "changes ReportSchema's OWN key set (a key added, removed or renamed in the schema itself, read from the DIFF against the merge base; the protection fields and override declaration it spreads are not this row, because the pin excludes them by reading them from the spec)",
+    matches: 'report-inspector-key-set',
+    gates: [
+      {
+        name: 'pnpm --dir ui exec vitest run packages/app-shell/src/views/metadata-admin/inspectors/ReportDefaultInspector.joinedClearsRefused-29195.test.tsx',
+        ciJob: 'Test UI',
+        ciRunner: 'pnpm --dir ui exec vitest run',
+        why: "its coverage case holds a maximal report fixture plus a named exclusion list (the protection fields and the override declaration, read from the spec, and two keys named in the test) equal to the top-level properties of ReportSchema's JSON Schema, so a key added, removed or renamed in ReportSchema itself reds it until the key joins the fixture with a valid non-joined value or the exclusions with its reason. It is a ui test, so no package suite outside ui and no check family covers it: CI runs it only inside the Test UI shards. ui's vitest config aliases only the sdui-parser to source, so the test reads @objectstack/spec from its BUILT dist and a stale one answers for your edit: build the seven @objectstack packages the job builds first, exactly as it does: pnpm exec turbo run build --filter=@objectstack/spec... --filter=@objectstack/client... --filter=@objectstack/core... --filter=@objectstack/formula... --filter=@objectstack/lint... --filter=@objectstack/sdui-parser... --filter=@objectstack/types... . One positional file, no bare `--`, from the repo root. Repair by adding the key to the test's MAXIMAL fixture or to its EXCLUDED set with the reason",
       },
     ],
   },
@@ -1420,26 +1445,68 @@ export const SPEC_MIGRATION_ENTRY_ROOTS = Object.freeze([
 ]);
 
 /**
- * Where FieldSchema's top-level keys are declared, as DATA, for the `field-schema-key-set` row: the engine's
- * `changesFieldSchemaKeySet` reads each declaration's members at the merge base and in the working tree, and the
- * row fires when they differ. Two files, because the schema's shape spreads the protection fields: `FieldSchema`
- * is the second argument of the `strictObject` call its lazy body makes (the first is the strictness options),
- * and `MetadataProtectionFields` is a bare object literal. A spread reads as one member (`...` and its name), so a
- * new spread in the shape is a change, and the spread object's own members are judged on its own row.
+ * Where each served metadata type's top-level keys are declared, as DATA, for the key-set rows (`SERVED_KEY_SET_PINS`
+ * names them): the engine's `changesServedKeySet` reads each declaration's members at the merge base and in the
+ * working tree, and a row fires when they differ for a type its pin holds. A row with a `type` is that type's own
+ * declaration; a row with a `spread` is a member object the declarations spread, and which types spread it is read
+ * from their own members, live, so it is never a second list to keep. Most types are the second argument of the
+ * `strictObject` call their lazy body makes (the first is the strictness options); `object` is `ObjectSchemaBase`,
+ * the strict object `ObjectSchema` assigns its methods onto; `action` is the body of the `actionObject` factory the
+ * schema refines. A spread reads as one member (`...` and its name), so a new spread in a shape is a change, and the
+ * spread object's own members are judged on its own row; the self-test holds every spread a type declares to a row
+ * here, so a member object nobody watches cannot join a shape quietly.
  *
- * The three pins the row names are the ones that hold the WHOLE set, so an ADDED key reds them. Measured at
- * a73edb3c: other tests read `FieldSchema.shape` (in the lint package, the cli data-model rules), and each checks
- * that a key it reads is declared, or that one spelling is absent; a new key cannot red them. Over the month to
- * that commit, 48 first-parent commits on main touched `field.zod.ts` and 9 changed the key set (each moved the
- * driver-sql table, which pins the set both ways); replayed over all 48, the reader fires on exactly those 9. A
- * path match would have named the suites 48 times for those 9, and three more commits that moved a pinned
- * package's file for an object key (a related list, a field group, a nested column table) are not this row.
- * ⚠ The `metadata-protocol` count also covers other metadata types; only `field` is this row's.
+ * Fourteen types, the thirteen `CARD_PROPERTY_COUNTS` counts in the metadata-protocol test plus `action`, whose count
+ * the same file pins in a case of its own; the self-test holds each type's expanded key count equal to the number its
+ * pin spells, so a type that joins the pin without a row here reds it. Field's history, measured at a73edb3c: over the
+ * month to that commit, 48 first-parent commits on main touched `field.zod.ts` and 9 changed the key set (each moved the
+ * driver-sql table, which pins the set both ways); replayed over all 48, the reader fires on exactly those 9. A path
+ * match would have named the suites 48 times for those 9.
  */
-export const FIELD_SCHEMA_KEY_DECLARATIONS = Object.freeze([
-  Object.freeze({ path: 'packages/spec/src/data/field.zod.ts', declares: 'FieldSchema', call: 'strictObject', argument: 1 }),
-  Object.freeze({ path: 'packages/spec/src/kernel/metadata-protection.zod.ts', declares: 'MetadataProtectionFields', call: null, argument: 0 }),
+export const SERVED_KEY_SET_DECLARATIONS = Object.freeze([
+  Object.freeze({ type: 'action', path: 'packages/spec/src/ui/action.zod.ts', declares: 'actionObject', call: 'strictObject', argument: 1 }),
+  Object.freeze({ type: 'agent', path: 'packages/spec/src/ai/agent.zod.ts', declares: 'AgentSchema', call: 'strictObject', argument: 1 }),
+  Object.freeze({ type: 'app', path: 'packages/spec/src/ui/app.zod.ts', declares: 'AppSchema', call: 'strictObject', argument: 1 }),
+  Object.freeze({ type: 'dashboard', path: 'packages/spec/src/ui/dashboard.zod.ts', declares: 'DashboardSchema', call: 'strictObject', argument: 1 }),
+  Object.freeze({ type: 'dataset', path: 'packages/spec/src/ui/dataset.zod.ts', declares: 'DatasetSchema', call: 'strictObject', argument: 1 }),
+  Object.freeze({ type: 'field', path: 'packages/spec/src/data/field.zod.ts', declares: 'FieldSchema', call: 'strictObject', argument: 1 }),
+  Object.freeze({ type: 'flow', path: 'packages/spec/src/automation/flow.zod.ts', declares: 'FlowSchema', call: 'strictObject', argument: 1 }),
+  Object.freeze({ type: 'hook', path: 'packages/spec/src/data/hook.zod.ts', declares: 'HookSchema', call: 'strictObject', argument: 1 }),
+  Object.freeze({ type: 'object', path: 'packages/spec/src/data/object.zod.ts', declares: 'ObjectSchemaBase', call: 'strictObject', argument: 1 }),
+  Object.freeze({ type: 'page', path: 'packages/spec/src/ui/page.zod.ts', declares: 'PageSchema', call: 'strictObject', argument: 1 }),
+  Object.freeze({ type: 'position', path: 'packages/spec/src/identity/position.zod.ts', declares: 'PositionSchema', call: 'strictObject', argument: 1 }),
+  Object.freeze({ type: 'report', path: 'packages/spec/src/ui/report.zod.ts', declares: 'ReportSchema', call: 'strictObject', argument: 1 }),
+  Object.freeze({ type: 'skill', path: 'packages/spec/src/ai/skill.zod.ts', declares: 'SkillSchema', call: 'strictObject', argument: 1 }),
+  Object.freeze({ type: 'tool', path: 'packages/spec/src/ai/tool.zod.ts', declares: 'ToolSchema', call: 'strictObject', argument: 1 }),
+  Object.freeze({ spread: 'MetadataProtectionFields', path: 'packages/spec/src/kernel/metadata-protection.zod.ts', declares: 'MetadataProtectionFields', call: null, argument: 0 }),
+  Object.freeze({ spread: 'OverrideDeclarationFields', path: 'packages/spec/src/kernel/override-declaration.zod.ts', declares: 'OverrideDeclarationFields', call: null, argument: 0 }),
 ]);
+
+/**
+ * The whole-set pins outside the spec package, keyed by the change-kind predicate each `CHANGE_KIND_ROWS` row names
+ * (the engine binds one predicate per key): `types` are the served types whose key set the row's test holds whole,
+ * and `throughSpreads` says whether a change to a member object those types spread is a change the test sees.
+ *
+ * A pin is here when a key ADDED to the type reds it: a table both ways, a count, or a fixture held equal to the
+ * property list. Found the way the field pins were, measured at e69fa46d over every tracked test outside
+ * `packages/spec` (the spec package's own suite is owed by any change to it): each spelling that enumerates one of the
+ * fourteen schemas' keys (`Object.keys` of the shape, a shape-keys helper, `z.toJSONSchema` of the schema or a ui
+ * helper wrapping it, the served `/meta/types` properties), then each hit read. Four hold a whole set: driver-sql's
+ * storage table (field), metadata-core's reference tables (field and object), the metadata-protocol counts (all
+ * fourteen) and the ui report inspector's coverage case (report, which excludes the two spread objects by reading
+ * them from the spec, hence `throughSpreads: false`). The rest check that a key they read is declared, or that a
+ * spelling is absent (the lint declared-key guards, the ui accept sets, the position row builder), or compare two
+ * derivations of one schema (the MCP authoring contract); a new key cannot red them, so they are not pins.
+ */
+export const SERVED_KEY_SET_PINS = Object.freeze({
+  'field-schema-key-set': Object.freeze({ types: Object.freeze(['field']), throughSpreads: true }),
+  'object-reference-key-set': Object.freeze({ types: Object.freeze(['field', 'object']), throughSpreads: true }),
+  'served-type-key-set': Object.freeze({
+    types: Object.freeze(['action', 'agent', 'app', 'dashboard', 'dataset', 'field', 'flow', 'hook', 'object', 'page', 'position', 'report', 'skill', 'tool']),
+    throughSpreads: true,
+  }),
+  'report-inspector-key-set': Object.freeze({ types: Object.freeze(['report']), throughSpreads: false }),
+});
 
 /**
  * The globs that MANDATE a model tier for any card whose file surface touches
