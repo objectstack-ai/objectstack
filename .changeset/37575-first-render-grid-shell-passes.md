@@ -1,6 +1,7 @@
 ---
 '@object-ui/plugin-grid': patch
 '@object-ui/i18n': patch
+'@object-ui/react': patch
 '@object-ui/layout': patch
 '@object-ui/app-shell': patch
 '@object-ui/console': patch
@@ -20,8 +21,8 @@ The shell does less during first load too. The app's own locale list lands after
 
 Nothing changes in what the list, the sidebar or the language menus show.
 
-**BREAKING** (`@object-ui/i18n`, two hooks' return values), shipped as `patch`: the change is not to the metadata protocol (`Metadata-protocol: none`).
+**BREAKING** (`@object-ui/i18n`, and `@object-ui/react`, which re-exports the same two hooks: their return values), shipped as `patch`: the change is not to the metadata protocol (`Metadata-protocol: none`).
 
-- Removed: the `appContentLanguages` field from what `useObjectTranslation()` and `useI18nContext()` return. It was added there by #36040.
-- Use instead: `useAppContentLanguages()`, exported from `@object-ui/i18n`. It returns the same value, the app's declared content languages or `null` while they are unknown, and `null` outside an `I18nProvider`.
+- Removed: the `appContentLanguages` field from what `useObjectTranslation()` and `useI18nContext()` return, whether they are imported from `@object-ui/i18n` or from `@object-ui/react`. It was added there by #36040.
+- Use instead: `useAppContentLanguages()`, which both entries now export: `@object-ui/i18n`, and `@object-ui/react` beside the two hooks. It returns the same value, the app's declared content languages or `null` while they are unknown, and `null` outside an `I18nProvider`.
 - Why: the list lands after the console has drawn. While it rode on the translation context, its arrival re-rendered every component that reads a translation, about 1,900 of them on first load. In its own context only the components that read it re-render.

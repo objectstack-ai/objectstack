@@ -113,6 +113,7 @@ export {
   useObjectLabel,
   useSafeFieldLabel,
   useI18nContext,
+  useAppContentLanguages,
   createI18n,
   getDirection,
   getAvailableLanguages,
