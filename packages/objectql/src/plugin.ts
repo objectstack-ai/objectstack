@@ -45,7 +45,7 @@ import { RecordCurrencyFollowRefusedError } from './record-currency-aggregate-do
 // [#22070] The builtin audit stamps are wrapped like a bound hook but registered in code.
 import { wrapDeclarativeHook } from './hook-wrappers.js';
 import { announceStoredExpressionHoles } from './stored-expression-backfill.js';
-import { announceUnservedKnowledgeSources } from './knowledge-source-unserved.js';
+import { announceUnservedKnowledgeSources, watchSavedUnservedKnowledgeSources } from './knowledge-source-unserved.js';
 import { announceSummaryHoles } from './summary-hole-announce.js';
 import { LifecycleService } from './lifecycle/lifecycle-service.js';
 import { WORK_CALENDAR_OBJECT, WorkCalendarService, installWorkCalendarHooks } from './work-calendar-service.js';
@@ -1485,6 +1485,10 @@ export class ObjectQLPlugin implements Plugin {
         // service to load them are valid and inert: said once, at warn, never
         // a boot refusal (`knowledge-source-unserved.ts`).
         await announceUnservedKnowledgeSources({ getService: (name) => ctx.getService(name), logger: ctx.logger });
+        // [ADR-0161 row 3b, item 4] And the first one saved while the process
+        // runs: no service is mounted after boot, so the save is told so.
+        const unwatch = watchSavedUnservedKnowledgeSources({ getService: (name) => ctx.getService(name), logger: ctx.logger });
+        if (unwatch) this.metadataUnsubscribes.push(unwatch);
     });
     ctx.hook('metadata:reloaded', async (payload?: unknown) => {
         await this.resyncAuthoredHooks(ctx);

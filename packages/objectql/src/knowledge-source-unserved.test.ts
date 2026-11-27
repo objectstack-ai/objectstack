@@ -4,7 +4,9 @@ import { describe, expect, it, vi } from 'vitest';
 import {
   UNSERVED_KNOWLEDGE_SOURCES_NAMED,
   announceUnservedKnowledgeSources,
+  describeSavedUnservedKnowledgeSource,
   describeUnservedKnowledgeSources,
+  watchSavedUnservedKnowledgeSources,
 } from './knowledge-source-unserved.js';
 
 describe('describeUnservedKnowledgeSources — items with no knowledge service (ADR-0161 K4, ADR-0078)', () => {
@@ -20,6 +22,8 @@ describe('describeUnservedKnowledgeSources — items with no knowledge service (
     expect(line).toContain('it is loaded, indexed or searched');
     expect(line).toContain('@objectstack/service-knowledge');
     expect(line).toContain('or remove the item.');
+    // [ADR-0161 K8 item 12] The stack's own items mount the service, so the remedy for these is the token.
+    expect(line).toContain("Declare requires: ['knowledge'] in the stack and restart");
   });
 
   it(`names at most ${UNSERVED_KNOWLEDGE_SOURCES_NAMED} items, counts the rest, and says a name two packages hold once`, () => {
@@ -79,5 +83,78 @@ describe('announceUnservedKnowledgeSources — once, at warn, never a refusal', 
     await announceUnservedKnowledgeSources(h.host);
     expect(getMetaItems).toHaveBeenCalledWith({ type: 'knowledge_source' });
     expect(h.warn).toHaveBeenCalledTimes(1);
+  });
+});
+
+/**
+ * [ADR-0161 row 3b, item 4] The first `knowledge_source` saved at run time on a
+ * deployment that mounted no knowledge service at boot: no service is mounted
+ * while the process runs, so the item is kept and not served, and its save is
+ * told so once, naming what serves it — `requires: ['knowledge']` and a
+ * restart.
+ */
+describe('watchSavedUnservedKnowledgeSources — the first item saved at run time with no service', () => {
+  type Listener = (evt: { type?: string; name?: string; state?: string }) => void;
+  const host = (services: Record<string, unknown>) => {
+    const warn = vi.fn();
+    return {
+      warn,
+      host: {
+        getService: (name: string) => {
+          if (name in services) return services[name];
+          throw new Error(`no service ${name}`);
+        },
+        logger: { warn },
+      },
+    };
+  };
+  const signal = () => {
+    const listeners: Listener[] = [];
+    const unsubscribe = vi.fn();
+    return {
+      listeners,
+      unsubscribe,
+      protocol: {
+        onMetadataMutation: vi.fn((l: Listener) => {
+          listeners.push(l);
+          return unsubscribe;
+        }),
+      },
+      emit: (evt: { type?: string; name?: string; state?: string }) => listeners.forEach((l) => l(evt)),
+    };
+  };
+
+  it('a saved source is said once, at warn: kept, not served, and what serves it after a restart', () => {
+    const s = signal();
+    const h = host({ protocol: s.protocol });
+    const unwatch = watchSavedUnservedKnowledgeSources(h.host);
+    s.emit({ type: 'knowledge_source', name: 'faq', state: 'active' });
+    s.emit({ type: 'knowledge_source', name: 'faq', state: 'active' });
+    expect(h.warn).toHaveBeenCalledTimes(1);
+    const line = String(h.warn.mock.calls[0][0]);
+    expect(line).toBe(describeSavedUnservedKnowledgeSource('faq'));
+    expect(line).toContain("knowledge_source 'faq' was saved");
+    expect(line).toContain('it is kept and is not loaded, indexed or searched');
+    expect(line).toContain("Declare requires: ['knowledge'] in the stack and restart");
+    expect(line).toContain('the next boot then loads and builds it');
+    unwatch?.();
+    expect(s.unsubscribe).toHaveBeenCalledOnce();
+  });
+
+  it('says nothing for a draft, a delete or another type', () => {
+    const s = signal();
+    const h = host({ protocol: s.protocol });
+    watchSavedUnservedKnowledgeSources(h.host);
+    s.emit({ type: 'knowledge_source', name: 'faq', state: 'draft' });
+    s.emit({ type: 'knowledge_source', name: 'faq', state: 'deleted' });
+    s.emit({ type: 'object', name: 'faq', state: 'active' });
+    expect(h.warn).not.toHaveBeenCalled();
+  });
+
+  it('a deployment with a knowledge service watches nothing: the service loads the item itself', () => {
+    const s = signal();
+    const h = host({ protocol: s.protocol, knowledge: {} });
+    expect(watchSavedUnservedKnowledgeSources(h.host)).toBeUndefined();
+    expect(s.protocol.onMetadataMutation).not.toHaveBeenCalled();
   });
 });
