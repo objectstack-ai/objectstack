@@ -428,7 +428,8 @@ export interface OpenAuthoringWriter {
      * [ADR-0161 K4, guard two] The refusal of a `knowledge_source` save whose
      * author may not themselves search what it would index
      * (`authoredKnowledgeSourceRefusal`, judged for the admitted human), or
-     * `undefined` when the save may go on. Every other type answers `undefined`.
+     * on a deployment with no knowledge service, or `undefined` when the save
+     * may go on. Every other type answers `undefined`.
      */
     itemSaveRefusal(type: string, item: unknown): Promise<{ code: ErrorCode; message: string; status: number } | undefined>;
 }
@@ -618,8 +619,9 @@ function openWriter(
                 // The human the door admitted: their grants, never the envelope's.
                 executionContext: reader,
                 // The classified lookup (`resolveServiceOrLoud`): an absent
-                // service answers `undefined`, a registered one that cannot be
-                // resolved rejects and the predicate answers `503`.
+                // service answers `undefined` and the predicate refuses the
+                // save `503`, naming the remedy; a registered one that cannot
+                // be resolved rejects and the predicate answers `503`.
                 resolveKnowledgeService: () => deps.resolveServiceOrLoud(context, KNOWLEDGE_SOURCE_ADMISSION_SERVICE, context.environmentId),
             });
             if (!refused) return undefined;
