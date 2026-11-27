@@ -3,43 +3,55 @@
 /**
  * [ADR-0161 K4, row 4] Knowledge sources (`knowledgeSources`, the governed
  * type `knowledge_source`) that reference what the stack does not have, or an
- * object the knowledge service never searches: reported by `os validate` /
- * `build` / `lint` and by the runtime publish gate, with one set of rule ids
- * and messages.
+ * object the knowledge service never searches for a caller it judges:
+ * reported by `os validate` / `build` / `lint` and by the runtime publish
+ * gate, with one set of rule ids and messages.
  *
  * ADR-0161 K4 states both halves: an item "is refused when the object or a
  * named field does not exist (the lint and `os validate` checks are row 4)",
  * and "a packaged item meets the gates that need no principal in `os validate`
- * and at publish (row 4)". A source that fails one of them can never serve a
- * hit, so those findings are errors, and the publish door refuses them. That
- * is the one point where this rule departs from its precedent,
- * `validateAiContext`, which only advises at publish: a context pack still
- * reads what resolves (ADR-0160 D1), a knowledge source over a missing object
- * or a gated object indexes nothing.
+ * and at publish (row 4)". So those findings are errors, and the publish door
+ * refuses them. What each one costs differs: a missing object leaves the
+ * source nothing to index, a missing field indexes no text for that member,
+ * and a gated object is never searched for any caller the service judges.
+ * That is the one point where this rule departs from its precedent,
+ * `validateAiContext`, which only advises at publish (ADR-0160 D1: a context
+ * pack still reads what resolves); K4 orders the refusal here.
  *
  * Five verdicts:
  *
- * - `knowledge-source-object-unknown` (`error`): `source.object` names no
- *   object of the stack, of a package of its artifact (`packages[]`), or, at
- *   the publish door, of the objects the host serves (the package's closure
- *   when one is stated, worded for the closure with the shared remedy,
- *   {@link closureDependencyRemedy}). The ladder `validateObjectReferences`
- *   resolves every object name by: a platform object a known package
- *   registers is not judged when the stack does not carry it (its declaration
- *   is not in hand), and a platform-prefixed name no known package registers
- *   is a `warning`, because a third-party package may still provide it.
+ * - `knowledge-source-object-unknown`: `source.object` names no object of the
+ *   stack or of a package of its artifact (`packages[]`), or, at the publish
+ *   door, of the objects the host serves. An `error` where the snapshot is
+ *   enough to know: under the package closure the door states (worded for
+ *   the closure with {@link closureDependencyRemedy}), at the door with no
+ *   closure (the whole collection the host serves), and on the CLI for a
+ *   stack whose manifest declares no dependency the artifact does not carry.
+ *   A `warning` with the hedge on the CLI when the manifest declares such a
+ *   dependency: the build cannot see that package's objects, and the publish
+ *   door judges the source against its closure, which holds them (the
+ *   `flow-trigger-unknown-object` split). The ladder
+ *   `validateObjectReferences` resolves object names by also applies: a
+ *   platform object a known package registers is not judged when the stack
+ *   does not carry it (its declaration is not in hand), and a
+ *   platform-prefixed name no known package registers is a `warning`. An
+ *   empty whole collection at the door is no universe, and judges nothing.
  * - `knowledge-source-field-unknown` (`error`): a `source.content` or
  *   `source.metadataFields` member names no field of the object: neither one
  *   it declares (its own stack's extensions folded in, `objectsAsServed`) nor
- *   a system column the platform injects on it ({@link injectedColumnDefsFor}).
- *   The index reads the member off every record and finds nothing.
+ *   a column addressable on it without being declared
+ *   ({@link injectedColumnsFor}: `id`, which the driver provisions, and the
+ *   system columns the registry injects). The index reads that member off
+ *   every record and finds nothing.
  * - `knowledge-source-object-not-searchable` (`error`): the object's API
- *   exposure refuses `search` — `canServeApiOperation(enable, 'search')`, the
+ *   exposure refuses `search`: `canServeApiOperation(enable, 'search')`, the
  *   decision and operation the knowledge service's admission asks
  *   (`knowledge-source-admission.ts` in `@objectstack/service-knowledge`,
- *   gate 2): `enable.apiEnabled: false`, an `enable.apiMethods` list that
- *   grants neither `search` nor `list` (which grants it), or
- *   `enable.searchable: false`.
+ *   gate 2). `enable.apiEnabled: false` refuses it, and so does an
+ *   `enable.apiMethods` list that does not grant `list` (search derives from
+ *   `list`; `search` itself is a retired list value the parse strips) or that
+ *   grants `list` beside `enable.searchable: false`. With no `apiMethods`
+ *   list, `searchable: false` does not refuse it.
  * - `knowledge-source-system-object-not-ai-readable` (`error`): a system
  *   object (a `sys_` name, the admission's gate 3) that does not opt into AI
  *   reads — `isAiReadExposed`, the spec's one reading of
@@ -66,7 +78,7 @@ import { canServeApiOperation, isAiReadExposed, isMaskedOnReadFieldType, type En
 import { hasPlatformObjectPrefix, isPlatformProvidedObjectName } from '@objectstack/spec/system';
 import { collectionEntries } from './collection-entries.js';
 import { closureDependencyRemedy, objectsAsServed, packagesOf, recordsOf, suggestName } from './object-graph.js';
-import { injectedColumnDefsFor } from './system-fields.js';
+import { injectedColumnsFor } from './system-fields.js';
 
 export type KnowledgeSourceSeverity = 'error' | 'warning';
 
@@ -102,40 +114,70 @@ const str = (v: unknown): string => (typeof v === 'string' ? v : '');
 const isSystemObjectName = (name: string): boolean => /^sys_/i.test(name);
 
 /**
- * The object's fields as a name → definition map, or `undefined` when it
- * declares no readable map: the declared fields plus the system columns the
- * registry injects on it, a declared field winning over the injected one of
- * its name. The index reads a record as served, which carries those columns.
+ * The object's declared fields as a name → definition map, or `undefined`
+ * when it declares no readable map. Existence also admits the columns
+ * addressable without a declaration ({@link injectedColumnsFor}), which carry
+ * no credential and no `internal` flag, so they need no definition here.
  */
-function fieldMapOf(object: AnyRec): Map<string, AnyRec> | undefined {
+function declaredFieldsOf(object: AnyRec): Map<string, AnyRec> | undefined {
   const raw = object.fields;
   if (!raw || typeof raw !== 'object') return undefined;
-  const fields = new Map(recordsOf(raw).map((f) => [str(f.name), f] as const).filter(([name]) => name !== ''));
-  for (const [name, def] of injectedColumnDefsFor(object)) if (!fields.has(name)) fields.set(name, { ...def });
-  return fields;
+  return new Map(recordsOf(raw).map((f) => [str(f.name), f] as const).filter(([name]) => name !== ''));
+}
+
+/**
+ * The ids of the packages the stack's manifest declares in `dependencies`
+ * that its artifact (`packages[]`) does not carry: packages whose objects the
+ * build cannot see, and the publish door's closure holds.
+ */
+function unseenDeclaredDependencies(stack: AnyRec): string[] {
+  const manifest = stack.manifest;
+  if (!isRec(manifest)) return [];
+  const declared = manifest.dependencies;
+  const ids = Array.isArray(declared)
+    ? declared.filter((d): d is string => typeof d === 'string' && d !== '')
+    : isRec(declared)
+      ? Object.keys(declared)
+      : [];
+  if (ids.length === 0) return [];
+  const carried = new Set<string>();
+  for (const entry of packagesOf(stack)) {
+    const id = isRec(entry.manifest) ? str(entry.manifest.id) : '';
+    if (id) carried.add(id);
+  }
+  return ids.filter((id) => !carried.has(id) && id !== str(manifest.id));
 }
 
 /**
  * Report every knowledge source of `stack` whose object or fields the stack
- * does not have, whose object the knowledge service never searches, or that
- * names a field the index never carries. Reads `stack.knowledgeSources`,
- * `stack.objects` (with the stack's own `objectExtensions` folded in) and the
- * objects of `stack.packages[]`; safe on any shape.
+ * does not have, whose object the knowledge service never searches for a
+ * caller it judges, or that names a field the index never carries. Reads
+ * `stack.knowledgeSources`, `stack.manifest.dependencies`, `stack.objects`
+ * (with the stack's own `objectExtensions` folded in) and the objects of
+ * `stack.packages[]`; safe on any shape.
  *
  * @param options.packageScope The package closure the runtime publish gate
  *   narrowed `stack.objects` to (`AuthoringRuleContext.packageScope`), present
  *   only when one was in force. An unresolved object is then outside the
  *   package's reach, and the verdict says so with the closure remedy.
+ * @param options.wholeCollection `true` when `stack.objects` is the whole
+ *   collection a runtime host serves (a gated write that names no package),
+ *   as the list-view and form members read it: an unresolved object exists
+ *   nowhere, and the declared-dependency hedge does not apply.
  */
 export function validateKnowledgeSource(
   stack: AnyRec,
-  options: { packageScope?: { readonly packageId: string; readonly dependencies: readonly string[] } } = {},
+  options: {
+    packageScope?: { readonly packageId: string; readonly dependencies: readonly string[] };
+    wholeCollection?: boolean;
+  } = {},
 ): KnowledgeSourceFinding[] {
   const out: KnowledgeSourceFinding[] = [];
   if (!isRec(stack)) return out;
   const sources = collectionEntries(stack.knowledgeSources, 'knowledgeSources');
   if (sources.length === 0) return out;
   const closure = options.packageScope;
+  const atDoor = !!closure || options.wholeCollection === true;
 
   // The stack's own objects as served, then what a package of its artifact
   // ships (ADR-0130 D4: the release artifact is the co-ownership boundary, so
@@ -147,6 +189,11 @@ export function validateKnowledgeSource(
     if (!isRec(body)) continue;
     for (const o of recordsOf(body.objects)) if (str(o.name) && !objects.has(str(o.name))) objects.set(str(o.name), o);
   }
+  // An empty whole collection means the host supplied no universe (a failed
+  // registry read), as the list-view and form members read it: no object
+  // verdict is drawn from it.
+  const noUniverse = !closure && options.wholeCollection === true && objects.size === 0;
+  const unseen = atDoor ? [] : unseenDeclaredDependencies(stack);
 
   for (const { rec, path } of sources) {
     const where = `knowledge source "${str(rec.name) || path}"`;
@@ -158,6 +205,7 @@ export function validateKnowledgeSource(
     const def = objects.get(objectName);
 
     if (!def) {
+      if (noUniverse) continue;
       // A platform object a known package registers: its declaration is not
       // in this stack, so neither its fields nor its gates can be read here.
       if (isPlatformProvidedObjectName(objectName)) continue;
@@ -186,6 +234,21 @@ export function validateKnowledgeSource(
             suggestName(objectName, objects.keys()),
           hint: 'Check the spelling against the object the providing package registers, or ignore this if a third-party package provides it',
         });
+      } else if (unseen.length > 0) {
+        out.push({
+          severity: 'warning',
+          rule: KNOWLEDGE_SOURCE_OBJECT_UNKNOWN,
+          where,
+          path: objectPath,
+          message:
+            `\`source.object\` names '${objectName}', which this stack does not define. The manifest declares ` +
+            `${unseen.map((id) => `"${id}"`).join(', ')} in \`dependencies\`, whose objects this build cannot see; ` +
+            'if none of them defines it, the source indexes nothing, and the publish is refused.' +
+            suggestName(objectName, objects.keys()),
+          hint:
+            'Ignore this if a declared dependency defines the object (the publish checks it against the package\'s ' +
+            'closure); otherwise name an object the stack defines (check the spelling)',
+        });
       } else {
         out.push({
           severity: 'error',
@@ -196,7 +259,9 @@ export function validateKnowledgeSource(
             `\`source.object\` names '${objectName}', which this stack does not define, so the source indexes nothing ` +
             'and no search ever returns a hit from it.' +
             suggestName(objectName, objects.keys()),
-          hint: 'Name an object the stack defines (check the spelling), or a platform object by its full name',
+          hint:
+            'Name an object the stack defines (check the spelling) or a platform object by its full name; for an ' +
+            'object another package defines, declare that package in the manifest\'s `dependencies` and install it',
         });
       }
       continue;
@@ -212,9 +277,11 @@ export function validateKnowledgeSource(
         path: objectPath,
         message:
           `the API does not serve object '${objectName}' for \`search\` (\`enable.apiEnabled\` is false, its ` +
-          '`enable.apiMethods` list grants neither `search` nor `list`, or `enable.searchable` is false), so the ' +
-          'knowledge service never searches this source.',
-        hint: `Serve '${objectName}' for \`search\`, or index another object`,
+          '`enable.apiMethods` list does not grant `list`, from which search derives, or it grants `list` beside ' +
+          '`enable.searchable: false`), so the knowledge service never searches this source for a caller it judges.',
+        hint:
+          `Serve '${objectName}' for search: keep \`enable.apiEnabled\` true and, where it declares ` +
+          '`enable.apiMethods`, include `list` with `enable.searchable` not false; or index another object',
       });
     }
     if (isSystemObjectName(objectName) && !isAiReadExposed(def)) {
@@ -225,13 +292,15 @@ export function validateKnowledgeSource(
         path: objectPath,
         message:
           `'${objectName}' is a system object that does not opt into AI reads (\`enable.aiReadable: true\`), so ` +
-          'its records are never indexed for retrieval.',
+          'the knowledge service never searches this source for a caller it judges.',
         hint: 'Index a business object, or a system object whose definition declares `enable.aiReadable: true`',
       });
     }
 
-    const fields = fieldMapOf(def);
+    const fields = declaredFieldsOf(def);
     if (!fields) continue;
+    const addressable = injectedColumnsFor(def);
+    const known = (): string[] => [...fields.keys(), ...[...addressable].filter((n) => !fields.has(n))];
     const managedBy = def.managedBy;
     const judgeMembers = (key: 'content' | 'metadataFields') => {
       const members = source[key];
@@ -241,6 +310,7 @@ export function validateKnowledgeSource(
         const memberPath = `${path}.source.${key}[${k}]`;
         const field = fields.get(member);
         if (!field) {
+          if (addressable.has(member)) return;
           out.push({
             severity: 'error',
             rule: KNOWLEDGE_SOURCE_FIELD_UNKNOWN,
@@ -249,7 +319,7 @@ export function validateKnowledgeSource(
             message:
               `\`source.${key}\` names field '${member}', which object '${objectName}' does not define, so the ` +
               'index reads nothing for it on any record.' +
-              suggestName(member, fields.keys()),
+              suggestName(member, known()),
             hint: `Name a field of '${objectName}' (check the spelling), or remove it from \`${key}\``,
           });
           return;

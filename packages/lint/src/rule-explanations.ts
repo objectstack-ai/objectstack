@@ -6193,8 +6193,8 @@ const AI_CONTEXT_SORT_FIELD_UNSORTABLE_EXPLANATION: RuleExplanation = {
 const KNOWLEDGE_SOURCE_DOORS =
   'Judged by `os validate`, `os build` and `os lint`, and at the runtime publish gate for a ' +
   '`knowledge_source` write (Studio, the metadata API, MCP), with the same rule id and message. An error ' +
-  'refuses the publish: a source that fails it indexes nothing, so no search ever returns a hit from it ' +
-  '(ADR-0161 K4).';
+  'refuses the publish (ADR-0161 K4): a source over a missing object has nothing to index, a missing field ' +
+  'indexes no text for that member, and a gated object is never searched for a caller the service judges.';
 
 const KNOWLEDGE_SOURCE_OBJECT_UNKNOWN_EXPLANATION: RuleExplanation = {
   rule: 'knowledge-source-object-unknown',
@@ -6210,6 +6210,11 @@ const KNOWLEDGE_SOURCE_OBJECT_UNKNOWN_EXPLANATION: RuleExplanation = {
       'gate states the package\'s closure (the package, the packages its manifest declares in ' +
       '`dependencies`, and platform objects), an object outside it is reported with the remedy to declare the ' +
       'dependency.',
+    'On the command line a package the manifest declares in `dependencies` but the artifact does not carry ' +
+      'is out of sight: its objects cannot be read there. So while the manifest declares such a dependency, ' +
+      'an object the stack does not define is a warning, which clears when that dependency defines it (the ' +
+      'publish gate judges the source against the package\'s closure, which holds the dependency\'s objects). ' +
+      'With no such dependency it is an error, which clears only by naming an object that exists.',
     KNOWLEDGE_SOURCE_DOORS,
   ],
 };
@@ -6222,9 +6227,9 @@ const KNOWLEDGE_SOURCE_FIELD_UNKNOWN_EXPLANATION: RuleExplanation = {
       'into a hit\'s metadata (`source.metadataFields`). A name the object does not define reads nothing on ' +
       'every record: the document is built without that text, or the metadata without that value.',
     'Defined means declared in the object\'s `fields` (an object extension of the same stack included) or ' +
-      'injected by the platform: the system columns it adds without the author declaring them (`owner_id`, ' +
-      '`created_at` and the rest) are read like any field. An object whose definition carries no readable ' +
-      'field map is not judged.',
+      'addressable without a declaration: `id`, which the driver provisions, and the system columns the ' +
+      'platform injects (`owner_id`, `created_at` and the rest) are read like any field. An object whose ' +
+      'definition carries no readable field map is not judged.',
     KNOWLEDGE_SOURCE_DOORS,
   ],
 };
@@ -6236,8 +6241,11 @@ const KNOWLEDGE_SOURCE_OBJECT_NOT_SEARCHABLE_EXPLANATION: RuleExplanation = {
     'A knowledge search is a search over the object\'s records, so the knowledge service searches a source ' +
       'only when the API exposure serves its object for `search`: the decision `canServeApiOperation` in ' +
       '`@objectstack/spec/data` answers, the one every door serving object rows asks. `enable.apiEnabled: ' +
-      'false` refuses it; so does an `enable.apiMethods` list that grants neither `search` nor `list` (a ' +
-      'list grants search), and `enable.searchable: false`.',
+      'false` refuses it. So does an `enable.apiMethods` list that does not grant `list`, from which search ' +
+      'derives (`search` itself is a retired list value the parse strips), or one that grants `list` beside ' +
+      '`enable.searchable: false`. With no `apiMethods` list, `searchable: false` does not refuse it.',
+    'To clear it, keep `enable.apiEnabled` true and, where the object declares `enable.apiMethods`, include ' +
+      '`list` with `enable.searchable` not false; or index another object.',
     'This gate needs no caller, so it is judged here. The gates that need one (the object\'s package is not ' +
       'disabled, and the author may query every field the source serves) are asked when the source is saved, ' +
       'as its author.',

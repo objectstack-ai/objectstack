@@ -14,21 +14,24 @@ export const entry: SemanticMigration = {
     'Four author-time errors on a knowledge source (`knowledgeSources`, the `knowledge_source` type), run by the '
     + 'runtime publish gate and by `os validate` / `lint` / `compile` / `build`: `source.object` names an object that '
     + 'does not exist (`knowledge-source-object-unknown`; a warning for a platform-prefixed name no known package '
-    + 'registers); a `source.content` or `source.metadataFields` member names no field of the object, declared or '
+    + 'registers, and on the CLI while the manifest declares a dependency the artifact does not carry); a `source.content` or `source.metadataFields` member names no field of the object, declared or '
     + 'injected (`knowledge-source-field-unknown`); the object\'s API exposure does not serve `search` '
     + '(`knowledge-source-object-not-searchable`); the object is a system object without `enable.aiReadable: true` '
     + '(`knowledge-source-system-object-not-ai-readable`). And one warning: a member names a credential-class or '
     + '`internal` field, which the index never carries (`knowledge-source-field-never-indexed`)',
   replacement:
-    'Point `source.object` at an object the stack, its artifact or the host defines (a dependency\'s object: declare '
-    + 'the package in the manifest\'s `dependencies`); name fields the object defines in `content` and '
-    + '`metadataFields`; serve the object for `search` (`enable.apiEnabled`, an `enable.apiMethods` list that grants '
-    + '`search` or `list`, `enable.searchable` not false) or index another object; index a business object, or a '
-    + 'system object whose definition declares `enable.aiReadable: true`',
+    'Point `source.object` at an object the stack, its artifact or the host defines; an object a dependency defines '
+    + 'clears at publish once the package\'s manifest declares that dependency in `dependencies` (on the CLI it stays '
+    + 'a warning while the artifact does not carry the dependency). Name fields the object defines, or `id` and the '
+    + 'injected system columns, in `content` and `metadataFields`. Serve the object for `search`: keep '
+    + '`enable.apiEnabled` true and, where it declares `enable.apiMethods`, include `list` with `enable.searchable` '
+    + 'not false (`search` is a retired list value the parse strips); or index another object. Index a business '
+    + 'object, or a system object whose definition declares `enable.aiReadable: true`',
   reason:
-    'Each one parses and publishes, then indexes nothing: an object nothing defines has no records, a field it does '
-    + 'not define reads nothing on every record, and the knowledge service never searches a source whose object the '
-    + 'API does not serve for search or a system object that does not opt into AI reads. The save door already '
+    'Each one parses and publishes, then fails at search: an object nothing defines leaves nothing to index, a field '
+    + 'it does not define indexes no text for that member on any record, and the knowledge service never searches a '
+    + 'source whose object the API does not serve for search or a system object that does not opt into AI reads, for '
+    + 'any caller it judges. The save door already '
     + 'refused the last two for an author it judges; a publish no author judgement reaches (where no knowledge '
     + 'service is mounted) is now refused too, and so is a missing object or field. Stored metadata is '
     + 'not rewritten or refused at boot. The next publish of a source that carries one of these is refused with the '

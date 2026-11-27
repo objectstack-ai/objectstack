@@ -97,6 +97,18 @@ describe('validateKnowledgeSource in os validate (ADR-0161 K4, row 4)', () => {
     expect(atValidate(kbSource({ metadataFields: ['owner_id', 'created_at'] }))).toEqual([]);
   });
 
+  it('`id`, which the driver provisions without a declaration, resolves like a declared field', () => {
+    expect(atValidate(kbSource({ metadataFields: ['id', 'status'] }))).toEqual([]);
+    expect(atValidate(kbSource({ content: ['id', 'title'] }))).toEqual([]);
+    expect(atPublish(kbSource({ metadataFields: ['id'] })).errors).toEqual([]);
+  });
+
+  it('`enable.searchable: false` with no `apiMethods` list does not refuse search', () => {
+    const open = { name: 'open_note', enable: { searchable: false }, fields: { body: { type: 'text' } } };
+    const source = kbSource({ object: 'open_note', content: ['body'], metadataFields: [] });
+    expect(validateKnowledgeSource({ objects: [open], knowledgeSources: [source] })).toEqual([]);
+  });
+
   it('a field an object extension of the stack adds resolves', () => {
     const extension = { extend: 'kb_article', fields: { product: { type: 'text' } } };
     expect(atValidate(kbSource({ metadataFields: ['product'] }), { objectExtensions: [extension] })).toEqual([]);
@@ -117,6 +129,27 @@ describe('validateKnowledgeSource in os validate (ADR-0161 K4, row 4)', () => {
   it('a platform-prefixed name no known package registers is a warning, not an error', () => {
     const findings = atValidate(kbSource({ object: 'sys_kb_article', content: ['body'], metadataFields: [] }));
     expect(findings.map((f) => [f.rule, f.severity])).toEqual([[KNOWLEDGE_SOURCE_OBJECT_UNKNOWN, 'warning']]);
+  });
+
+  it('on the CLI, a missing object is a warning while the manifest declares a dependency the artifact does not carry', () => {
+    const manifest = { id: 'app.kb', dependencies: { 'com.acme.faq': '^1.0.0' } };
+    const source = kbSource({ object: 'faq_entry', content: ['answer'], metadataFields: [] });
+    const findings = atValidate(source, { manifest });
+    expect(findings.map((f) => [f.rule, f.severity, f.path])).toEqual([
+      [KNOWLEDGE_SOURCE_OBJECT_UNKNOWN, 'warning', 'knowledgeSources[0].source.object'],
+    ]);
+    expect(findings[0]!.message).toContain('"com.acme.faq"');
+    expect(findings[0]!.hint).toContain('Ignore this if a declared dependency defines the object');
+  });
+
+  it('on the CLI, a missing object stays an error when every declared dependency is carried, or none is declared', () => {
+    const carried = [{ manifest: { id: 'com.acme.faq', objects: [{ name: 'faq_topic', fields: { title: { type: 'text' } } }] } }];
+    const manifest = { id: 'app.kb', dependencies: { 'com.acme.faq': '^1.0.0' } };
+    const source = kbSource({ object: 'faq_entry', content: ['answer'], metadataFields: [] });
+    expect(atValidate(source, { manifest, packages: carried }).map((f) => [f.rule, f.severity]))
+      .toEqual([[KNOWLEDGE_SOURCE_OBJECT_UNKNOWN, 'error']]);
+    expect(atValidate(source, { manifest: { id: 'app.kb' } }).map((f) => [f.rule, f.severity]))
+      .toEqual([[KNOWLEDGE_SOURCE_OBJECT_UNKNOWN, 'error']]);
   });
 
   it('a missing object is reported once, and its fields are not judged', () => {
@@ -192,7 +225,37 @@ describe('validateKnowledgeSource on the runtime publish door', () => {
   it('with no scope the object verdict keeps the words os validate prints', () => {
     const [finding] = validateKnowledgeSource({ objects, knowledgeSources: [kbSource({ object: 'kb_artcle' })] });
     expect(finding!.message).toContain("`source.object` names 'kb_artcle', which this stack does not define");
-    expect(finding!.hint).toBe('Name an object the stack defines (check the spelling), or a platform object by its full name');
+    expect(finding!.hint).toBe(
+      'Name an object the stack defines (check the spelling) or a platform object by its full name; for an object '
+      + 'another package defines, declare that package in the manifest\'s `dependencies` and install it',
+    );
+  });
+
+  it('against the whole collection the host serves, a missing object is an error even beside an unseen declared dependency', () => {
+    const stack = {
+      objects,
+      manifest: { id: 'app.kb', dependencies: { 'com.acme.faq': '^1.0.0' } },
+      knowledgeSources: [kbSource({ object: 'faq_entry', content: ['answer'], metadataFields: [] })],
+    };
+    expect(validateKnowledgeSource(stack, { wholeCollection: true }).map((f) => [f.rule, f.severity]))
+      .toEqual([[KNOWLEDGE_SOURCE_OBJECT_UNKNOWN, 'error']]);
+    // Non-vacuous: the same stack on the CLI is the hedged warning.
+    expect(validateKnowledgeSource(stack).map((f) => [f.rule, f.severity]))
+      .toEqual([[KNOWLEDGE_SOURCE_OBJECT_UNKNOWN, 'warning']]);
+  });
+
+  it('the door passes the whole-collection reading when no package scope is stated', () => {
+    const verdict = runRuntimeAuthoringRules({
+      type: 'knowledge_source',
+      item: kbSource({ object: 'faq_entry', content: ['answer'], metadataFields: [] }),
+      context: { objects, manifest: { id: 'app.kb', dependencies: { 'com.acme.faq': '^1.0.0' } } },
+    });
+    expect(verdict.errors.map((f) => [f.rule, f.severity])).toEqual([[KNOWLEDGE_SOURCE_OBJECT_UNKNOWN, 'error']]);
+  });
+
+  it('an empty whole collection at the door is no universe, and judges no object', () => {
+    const stack = { objects: [], knowledgeSources: [kbSource({ object: 'faq_entry' })] };
+    expect(validateKnowledgeSource(stack, { wholeCollection: true })).toEqual([]);
   });
 });
 

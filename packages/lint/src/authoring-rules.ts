@@ -2097,15 +2097,20 @@ export const AUTHORING_RULES: readonly AuthoringRule[] = [
   // `os validate` and at publish". That is the departure from the
   // `validateAiContext` row above, which only advises at publish because a
   // context pack still reads what resolves; a source that fails one of these
-  // indexes nothing. The rule reads `knowledgeSources`, `objects` (and the
-  // stack's own extensions) and no other collection; `objects` is the context
-  // every per-write snapshot carries, and the written source is the sole
-  // member of its own collection. Under a stated package scope that
-  // `objects` is the write's closure, so the scope is passed through and an
-  // object outside it is worded for the closure with
-  // `closureDependencyRemedy`. With no scope the door reports the rule ids
-  // and messages `os validate` prints; an `error` refuses the publish (422),
-  // the `warning`s ride the 2xx `advisories`.
+  // has nothing to index (a missing object), indexes no text for a member (a
+  // missing field), or is never searched for a caller the service judges (a
+  // gated object). The rule reads `knowledgeSources`, `objects` (and the
+  // stack's own extensions), `manifest.dependencies` and no other collection;
+  // `objects` is the context every per-write snapshot carries, and the
+  // written source is the sole member of its own collection. Under a stated
+  // package scope that `objects` is the write's closure, so the scope is
+  // passed through and an object outside it is worded for the closure with
+  // `closureDependencyRemedy`. With no scope `objects` is the whole
+  // collection the host serves (`wholeCollection`), so an unresolved object
+  // is an error there too; only the CLI, where a manifest dependency the
+  // artifact does not carry may define it, hedges it as a warning (the
+  // `flow-trigger-unknown-object` split). An `error` refuses the publish
+  // (422), the `warning`s ride the 2xx `advisories`.
   {
     name: 'validateKnowledgeSource',
     tier: 'gating',
@@ -2114,7 +2119,11 @@ export const AUTHORING_RULES: readonly AuthoringRule[] = [
     source: 'packages/lint/src/validate-knowledge-source.ts',
     surfaces: CLI_AND_RUNTIME,
     runtimeTypes: ['knowledge_source'],
-    run: (stack, ctx) => validateKnowledgeSource(stack, ctx.packageScope ? { packageScope: ctx.packageScope } : {}),
+    run: (stack, ctx) =>
+      validateKnowledgeSource(stack, {
+        ...(ctx.packageScope ? { packageScope: ctx.packageScope } : {}),
+        wholeCollection: ctx.runtimeWriteType !== undefined && !ctx.packageScope,
+      }),
   },
   // [#34613] `validateSeedReplaySafety` (framework#3434, the `insert`-mode
   // replay warning) is retired: `SeedMode` itself refuses `insert` and
