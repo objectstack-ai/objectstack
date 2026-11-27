@@ -33,6 +33,7 @@ import {
 // plugin-designer writers share it; `@object-ui/data-objectstack` is already on
 // the console's eager path (its data source), so this adds no eager chunk.
 import { dropServedPicklistOptions } from '@object-ui/data-objectstack';
+import { AI_CHAT_COMPONENT_REF } from '@objectstack/spec/ui';
 
 /* -------------------------------------------------------------------------- */
 /* 1) Top-level admin pages — bound to `metadata:directory` + `metadata:resource` */
@@ -322,6 +323,21 @@ registerAppComponent({
   label: 'Slack',
   source: '@object-ui/app-shell',
   component: SlackSetupPage,
+});
+
+/**
+ * An app's AI inquiry page (ui ADR-0057 Amendment A4): the `ai:chat` entry an
+ * app places on its menu, its copy judged by `AiChatNavParamsSchema`. The page
+ * module reaches the whole chat UI, so it loads the first time it is drawn.
+ */
+const AppAskPage = lazyPage('AI inquiry', () =>
+  import('../console/ai/AppAskPage.js').then((m) => m.AppAskPage),
+);
+registerAppComponent({
+  ref: AI_CHAT_COMPONENT_REF,
+  label: 'AI Inquiry',
+  source: '@object-ui/app-shell',
+  component: AppAskPage,
 });
 
 /* -------------------------------------------------------------------------- */

@@ -2595,6 +2595,10 @@ const zh = {
       noChatsDescription: '开始新的对话后会显示在这里。',
       noMatchingChats: '没有匹配的对话。',
       newConversation: '新对话',
+      // ui ADR-0057 Amendment A4 — the app's AI inquiry page: its static scope badge.
+      askPage: {
+        scopeBadge: '本应用优先',
+      },
       renameConversation: '重命名对话',
       deleteConversation: '删除对话',
       saveRename: '保存重命名',

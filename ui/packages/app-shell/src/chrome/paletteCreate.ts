@@ -23,11 +23,15 @@
  * row carries the typed words as that page's query-string prefill of the
  * object's title field (`resolveNameField`, the ADR-0079 ladder), and is
  * offered only where that field is a plain text field the member may write
- * on create (`createFormFields`), so the words always land in the form.
+ * on create (`createFormFields`) and the create page draws an input for — not
+ * read-only by hand (`fieldStaticallyReadOnlyByHand`: `readonly` or the hand
+ * lock `uiReadonly`, the create dialog's own read) — so the words always land
+ * in the form.
  */
 
 import {
   evalRowPredicate,
+  fieldStaticallyReadOnlyByHand,
   resolveAffordance,
   resolveFieldAffordance,
   resolveNameField,
@@ -43,7 +47,7 @@ export interface PaletteCreateObjectDef {
   label?: unknown;
   icon?: unknown;
   color?: unknown;
-  fields?: Record<string, { type?: unknown; readonly?: unknown } | undefined> | unknown;
+  fields?: Record<string, { type?: unknown; readonly?: unknown; uiReadonly?: unknown } | undefined> | unknown;
   [key: string]: unknown;
 }
 
@@ -104,11 +108,14 @@ export function palettePrefillField(def: PaletteCreateObjectDef, perms: PaletteC
   const name = resolveNameField(def);
   if (!name) return undefined;
   const fields = def.fields && typeof def.fields === 'object' && !Array.isArray(def.fields)
-    ? (def.fields as Record<string, { type?: unknown; readonly?: unknown } | undefined>)
+    ? (def.fields as Record<string, { type?: unknown; readonly?: unknown; uiReadonly?: unknown } | undefined>)
     : undefined;
   const field = fields?.[name];
   if (!field || typeof field.type !== 'string' || !PREFILLABLE_TYPES.has(field.type)) return undefined;
-  if (field.readonly === true) return undefined;
+  // A create is judged by the static half only, as the create dialog judges
+  // it: the page leaves a field read-only by hand off the form, so a prefill
+  // of it would land nowhere (objectstack#37448).
+  if (fieldStaticallyReadOnlyByHand(field)) return undefined;
   if (!resolveFieldAffordance('createFormFields', perms, def.name, name)) return undefined;
   return name;
 }

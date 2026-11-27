@@ -46,6 +46,7 @@ import {
   callerObjectView,
   createStdioDataBridge,
   enforceApiExposure,
+  engineObjectPackageDisabled,
   GATED_ACTIONS,
   serveStoredMetadataHashes,
   serveStoredMetadataRow,
@@ -903,8 +904,10 @@ export class MCPServerPlugin implements Plugin {
       // the one `bridgeResources` was registered with.
       // [#25138] …beside the protocol's by-name read, which the gate asks
       // first, as `bridge.get` asks it.
+      // [#36689] …and the engine registry's disabled-package question, which
+      // the gate asks of every caller, as `bridge.get` asks it.
       const gateReads: StdioObjectReads | undefined = metadataService
-        ? { metadataService, protocol: protocolReads }
+        ? { metadataService, protocol: protocolReads, isObjectPackageDisabled: engineObjectPackageDisabled(scopedQl) }
         : undefined;
       getRecord = async (objectName, recordId) => {
         const ec = await resolvePrincipal();

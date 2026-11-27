@@ -2006,3 +2006,29 @@ describe('[#22161] one-line fixes — field-no-consumers, the carrier sites boun
     }
   });
 });
+
+/**
+ * #37448 (N8) — `uiReadonlyWhen` is deliberately NOT in `BEHAVIOUR_SEGMENTS`.
+ * That set earns behaviour back only inside a display root or segment, and the
+ * key is authorable only on a field definition under `objects`, which
+ * `bucketFor` already reads as behaviour; `readonlyWhen` is listed because the
+ * inline-grid column (under a `columns` display segment) carries it too, and
+ * that column declares no hand lock. What holds the verdict is this pin.
+ */
+describe('[#37448] validateFieldConsumers — a field-lock predicate reads the fields it names', () => {
+  /** `x` is named by nothing but the lock predicate each case adds to `y`. */
+  const verdictOfX = (lock: AnyRec): string | undefined =>
+    validateFieldConsumers({
+      objects: [{ name: 'o', fields: { name: { type: 'text' }, x: { type: 'text' }, y: { type: 'text', ...lock } } }],
+      views: [{ list: { data: { object: 'o' }, columns: [{ field: 'y' }] } }],
+    }).find((f) => f.object === 'o' && f.field === 'x')?.verdict;
+
+  it('baseline: unnamed, `x` is reported', () => {
+    expect(verdictOfX({})).toBe('inert');
+  });
+
+  it('the hand lock `uiReadonlyWhen` reads its operand, as the server lock `readonlyWhen` does', () => {
+    expect(verdictOfX({ readonlyWhen: "record.x == 'done'" })).toBeUndefined();
+    expect(verdictOfX({ uiReadonlyWhen: "record.x == 'done'" })).toBeUndefined();
+  });
+});
