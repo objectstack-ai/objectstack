@@ -1067,9 +1067,14 @@ function DefaultMetadataList({ type, appName }: { type: string; appName?: string
   const gridColumns: MetadataGridColumn[] = [
     ...shownColumns.map((c, ci) => ({
       key: c.key,
+      // The Studio list heads its label-first column by the identity it
+      // sorts by: "Name", or the type's own identity key (an extension's
+      // "Object").
       label:
         studioList && ci === 0 && labelColumn
-          ? t('engine.list.col.name', locale)
+          ? c.key === 'name'
+            ? t('engine.list.col.name', locale)
+            : localizeColumnLabel(c)
           : localizeColumnLabel(ci === 0 && labelColumn ? labelColumn : c),
       width: c.width,
       ...(studioList && ci > 0 && numericColumn(c.key) ? { alignRight: true } : {}),
