@@ -143,12 +143,13 @@ function commitGatedPool(): { pool: PgPoolLike; holdNextCommit(): { entered: Pro
   };
 }
 
-/** Wait until a statement on the store's schema waits on a row lock another transaction holds. */
-async function waitForLockWait(schema: string): Promise<void> {
+/** Wait until a `SELECT … FOR UPDATE` of the store's generation rows waits on a lock another transaction holds. */
+async function waitForRowLockWait(schema: string): Promise<void> {
   for (let i = 0; i < 400; i++) {
     const waiting = await store.pool().query<{ n: number }>(
-      `SELECT count(*)::int AS n FROM pg_stat_activity WHERE wait_event_type = 'Lock' AND position($1 in query) > 0`,
-      [`"${schema}"`],
+      `SELECT count(*)::int AS n FROM pg_stat_activity
+        WHERE wait_event_type = 'Lock' AND position($1 in query) > 0 AND position('FOR UPDATE' in query) > 0`,
+      [`"${schema}"."knowledge_generation"`],
     );
     if (Number(waiting.rows[0].n) > 0) return;
     await new Promise((r) => setTimeout(r, 25));
@@ -394,6 +395,8 @@ describe.skipIf(!PG_URL)('knowledge-pgvector dropSource while another process bu
     const b = otherProcess(schema);
     const s = source('drop_during_begin');
     await a.upsert([doc(s, '1', 'granite quarry')], ctx(s, FP_A, 'manual'));
+    // The dropping process is ready first, so the drop waits on the row lock alone.
+    expect((await b.indexStatus(dropCtx(s))).fingerprint).toBe(FP_A.fingerprint);
 
     // The build's opening transaction has locked the active generation and
     // opened one beside it, and has not committed yet.
@@ -401,7 +404,7 @@ describe.skipIf(!PG_URL)('knowledge-pgvector dropSource while another process bu
     const begun = a.beginBuild(ctx(s, FP_B));
     await commit.entered;
     const dropped = b.dropSource(dropCtx(s));
-    await waitForLockWait(schema);
+    await waitForRowLockWait(schema);
     commit.release();
     await begun;
     await dropped;
