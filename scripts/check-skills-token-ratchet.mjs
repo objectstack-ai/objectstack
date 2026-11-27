@@ -417,7 +417,10 @@ export const BODY_PIN_REPIN = Object.freeze({
 // all: files shrunk by later PRs that left their rows standing. None was a
 // reservation (the header's one, `pending10402`, is spent). Each was lowered to
 // the measurement on that tree; its `-N to the measurement (was C)` note is
-// the whole change, and no file's text moved.
+// the whole change, and no file's text moved. One more row followed on the
+// merge of `origin/main` 077831538: `state-machines-and-approvals.md` had
+// shrunk 9 tokens there with its row left standing — the red this re-lock
+// exists to raise, raised by the merge queue on its first run.
 
 /**
  * Measured counts, in the convention above. SHRINK-ONLY: lower freely, and see
@@ -1889,7 +1892,7 @@ export const CEILINGS = new Map([
   // marker went with the TypeScript block. 23652 -> 23744 bytes; the row moves +20,
   // the measured remainder (main carried 3 of headroom), pinned AT the measurement.
   //   ceil($(wc -c < skills/objectstack-automation/references/state-machines-and-approvals.md) / 4) == ceil(23744 / 4)
-  ['skills/objectstack-automation/references/state-machines-and-approvals.md', 5936],
+  ['skills/objectstack-automation/references/state-machines-and-approvals.md', 5927], // -9 to the measurement (was 5936)
   // 1779 -> 1769 (#26297): RE-LOCK at the landed count after a net cut — two
   // stale `{ type: 'lookup', reference: 'user' }` fields (an object that does
   // not exist) became `type: 'user'`; -10 tokens, the row follows the
