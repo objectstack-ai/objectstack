@@ -334,7 +334,7 @@ Object-hook `ctx` is a different vocabulary — see **objectstack-data**
 | Field | Purpose |
 |:------|:--------|
 | `approvers` | Who may act (≥ 1 — see Approver Types above). Each approver may carry an optional **`group`** label (e.g. `{ type: 'position', value: 'crm_auditor', group: 'finance' }`) — with `behavior: 'per_group'`, approvers sharing a label form one group; unlabelled approvers each form their own |
-| `behavior` | `first_response` (first approver decides), `unanimous` (all must approve), `quorum` (`minApprovals` of N — M-of-N collective sign-off), or `per_group` (EACH approver `group` must reach `minApprovals` — one-from-each-group sign-off). In every mode a single rejection finalizes the node as `rejected`. Default `first_response` |
+| `behavior` | `first_response` (first approver decides), `unanimous` (all must approve), `quorum` (`minApprovals` of N), or `per_group` (EACH approver `group` must reach `minApprovals`). In every mode a single rejection finalizes the node as `rejected`. Default `first_response` |
 | `minApprovals` | Approvals required — total for `quorum`, per group for `per_group`. Omitted ⇒ ALL resolvable approvers under `quorum`, `1` per group; clamped at runtime so a misconfiguration can never deadlock |
 | `lockRecord` | Lock the record from edits while pending. Default `true` |
 | `approvalStatusField` | Business-object field to mirror `pending`/`approved`/`rejected`/`returned`/`recalled` onto (should be readonly) |
@@ -370,9 +370,9 @@ These are wired on the **graph**, not in node config:
    the record and its `master_detail` child rows only: a `lookup` child shown
    in the record's details (`relatedList: 'primary'`) stays editable (warning
    `approval-detail-editable-while-pending`). Deleting the pending record
-   still lands, cancelling the request and cascading those rows; it is refused
-   whole (`409 RECORD_LOCKED`) where the cascade lacks one transaction or
-   a row has a second cascading parent.
+   still lands, cancelling the request and cascading its `master_detail` rows;
+   it is refused (`409 RECORD_LOCKED`) where the cascade lacks one transaction
+   or the child object declares a second cascading relation.
 3. **Notify the submitter from downstream nodes** wired to the `approve` /
    `reject` edges. Opening already tells each resolved approver
    (`approval.requested`); ⛔ no `notify` node for the opening: it tells
