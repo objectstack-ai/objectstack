@@ -15,6 +15,9 @@
  */
 
 import '@testing-library/jest-dom/vitest';
+// AiChatPage reads a dropped spreadsheet through `import('@object-ui/plugin-grid')`; load it
+// here so collection pays that transform, not a clocked case (check-test-source-alias).
+import '@object-ui/plugin-grid';
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import React from 'react';
 import { render, screen, fireEvent, cleanup, waitFor, act } from '@testing-library/react';
