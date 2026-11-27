@@ -8,7 +8,9 @@
 // The doors, each with its own probe name:
 //   • the record that starts a record-triggered flow (`POST` / `PATCH /data`);
 //   • a flow trigger's `params` bag (`POST /automation/:name/trigger`);
-//   • a screen resume's `inputs` and `output` (`POST …/runs/:runId/resume`).
+//   • a screen resume's `inputs` and `output` (`POST …/runs/:runId/resume`),
+//     where a key with a reserved segment is refused (`INVALID_SIGNAL`) and the
+//     run stays paused for a valid submission.
 //
 // Control: an ordinary dotted key (`<node>.<key>`, a resumed screen's output)
 // still nests, and a condition after the screen still reads it.
@@ -214,16 +216,24 @@ describe('a flow condition scope: no variable key reaches a prototype', () => {
       const runId = await pause();
       const res = await resume(runId, { inputs: { note: 'fcsk-in', '__proto__.fcsk_resume_inputs': true } });
       expect(res.status, await res.clone().text()).toBe(400);
-      expect(((await res.json()) as any).error?.code).toBe('INVALID_SCREEN_INPUT');
+      expect(((await res.json()) as any).error?.code).toBe('INVALID_SIGNAL');
       expect(inherited('fcsk_resume_inputs')).toBeUndefined();
+      // Nothing was applied: the pause is live, and the valid submission lands.
+      const ok = await resume(runId, { inputs: { note: 'fcsk-in' }, output: { tag: 'go' } });
+      expect(ok.status, await ok.clone().text()).toBeLessThan(300);
+      expect(await marks('fcsk-in')).toBe(1);
     });
 
     it('its output bag', async () => {
       const runId = await pause();
       const res = await resume(runId, { inputs: { note: 'fcsk-out' }, output: { tag: 'go', '__proto__.fcsk_resume_output': true } });
       expect(inherited('fcsk_resume_output')).toBeUndefined();
-      // The rest of the bag still nests: the condition after the screen read `ask.tag`.
-      expect(res.status, await res.clone().text()).toBeLessThan(300);
+      expect(res.status, await res.clone().text()).toBe(400);
+      expect(((await res.json()) as any).error?.code).toBe('INVALID_SIGNAL');
+      expect(await marks('fcsk-out')).toBe(0);
+      // Nothing was applied: the pause is live, and the valid submission lands.
+      const ok = await resume(runId, { inputs: { note: 'fcsk-out' }, output: { tag: 'go' } });
+      expect(ok.status, await ok.clone().text()).toBeLessThan(300);
       expect(await marks('fcsk-out')).toBe(1);
     });
 
