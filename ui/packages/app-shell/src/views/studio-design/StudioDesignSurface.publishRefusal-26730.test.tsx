@@ -97,7 +97,6 @@ vi.mock('@object-ui/react', async (importOriginal) => {
   return { ...mod, useAdapter: () => dataSource };
 });
 
-vi.mock('./StudioAiCopilot', () => ({ StudioChatDock: () => null }));
 
 // The sheet: each pending entry with the note the surface gives it.
 vi.mock('../../preview/DraftChangesPanel', () => ({

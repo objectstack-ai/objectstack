@@ -46,7 +46,6 @@ vi.mock('@object-ui/react', async (importOriginal) => {
   const mod = await importOriginal<typeof import('@object-ui/react')>();
   return { ...mod, useAdapter: () => ({}) };
 });
-vi.mock('./StudioAiCopilot', () => ({ StudioChatDock: () => null }));
 vi.mock('../../preview/DraftChangesPanel', () => ({ DraftChangesPanel: () => null }));
 
 import { AppNavCanvas } from '../metadata-admin/previews/AppNavCanvas';

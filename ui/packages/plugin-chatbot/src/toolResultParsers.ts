@@ -51,7 +51,7 @@ export interface AnyPart {
   url?: string;
   href?: string;
   title?: string;
-  /** Payload of a Vercel custom data part (`data-*`), e.g. build progress. */
+  /** Payload of a Vercel custom data part (`data-*`). */
   data?: unknown;
 }
 
@@ -69,10 +69,9 @@ export interface AnyPart {
  * peel one layer if present, then fall back to the raw value. Returns the first
  * candidate that parses to a plain object.
  *
- * Exported so `isProposalResult` (ChatbotEnhanced) shares the exact same
- * envelope-peeling logic — otherwise a wrapped `{type:'text', value:'…'}`
- * result slips past its `.status` check and the activity chip mis-reads a
- * still-pending proposal as "Completed" (#787 finding B / #2362).
+ * Exported so every result detector shares the exact same envelope-peeling
+ * logic — otherwise a wrapped `{type:'text', value:'…'}` result slips past a
+ * detector's `.status` check.
  */
 export function parseResultEnvelope(result: unknown): Record<string, unknown> | undefined {
   const tryParse = (value: unknown): Record<string, unknown> | undefined => {

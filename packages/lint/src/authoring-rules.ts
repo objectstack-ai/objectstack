@@ -3023,23 +3023,34 @@ export const AUTHORING_RULES: readonly AuthoringRule[] = [
   // semantics (system-elevated, the whole child collection, the parent field's
   // own FLS on read); this tells the author so where they configure the set.
   // Advisory: the pair is legal and often meant.
+  //
+  // Across the runtime publish gate for `permission` writes, on the measurement
+  // the previous `surfaceReason` asked for (the precedent is the crossing of
+  // `validateRetiredPermissionResidue` above). What a `permission` save hands
+  // this rule: the set is the written item, in `permissions`; the parent and
+  // child objects it judges the set against are the snapshot's `objects`, which
+  // the gate has carried since the security rules were measured, narrowed to
+  // the written package's closure plus that package's other drafts (the draft
+  // verdict's pending declarations). The rule reads only spec-declared keys, so
+  // the authored body answers as the parsed one does, and a child the snapshot
+  // does not carry is left unjudged by the rule's own "silence, never a guess"
+  // clause, so a narrowed snapshot can drop a finding but never invent one. The
+  // finding sits on the written set's own entry, so the differential charges it
+  // to that write and never to a stored sibling set. Pinned at this layer
+  // (`runtime-gate.rollup-source-visibility.test.ts`) and at the draft door
+  // that answers the MCP author's save (`metadata-protocol`'s
+  // `protocol.draft-publish-verdict.test.ts`). Advisory only, so it rides the
+  // 2xx the write earns and can never refuse one. `object` writes stay off: an
+  // advisory object rule crossing falls under RUNTIME_OBJECT_ADVISORY_VOLUME,
+  // a separate UX decision.
   {
     name: 'validateRollupSourceVisibility',
     tier: 'advisory',
     input: 'parsed',
     commands: ALL,
     source: 'packages/lint/src/validate-rollup-source-visibility.ts',
-    surfaces: CLI_ONLY,
-    // The precedent the reason below names is #17936, the measured crossing of
-    // `validateRetiredPermissionResidue` onto `permission` writes.
-    surfaceReason:
-      'Advisory-tier rule over permission-set × summary-field pairs: it cannot refuse a write. CLI-only ' +
-      'because the crossing it would take is unmeasured: nothing yet measures, per write, what a ' +
-      '`permission` save hands this rule (the set, and the parent and child objects it judges the set ' +
-      'against), which is the measurement taken before `validateRetiredPermissionResidue` crossed on ' +
-      '`permission` writes. Crossing on `permission` writes is therefore a separate decision with that ' +
-      'precedent; crossing on `object` writes as well would fall under the RUNTIME_OBJECT_ADVISORY_VOLUME ' +
-      'fence. Never a bare `runtimeTypes` edit.',
+    surfaces: CLI_AND_RUNTIME,
+    runtimeTypes: ['permission'],
     run: (stack) => validateRollupSourceVisibility(stack),
   },
   // #4983 — the sibling surface of the rule above, and ADR-0056 D4's gate,

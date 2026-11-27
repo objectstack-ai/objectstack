@@ -675,3 +675,53 @@ describe('#29919 DbQueueAdapter — wake at the next due time, no ramp for a sol
     });
 });
 
+
+/**
+ * [#37705] A publish made inside a unit of work wakes the loop at that unit's
+ * commit, through the engine's `runAfterOpenUnitsCommit`: the woken tick runs
+ * outside the unit, and on a pooled driver it could not see the row before the
+ * commit. The double holds the signal the way an open unit does.
+ */
+describe('#37705 DbQueueAdapter — a publish inside a unit wakes the loop at its commit', () => {
+    function deferringEngine() {
+        const engine = makeCountingEngine() as ReturnType<typeof makeCountingEngine> & { runAfterOpenUnitsCommit(body: () => void): void };
+        const held: Array<() => void> = [];
+        engine.runAfterOpenUnitsCommit = (body) => { held.push(body); };
+        return { engine, commit: () => { for (const body of held.splice(0)) body(); }, held };
+    }
+
+    it('the wake waits for the commit, then the row goes out at the base interval', async () => {
+        vi.useFakeTimers();
+        const { engine, commit, held } = deferringEngine();
+        const adapter = adapterOn(engine);
+        const at: number[] = [];
+        await adapter.subscribe('q1', async () => { at.push(Date.now()); });
+        adapter.start();
+        await vi.advanceTimersByTimeAsync(5 * 60_000);
+
+        await adapter.publish('q1', { n: 1 });
+        await vi.advanceTimersByTimeAsync(1);
+        expect(held, 'the wake was handed to the engine, not sent').toHaveLength(1);
+        expect(at, 'no tick ran for the uncommitted row').toEqual([]);
+
+        const committedAt = Date.now();
+        commit();
+        await vi.advanceTimersByTimeAsync(1);
+        await adapter.stop();
+        expect(at).toHaveLength(1);
+        expect(at[0]! - committedAt).toBeLessThanOrEqual(BASE);
+    });
+
+    it('a replay inside a unit also wakes at the commit', async () => {
+        const { engine, held } = deferringEngine();
+        const adapter = adapterOn(engine);
+        await adapter.subscribe('q1', async () => { throw new Error('boom'); });
+        const id = await adapter.publish('q1', { n: 1 }, { maxAttempts: 1 });
+        held.splice(0);
+        await adapter.pollOnce();
+        const [row] = engine.tables.get(QUEUE_TABLE) ?? [];
+        expect([row?.id, row?.status], 'the one attempt failed into the dead-letter state').toEqual([id, 'dlq']);
+        await adapter.replay(id);
+        expect(held, 'the replay\'s wake was handed to the engine').toHaveLength(1);
+    });
+});

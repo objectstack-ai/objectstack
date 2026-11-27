@@ -153,7 +153,6 @@ const LEGITIMATE_IDENTITIES: Record<string, string> = {
   'marketplace.versionBadge': 'v{{version}} — version prefix plus the hole.',
   'appManagement.toast.bulkFailureEntry': '{{name}} ({{reason}}) — holes and parentheses only.',
   'collaboration.userStatusTitle': '{{name}} ({{status}}) — holes and parentheses only.',
-  'chatbot.build.nextStepQuote': '“{{step}}” — a hole in quote marks; ko quotes with the same curly marks as en (objectui#12724).',
   'console.assignedWork.row': '{{object}} · {{field}} — two holes and a middle dot, no prose (objectstack#30205).',
   'approvalsInbox.bulkFailureLine': '{{title}}: {{reason}} — holes and a colon; zh/ja set a fullwidth colon, ko/ru/ar keep `: `.',
   'listConditions.chips.pattern': '{{field}}: {{value}} — holes and a colon; zh/ja set a fullwidth colon, ko/ru/ar keep `: `.',

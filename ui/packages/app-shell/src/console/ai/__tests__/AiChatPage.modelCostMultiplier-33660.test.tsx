@@ -7,11 +7,11 @@
  *
  * ## Real subjects
  *
- * The three hosts of the shared `ChatPane`: the full-page chat (`AiChatPage` at
- * `/ai/build`), the console dock (`ChatDockConversation`) and the Studio
- * copilot (`StudioCopilotConversation`), each with the REAL `ChatPane`, the
- * REAL `useAiModels` and `useAiUsage` reading a `fetch` stub, and the REAL
- * `ChatbotEnhanced` picker driven through its rendered `Select`. The stand-ins:
+ * The two hosts of the shared `ChatPane`: the full-page chat (`AiChatPage` at
+ * `/ai/build`) and the console dock (`ChatDockConversation`), each with the
+ * REAL `ChatPane`, the REAL `useAiModels` and `useAiUsage` reading a `fetch`
+ * stub, and the REAL `ChatbotEnhanced` picker driven through its rendered
+ * `Select`. The stand-ins:
  * the agent catalog, auth, metadata, the adapter and the side panels.
  *
  * Pins, on each host:
@@ -22,6 +22,9 @@
  *  - the allowance note shows with usage served and is absent without it.
  */
 
+// AiChatPage reads a dropped spreadsheet through `import('@object-ui/plugin-grid')`; load it
+// here so collection pays that transform, not a clocked case (check-test-source-alias).
+import '@object-ui/plugin-grid';
 import '@testing-library/jest-dom/vitest';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
@@ -58,12 +61,10 @@ vi.mock('../../../hooks/useCanAuthorMetadata', () => ({ useCanAuthorMetadata: ()
 vi.mock('../../../layout/AiUsageIndicator', () => ({ AiUsageIndicator: () => null }));
 vi.mock('../ConversationsSidebar', () => ({ ConversationsSidebar: () => null }));
 
-vi.mock('../PendingDraftsBar', () => ({ PendingDraftsBar: () => null }));
 
 import { I18nProvider } from '@object-ui/i18n';
 import { AiChatPage } from '../AiChatPage';
 import { ChatDockConversation } from '../../../layout/ChatDockConversation';
-import { StudioCopilotConversation } from '../../../views/studio-design/StudioAiCopilot';
 
 window.matchMedia = ((query: string) => ({
   matches: false,
@@ -149,16 +150,6 @@ function mountDock(): void {
   );
 }
 
-function mountStudio(): void {
-  render(
-    <I18nProvider config={I18N}>
-      <MemoryRouter initialEntries={['/studio/crm_app']}>
-        <StudioCopilotConversation packageId="crm_app" />
-      </MemoryRouter>
-    </I18nProvider>,
-  );
-}
-
 async function picker(): Promise<HTMLElement> {
   return screen.findByRole('combobox', { name: 'Model' }, { timeout: 4000 });
 }
@@ -174,7 +165,6 @@ const multiplierOf = (el: HTMLElement) =>
 describe.each([
   ['the full-page chat (/ai/build)', mountPage],
   ['the console dock', mountDock],
-  ['the Studio copilot', mountStudio],
 ])('%s — the model picker shows the cost multiplier (objectstack#33660)', (_host, mount) => {
   it('draws ×N per model the server gives one, and nothing for the model it gives none', async () => {
     mount();

@@ -59,8 +59,8 @@ describe('DetailViewFieldSchema.options is the spec authoring option schema (obj
     expect((issue as { keys?: string[] } | undefined)?.keys).toEqual([key]);
   });
 
-  it.each(['Open', '1st', 'a-b', 'o'])(
-    'refuses `value: %s` — the spec value is `^[a-z][a-z0-9_.]*$`, at least 2 characters',
+  it.each(['Open', '1st', 'a-b', ''])(
+    'refuses `value: %s` — the spec value is `^[a-z][a-z0-9_.]*$`, at least 1 character',
     (value) => {
       const r = field({ label: 'Open', value });
       expect(r.success).toBe(false);
@@ -68,7 +68,7 @@ describe('DetailViewFieldSchema.options is the spec authoring option schema (obj
     },
   );
 
-  it.each(['ab', 'a.b', 'in_progress'])('accepts `value: %s` (accepting control for the rule above)', (value) => {
+  it.each(['o', 'ab', 'a.b', 'in_progress'])('accepts `value: %s` (accepting control for the rule above)', (value) => {
     expect(issuesOf(field({ label: 'Open', value }))).toEqual([]);
   });
 

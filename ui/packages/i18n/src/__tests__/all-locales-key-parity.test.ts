@@ -39,9 +39,9 @@
  *     a key set or a placeholder. Trying to make it red on those would be asking
  *     a key-set test to judge meaning.
  *
- * That gate skips any key a pack does not define — including the four
- * `OUTBOUND_KEYS` below — precisely because their key sets are this file's
- * business, so the two cannot contradict each other on the same fact.
+ * That gate skips any key a pack does not define, precisely because key sets
+ * are this file's business, so the two cannot contradict each other on the
+ * same fact.
  *
  * ## The second invariant here: a plural family carries a base key (objectui#3863)
  *
@@ -106,24 +106,6 @@ import { describe, it, expect } from 'vitest';
 import { PLATFORM_LOCALE_TAGS } from '@objectstack/spec/system';
 import { builtInLocales } from '../locales';
 
-/**
- * Text the console SENDS to the agent rather than displays. These are absent
- * from every non-gate pack ON PURPOSE: the console resolves them from the
- * `en`/`zh-Hans` packs by the CONVERSATION's language (objectui#3896), so a value in
- * any other pack is unreachable, and the cloud confirm gate only recognises
- * those two languages anyway — see `outbound-agent-messages.test.ts`, which owns
- * that invariant and asserts it in both directions. Excluded here so the two
- * guards cannot contradict each other.
- */
-const OUTBOUND_KEYS = new Set([
-  'console.ai.planApproveMessage',
-  'console.ai.planApproveDefaultsMessage',
-  'console.ai.planAnswerMessage',
-  'console.ai.planExtendExistingMessage',
-  'console.ai.planBuildNewAppMessage',
-  'console.ai.changesConfirmMessage',
-]);
-
 function keyPaths(node: unknown, prefix = ''): string[] {
   return node !== null && typeof node === 'object'
     ? Object.entries(node as Record<string, unknown>).flatMap(([k, v]) =>
@@ -132,7 +114,7 @@ function keyPaths(node: unknown, prefix = ''): string[] {
     : [prefix];
 }
 
-const keysOf = (pack: unknown) => new Set(keyPaths(pack).filter((k) => !OUTBOUND_KEYS.has(k)));
+const keysOf = (pack: unknown) => new Set(keyPaths(pack));
 
 /**
  * `Object.keys` erases which keys it enumerated, so `builtInLocales[lang]` on a
@@ -152,8 +134,7 @@ type LocaleCode = keyof typeof builtInLocales;
  */
 const PLURAL_SUFFIXES = ['_zero', '_one', '_two', '_few', '_many', '_other'] as const;
 
-/** Every leaf path of a pack — no `OUTBOUND_KEYS` subtraction: a base key must be a
- *  real leaf of the SAME pack, whatever the parity exemptions are. */
+/** Every leaf path of a pack: a base key must be a real leaf of the SAME pack. */
 const leavesOf = (pack: unknown) => new Set(keyPaths(pack));
 
 /**

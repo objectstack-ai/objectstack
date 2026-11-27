@@ -247,7 +247,7 @@ import { stripReadonlyFields, staticReadonlyInsertSubject } from './validation/r
 // reason the explanation cannot be composed any further downstream.
 import { UnscopedHookApi, SEED_USER_GRANTS, APP_AUTHORED_HOOK_API, type HookRunAs, type HookRunAsRef, type RunAsDerivableApi } from './hook-run-as.js';
 import { PLATFORM_SYSTEM_API } from './platform-system-api.js';
-import { DETACHED_HOOK_RUN, type UNIT_ROLLED_BACK, type UnitCommitQueue } from './unit-detach.js';
+import { DETACHED_HOOK_RUN, runAfterOpenUnitsCommit, runOutsideOpenUnits, type UNIT_ROLLED_BACK, type UnitCommitQueue } from './unit-detach.js';
 // [#6457] The master-detail header a `parent`-scoped predicate reads is made
 // total over the MASTER's declared fields before it leaves this engine — the
 // same helper every other server seam materialises with (#1871/#4649/#4953).
@@ -5442,6 +5442,8 @@ export class ObjectQL implements IObjectQLEngine {
     return (TransactionsSectionFacet.transaction<T>).call(transactionsSectionHost.of(this), callback, baseContext, opts);
   }
 
+  /** [#37705] Run work the caller does not await outside every open unit; contract: `runOutsideOpenUnits`, `unit-detach.ts`. */ runOutsideOpenUnits<T>(body: () => T): T { return runOutsideOpenUnits(this.txStore, undefined, body); }
+  /** [#37705] Run a signal about a row the open unit just wrote once that unit commits; contract: `runAfterOpenUnitsCommit`, `unit-detach.ts`. */ runAfterOpenUnitsCommit(body: () => void): void { runAfterOpenUnitsCommit(this.txStore, body); }
   private runOpenedUnit<T>(trx: unknown, owner: IDataDriver, body: () => Promise<T>, commitQueue?: UnitCommitQueue): Promise<T> {
     // [#29986 codemod] The body moved to `engine-transactions-section.ts`, its docblock with it (see `TransactionsSectionHost`).
     return (TransactionsSectionFacet.runOpenedUnit<T>).call(transactionsSectionHost.of(this), trx, owner, body, commitQueue);
@@ -6636,10 +6638,8 @@ export class ScopedContext implements IScopedContext, RunAsDerivableApi {
    * `waitsForUnitCommit`), started once the unit it was dispatched in
    * commits, and answering `UNIT_ROLLED_BACK` without running when that unit
    * rolls back (`runOutsideOpenUnitsOnCommit`); at once outside any unit, and
-   * at once for any other event (`afterFind`).
-   *
-   * Keyed on {@link DETACHED_HOOK_RUN}, a symbol the package entry does not
-   * export, so it is no nameable member of this class's published face.
+   * at once for any other event (`afterFind`). Keyed on {@link DETACHED_HOOK_RUN},
+   * a symbol the package entry does not export: no nameable published member.
    */
   [DETACHED_HOOK_RUN]<T>(body: () => Promise<T>, waitForCommit: boolean): Promise<T | typeof UNIT_ROLLED_BACK> {
     return (ScopedContextFacet.detachedHookRun<T>).call(scopedContextHost.of(this), body, waitForCommit);

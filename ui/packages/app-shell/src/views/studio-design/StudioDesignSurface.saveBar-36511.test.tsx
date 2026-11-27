@@ -71,7 +71,6 @@ vi.mock('@object-ui/react', async (importOriginal) => {
   return { ...actual, useAdapter: () => dataSource };
 });
 vi.mock('../../components/SuggestedBindingsPanel', () => ({ SuggestedBindingsPanel: () => null }));
-vi.mock('./StudioAiCopilot', () => ({ StudioChatDock: () => null }));
 vi.mock('../../preview/DraftChangesPanel', () => ({
   DraftChangesPanel: (p: { onPublish?: () => void }) =>
     p.onPublish ? (

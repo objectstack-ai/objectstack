@@ -20,6 +20,9 @@
  * (a recorder that exposes the pane's send) and the conversation API.
  */
 
+// AiChatPage reads a dropped spreadsheet through `import('@object-ui/plugin-grid')`; load it
+// here so collection pays that transform, not a clocked case (check-test-source-alias).
+import '@object-ui/plugin-grid';
 import '@testing-library/jest-dom/vitest';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act, cleanup, render, waitFor } from '@testing-library/react';
@@ -75,7 +78,6 @@ vi.mock('../../providers/AdapterProvider', async (importOriginal) => ({
   useAdapter: () => null,
 }));
 vi.mock('../AiUsageIndicator', () => ({ AiUsageIndicator: () => null }));
-vi.mock('../../console/ai/PendingDraftsBar', () => ({ PendingDraftsBar: () => null }));
 
 vi.mock('../UnifiedSidebar', () => ({ UnifiedSidebar: () => null }));
 vi.mock('../AppHeader', () => ({ AppHeader: () => null }));
@@ -228,14 +230,14 @@ describe('console dock — the request names the selected app and the page in vi
     expect(context.surface).toEqual({ artifact: { type: 'object', name: 'account' } });
   });
 
-  it('the build agent bound to the app sends the same app as activeApp and packageId', async () => {
+  it('a build agent in the catalog binds no package: the turn names the app as activeApp alone (objectstack#37682)', async () => {
     state.agents = [{ name: 'build', label: 'Build' }];
     state.canAuthor = true;
     mount('/apps/crm_app/dashboard/pipeline');
     const context = await send('add a chart');
 
     expect(context.activeApp).toBe('app.crm');
-    expect(context.packageId).toBe('app.crm');
+    expect(context.packageId).toBeUndefined();
     expect(context.surface).toEqual({ artifact: { type: 'dashboard', name: 'pipeline' } });
   });
 
