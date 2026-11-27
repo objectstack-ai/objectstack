@@ -127,6 +127,12 @@
  *    unresolved-`$record` refusal belongs to the server door that meets it.
  *  - **`dependsOn[]`** (both arms: a name, or `{ field, param }`) — the fields
  *    whose values gate this field and, on a picker, scope its candidates.
+ *    The filter half (`param`, or the bare name) is also refused when it names
+ *    a field of the referenced object computed on read (a `formula`,
+ *    `isVirtualSearchField`, #37717): the picker's candidate query and the
+ *    importer's scoped lookup filter by it, and the engine's filter seam
+ *    refuses every such filter, so the picker gets no answer and every import
+ *    of the column fails its lookup.
  *  - **`summaryOperations.filter`** — every field key of a roll-up's child-row
  *    predicate (#31224), judged against the CHILD object
  *    `summaryOperations.object` names, never the object that owns the summary
@@ -498,6 +504,15 @@ interface FieldNameSlot {
   singleValued?: boolean;
   /** [#34378] The hint when {@link singleValued} refuses a path. */
   singleValuedPrescription?: string;
+  /**
+   * [#37717] `true` when the reader FILTERS by the name: a name that resolves
+   * to a field computed on read (`isVirtualSearchField`, the predicate the
+   * engine's filter seam refuses by) has no column to filter, so it is refused
+   * too. Judged only on an AUTHORED field of the addressed object.
+   */
+  filtered?: boolean;
+  /** [#37717] The hint when {@link filtered} refuses a name. */
+  filteredPrescription?: string;
 }
 
 function nameOf(v: unknown): string | undefined {
@@ -601,6 +616,15 @@ const FIELD_NAME_SLOTS: readonly FieldNameSlot[] = [
       'When the two sides are spelled differently, write the entry as '
       + '`{ field: \'this_record_field\', param: \'referenced_object_field\' }`; otherwise fix '
       + 'the name.',
+    // [#37717] The picker's candidate query and the importer's scoped lookup
+    // both filter the referenced object by this key, and the engine refuses
+    // every filter on a field computed on read: the picker then lists nothing
+    // and every import of the column fails its lookup.
+    filtered: true,
+    filteredPrescription:
+      'Point the entry at a stored field of the referenced object that holds the same value, '
+      + 'written as `{ field: \'this_record_field\', param: \'stored_referenced_field\' }`, or drop '
+      + 'the entry.',
   },
 ];
 
@@ -1022,6 +1046,21 @@ export function validateObjectFieldRefs(stack: AnyRec): ObjectFieldRefFinding[] 
             prescription: slot.prescription,
           });
           if (hit && !slot.ownFinding) reported.add(`${at}=${read.name}`);
+
+          // [#37717] A name the reader filters by must name a field it can
+          // filter: one computed on read has no column, so the engine refuses
+          // the filter and the reader gets no answer at all.
+          if (!hit && slot.filtered) {
+            const named = graph.get(against)?.fields.get(read.name);
+            if (named && isVirtualSearchField(named as never)) {
+              refuseKey(
+                { where, path },
+                `${subject} "${read.name}" is a ${named.type} field of "${against}", computed on read: `
+                  + 'no record-picker query or import lookup can filter on it.',
+                slot.filteredPrescription ?? slot.prescription,
+              );
+            }
+          }
 
           // [#34378] A path that names real fields can still read a LIST: a
           // multi-valued head, or a multi-valued leaf behind one hop. The

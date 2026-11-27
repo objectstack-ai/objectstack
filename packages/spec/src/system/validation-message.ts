@@ -71,8 +71,10 @@
  * `import_reference_scope_unqueryable` is `reference_not_found`'s sentence for a
  * scoped lookup that asked nothing: the engine's filter seam refused its reads
  * because the scope names a target field the engine cannot filter by (a
- * formula), as that refusal's declared `code` and `fields` say. Any other
- * refusal keeps the plain sentence. The remedy names the target field the
+ * formula), as that refusal's declared `code` and `fields` say. A scoped
+ * lookup none of whose reads answered for any other reason keeps the plain
+ * sentence and is never asked again without the scope, so it cannot answer
+ * `reference_out_of_scope` either. The remedy names the target field the
  * `dependsOn` entry filters by (its `param`), never a row column. `{{scope}}` is
  * the same composition as above.
  *

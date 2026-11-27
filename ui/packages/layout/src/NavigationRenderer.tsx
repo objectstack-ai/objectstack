@@ -2185,6 +2185,8 @@ const NavigationItemRenderer = React.memo(NavigationItemRow, sameRowAnswers);
 
 type NavRowRendererProps = NavItemRendererProps;
 const ROW_TARGET_RESOLVERS = new Set(['resolveTargetLabel', 'resolveTargetIcon', 'resolveTargetColor']);
+/** The props a leaf row is compared by what they answer for it, not by identity. */
+const ROW_ANSWER_PROPS = new Set([...ROW_TARGET_RESOLVERS, 'checkCap']);
 
 /**
  * objectstack#37575 — whether a row's new props draw what its current ones draw.
@@ -2198,20 +2200,29 @@ const ROW_TARGET_RESOLVERS = new Set(['resolveTargetLabel', 'resolveTargetIcon',
  * has, which still give those answers. A group draws its entries, and each of
  * those asks its own questions, so a group with any new resolver is redrawn and
  * its entries are compared one by one.
+ *
+ * The capability checker is compared the same way: the host rebuilds it with
+ * the resolvers, and a leaf row asks it about its own `requiresObject` and
+ * `requiresService` only.
  */
 function sameRowAnswers(prev: NavRowRendererProps, next: NavRowRendererProps): boolean {
   const keys = new Set([...Object.keys(prev), ...Object.keys(next)]);
   for (const key of keys) {
-    if (ROW_TARGET_RESOLVERS.has(key)) continue;
+    if (ROW_ANSWER_PROPS.has(key)) continue;
     if (!Object.is(prev[key as keyof NavRowRendererProps], next[key as keyof NavRowRendererProps])) return false;
   }
   if (
     prev.resolveTargetLabel === next.resolveTargetLabel &&
     prev.resolveTargetIcon === next.resolveTargetIcon &&
-    prev.resolveTargetColor === next.resolveTargetColor
+    prev.resolveTargetColor === next.resolveTargetColor &&
+    prev.checkCap === next.checkCap
   ) return true;
   const { item, t, locale } = next;
   if (item.type === 'group') return false;
+  const requiresObject = (item as { requiresObject?: string }).requiresObject;
+  const requiresService = (item as { requiresService?: string }).requiresService;
+  if (requiresObject && prev.checkCap('object', requiresObject) !== next.checkCap('object', requiresObject)) return false;
+  if (requiresService && prev.checkCap('service', requiresService) !== next.checkCap('service', requiresService)) return false;
   if (resolveNavItemLabel(item, t, prev.resolveTargetLabel, locale) !== resolveNavItemLabel(item, t, next.resolveTargetLabel, locale)) return false;
   if (resolveNavItemIcon(item, prev.resolveTargetIcon) !== resolveNavItemIcon(item, next.resolveTargetIcon)) return false;
   if (item.type === 'object' && item.objectName) {

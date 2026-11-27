@@ -105,6 +105,16 @@ export interface RefMatch {
    * within the row's scope, never that the value lives under another parent.
    */
   scopeUnqueryable?: boolean;
+  /**
+   * [#37717] The SCOPED lookup asked nothing for any other reason: no candidate
+   * read answered, and no refusal said the scope's target field cannot be
+   * filtered by or read (a comparand the field's type cannot take, a missing
+   * read grant, a driver fault). Nothing is known about where the value lives,
+   * so it is not asked again without the scope: the refusal stays
+   * `reference_not_found` with the plain sentence, never
+   * `reference_out_of_scope`.
+   */
+  scopeUnanswered?: boolean;
 }
 
 /**
@@ -191,7 +201,12 @@ interface ScopedBy {
  * refused the scope (`RefMatch.scopeUnqueryable`: the scope names a target field
  * the engine cannot filter by, such as a formula) is not probed either: it
  * stays `reference_not_found` with its own sentence, which says the lookup
- * could not be made within the row's scope.
+ * could not be made within the row's scope. [#37717] Nor is a scoped lookup
+ * none of whose reads answered for any other reason
+ * (`RefMatch.scopeUnanswered`: every read refused, say for a scope cell the
+ * field's type cannot take): only a scoped read that ran to a miss says the
+ * value is not within the scope, so that cell stays `reference_not_found` with
+ * the plain sentence.
  *
  * The probe is the caller's own read: the resolver runs every lookup as the
  * importing principal, so it can find only a record that principal can already
@@ -213,6 +228,9 @@ async function referenceNotFound(
   // A scope the caller may not filter by was never asked: nothing is known about
   // where the value lives, so it is not "under another parent".
   if (scopedMatch.scopeDenied) return refusal;
+  // [#37717] No scoped read answered (every one refused): the scope was never
+  // asked, so a hit without it would claim a fact the import never checked.
+  if (scopedMatch.scopeUnanswered) return refusal;
   const qualifier = scopedBy.map((s) => `${s.label} = "${s.value}"`).join(', ');
   // A scope no read could filter by: say the lookup could not be made, not that nothing matched.
   if (scopedMatch.scopeUnqueryable) {
