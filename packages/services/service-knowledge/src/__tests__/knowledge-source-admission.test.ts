@@ -19,7 +19,7 @@ import type { Plugin, PluginContext } from '@objectstack/core';
 import type { AdapterContext, AdapterIndexStatus, IDataEngine, IKnowledgeAdapter } from '@objectstack/spec/contracts';
 import type { ExecutionContext } from '@objectstack/spec/kernel';
 import type { KnowledgeHit, KnowledgeSource, ObjectKnowledgeSource } from '@objectstack/spec/ai';
-import { KnowledgeService, type KnowledgeLogger } from '../knowledge-service.js';
+import { KnowledgeService, recordToDocument, type KnowledgeLogger } from '../knowledge-service.js';
 import { mayServeEarlierRuleTitle, type KnowledgeFieldSecurity } from '../knowledge-source-admission.js';
 import { KnowledgeServicePlugin, isServiceNotRegisteredError } from '../knowledge-service-plugin.js';
 
@@ -106,12 +106,27 @@ function objectSource(id: string, object: string, content: string[], metadataFie
   };
 }
 
+/**
+ * How the engine double answers a system-context read (the check of a hit
+ * against its record): `row` gives the record as it reads now (`undefined`:
+ * none), `throws` makes the read fail. A caller's read answers `{ id }` rows.
+ */
+interface SystemReads {
+  row?: (object: string, id: string) => Record<string, unknown> | undefined;
+  throws?: boolean;
+}
+
 /** A data engine whose row re-check admits every row, with a schema registry and a disabled-package predicate. */
-function makeEngine(objects: ObjectDef[], opts: { disabled?: string[]; schemaThrows?: boolean } = {}) {
+function makeEngine(objects: ObjectDef[], opts: { disabled?: string[]; schemaThrows?: boolean; system?: SystemReads } = {}) {
   const byName = new Map(objects.map((o) => [o.name, o]));
-  const findSpy = vi.fn(async (_object: string, q: { where?: { id?: { $in?: string[] } } }) =>
-    (q.where?.id?.$in ?? []).map((id) => ({ id })),
-  );
+  const findSpy = vi.fn(async (object: string, q: { where?: { id?: { $in?: string[] } } }, o?: { context?: ExecutionContext }) => {
+    if (o?.context?.isSystem === true && opts.system) {
+      if (opts.system.throws) throw new Error('system read failed');
+      const row = opts.system.row ?? ((_obj: string, id: string) => ({ id }));
+      return (q.where?.id?.$in ?? []).map((id) => row(object, id)).filter((r) => r !== undefined);
+    }
+    return (q.where?.id?.$in ?? []).map((id) => ({ id }));
+  });
   return {
     find: findSpy,
     getSchema: (name: string) => {
@@ -145,18 +160,33 @@ function setup(options: {
   logger?: KnowledgeLogger;
   /** What the adapter's `indexStatus` answers; absent, it has none. */
   proven?: IndexHeld;
+  system?: SystemReads;
+  resolveTenancyPosture?: () => Promise<undefined>;
 }) {
   const adapter = makeAdapter(options.proven);
-  const engine = makeEngine(options.objects ?? [TICKET], { disabled: options.disabled, schemaThrows: options.schemaThrows });
+  const engine = makeEngine(options.objects ?? [TICKET], {
+    disabled: options.disabled,
+    schemaThrows: options.schemaThrows,
+    system: options.system ?? {},
+  });
+  // The store holds the document the current recipe assembles from the record as it reads now.
+  adapter.searchSpy.mockImplementation(async (_q: string, o: { source: KnowledgeSource }) => [currentHit(o.source)]);
+  const currentHit = (source: KnowledgeSource, recordId = 'rec_1'): KnowledgeHit => {
+    const objSource = source.source as ObjectKnowledgeSource;
+    const row = (options.system?.row ?? ((_o: string, id: string) => ({ id })))(objSource.object, recordId) ?? { id: recordId };
+    const schema = (options.objects ?? [TICKET]).find((o) => o.name === objSource.object);
+    return { ...hitFor(source.name, recordId), docHash: recordToDocument(source, objSource, row, schema).docHash };
+  };
   const svc = new KnowledgeService({
     dataEngine: engine,
     logger: options.logger,
     resolveSecurity: options.security ? () => options.security : undefined,
+    ...(options.resolveTenancyPosture ? { resolveTenancyPosture: options.resolveTenancyPosture } : {}),
   });
   svc.registerAdapter('memory', adapter);
   for (const s of options.sources) svc.registerSource(s);
   const searched = () => adapter.searchSpy.mock.calls.map((c) => (c[1] as { source: KnowledgeSource }).source.name);
-  return { svc, adapter, engine, searched };
+  return { svc, adapter, engine, searched, currentHit };
 }
 
 const ids = (hits: KnowledgeHit[]) => hits.map((h) => h.sourceId).sort();
@@ -609,6 +639,129 @@ describe('field gate — the earlier title rule: searched only once the index is
     adapter.searchSpy.mockImplementation(async () => [{ ...hitFor('s'), title: 'synthetic-hidden-name-7c2d', metadata: { status: 'hidden' } }]);
     expect(await svc.search('q', { executionContext: MEMBER })).toEqual([]);
     expect(searched()).toEqual([]);
+  });
+
+  // A proven source's hits are each checked against the record as it reads
+  // now (ADR-0161 K7): a write the store has not caught up with — a record
+  // whose stored document is not the one the current recipe assembles — is
+  // never served, and every way the check cannot be made drops the hit.
+  describe('per-hit check: a proven source serves only documents the current recipe assembles from the live record', () => {
+    const SECRET = 'synthetic-live-secret-5d8e';
+    const live = (_o: string, id: string) => ({ id, name: 'Acme', title: 'synthetic-earlier-title-2b9c', body: 'current body', secret_note: SECRET });
+    const proven = (extra: Partial<Parameters<typeof setup>[0]> = {}) =>
+      setup({ objects: [ACCOUNT], sources: [objectSource('s', 'account', ['body'])], security: hideTitle, proven: true, system: { row: live }, ...extra });
+
+    it('CONTROL: a stored document matching the live record is served, as the store answered it', async () => {
+      const { svc, engine, currentHit } = proven();
+      const stored = currentHit(svc.getSource('s')!);
+      expect(await svc.search('q', { executionContext: MEMBER })).toEqual([stored]);
+      const systemReads = engine.find.mock.calls.filter((c) => (c[2] as { context?: ExecutionContext } | undefined)?.context?.isSystem === true);
+      expect(systemReads).toHaveLength(1);
+      expect(systemReads[0][1]).toMatchObject({ where: { id: { $in: ['rec_1'] } } });
+    });
+
+    it('the read decides survival only: no field it returns reaches the caller', async () => {
+      const { svc, adapter, currentHit } = proven();
+      const stored = currentHit(svc.getSource('s')!);
+      adapter.searchSpy.mockImplementation(async () => [{ ...stored }]);
+      const served = await svc.search('q', { executionContext: MEMBER });
+      expect(served).toEqual([stored]);
+      const text = JSON.stringify(served);
+      for (const value of [SECRET, 'synthetic-earlier-title-2b9c', 'current body', 'Acme']) expect(text).not.toContain(value);
+    });
+
+    it.each([
+      ['a write the store has not caught up with (S1): the stored hash is not the current one', (h: KnowledgeHit) => ({ ...h, docHash: 'dh1:written-before-the-edit' })],
+      ['a document a complete build kept: its record reads differently now', (h: KnowledgeHit) => ({ ...h, docHash: 'dh1:kept-from-an-earlier-build' })],
+      ['a foreign document: its id is not the one the source derives from the record', (h: KnowledgeHit) => ({ ...h, documentId: 'foreign:rec_1' })],
+      ['a stored document with no hash', (h: KnowledgeHit) => ({ ...h, docHash: undefined })],
+      ['a stored document with an empty hash', (h: KnowledgeHit) => ({ ...h, docHash: '' })],
+    ])('dropped: %s', async (_label, alter) => {
+      const { svc, adapter, currentHit } = proven();
+      const stored = currentHit(svc.getSource('s')!);
+      adapter.searchSpy.mockImplementation(async () => [alter(stored)]);
+      expect(await svc.search('q', { executionContext: MEMBER })).toEqual([]);
+      // Preservation: the system context is not checked, as every gate.
+      expect(ids(await svc.search('q', { executionContext: SYSTEM }))).toEqual(['s']);
+    });
+
+    it('dropped: a record the system read no longer answers (deleted, or outside the source\'s `where`)', async () => {
+      const gone = (o: string, id: string) => (id === 'rec_1' ? undefined : live(o, id));
+      const { svc, adapter, currentHit } = proven({ system: { row: gone } });
+      adapter.searchSpy.mockImplementation(async () => [{ ...currentHit(svc.getSource('s')!), docHash: recordToDocument(svc.getSource('s')!, svc.getSource('s')!.source as ObjectKnowledgeSource, live('account', 'rec_1'), ACCOUNT).docHash }]);
+      expect(await svc.search('q', { executionContext: MEMBER })).toEqual([]);
+    });
+
+    it('fails closed: a system read that throws, or answers no list, drops every hit of the source', async () => {
+      for (const system of [{ row: live, throws: true }, { row: live }] as SystemReads[]) {
+        const warn = vi.fn();
+        const { svc, engine } = proven({ system, logger: { warn, error: vi.fn() } });
+        if (system.throws !== true) {
+          const callerRead = engine.find.getMockImplementation()!;
+          engine.find.mockImplementation(async (object, q, o) => (o?.context?.isSystem === true ? ({ rows: [] } as never) : callerRead(object, q, o)));
+        }
+        expect(await svc.search('q', { executionContext: MEMBER })).toEqual([]);
+        expect(String(warn.mock.calls[warn.mock.calls.length - 1]?.[0])).toContain('could not be read to check its hits');
+      }
+    });
+
+    it('fails closed: a tenancy posture that cannot be read drops every hit of a checked source', async () => {
+      const warn = vi.fn();
+      // The organization scoping reads the posture first and answers; the check's own read is the one that fails.
+      let reads = 0;
+      const { svc, searched } = proven({
+        logger: { warn, error: vi.fn() },
+        resolveTenancyPosture: async () => {
+          reads += 1;
+          if (reads > 1) throw new Error('posture store unreachable');
+          return undefined;
+        },
+      });
+      expect(await svc.search('q', { executionContext: MEMBER })).toEqual([]);
+      expect(searched()).toEqual(['s']);
+      expect(warn.mock.calls.map((c) => String(c[0])).join('\n')).toContain('the tenancy posture could not be read');
+    });
+
+    it('fails closed: a hash that cannot be recomputed from the live row drops the hit', async () => {
+      const poisoned = (_o: string, id: string) => ({
+        id,
+        name: 'Acme',
+        body: {
+          toString(): string {
+            throw new Error('unreadable value');
+          },
+          toJSON(): never {
+            throw new Error('unreadable value');
+          },
+        },
+      });
+      const { svc, adapter } = proven({ system: { row: poisoned } });
+      adapter.searchSpy.mockImplementation(async () => [{ ...hitFor('s'), docHash: 'dh1:anything' }]);
+      expect(await svc.search('q', { executionContext: MEMBER })).toEqual([]);
+    });
+
+    it('fails closed: a hit with no `sourceRecordId` is dropped even where every other check would pass', async () => {
+      const { svc, adapter } = proven();
+      const source = svc.getSource('s')!;
+      // The worst case: its document id and hash are the ones a record id of `undefined` would give.
+      const docHash = recordToDocument(source, source.source as ObjectKnowledgeSource, live('account', 'undefined'), ACCOUNT).docHash;
+      adapter.searchSpy.mockImplementation(async () => [{ ...hitFor('s'), documentId: 's:undefined', sourceRecordId: undefined, docHash }]);
+      expect(await svc.search('q', { executionContext: MEMBER })).toEqual([]);
+    });
+
+    it('only a proven source is checked: a source searched without the proof is served as the store answered it', async () => {
+      const { svc, adapter, currentHit } = setup({
+        objects: [ACCOUNT, TICKET],
+        sources: [objectSource('s', 'account', ['body']), objectSource('tickets', 'ticket', ['body'])],
+        security: makeSecurity((object) => (object === 'ticket' ? Object.keys(TICKET.fields) : ['id', 'name', 'body'])),
+        proven: true,
+        system: { row: live },
+      });
+      adapter.searchSpy.mockImplementation(async (_q: string, o: { source: KnowledgeSource }) =>
+        o.source.name === 'tickets' ? [{ ...hitFor('tickets'), docHash: undefined }] : [currentHit(o.source)],
+      );
+      expect(ids(await svc.search('q', { executionContext: MEMBER })).sort()).toEqual(['s', 'tickets']);
+    });
   });
 
   it('reverse pin, unproven index: a stored hit carrying an earlier-rule `title` never reaches a caller who may not query it', async () => {

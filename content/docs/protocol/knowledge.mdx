@@ -346,6 +346,18 @@ proves such a source, so it stays refused, when its
 pass and the reconcile leave it alone) or when its adapter has no
 `listDocuments`, no `completeBuild` or no index status.
 
+The proof covers the index as its last complete build left it. So each hit of
+a proven source is also checked against its record as it reads now, with one
+read per source per search round in the system context. A hit is served only
+when the record still belongs to the source (its `where` included) and the
+document the store holds is the one the current recipe assembles from it (the
+same `docHash`). A document the build's purge left in place, or one written
+after the build under an earlier recipe, is never served, and the search
+repairs it in the background. A check that cannot be made drops the hit: the
+read fails, the hit names no record or carries no hash, the hash cannot be
+computed, or the tenancy posture cannot be read. The read decides only whether
+a hit is served; nothing it reads is added to the hit.
+
 ### 3.3 `IKnowledgeService` (consumed by the ObjectOS AI runtime, REST, Console)
 
 ```ts

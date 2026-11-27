@@ -1796,6 +1796,11 @@ export class KnowledgeService implements IKnowledgeService {
     if (admitted.length === 0) return { hits: [], refused: [] };
     const refused: KnowledgeSearchRefusal[] = [];
     const sources = await this.planSearches(admitted, refused);
+    // The sources whose every hit is checked against its live record before
+    // it is served: the ones the earlier title rule could serve a field for.
+    const verified = new Set(sources.filter((target) => target.verifyHits === true).map((target) => target.source.name));
+    const served = async (hits: KnowledgeHit[]): Promise<KnowledgeHit[]> =>
+      verified.size === 0 ? hits : this.dropUnverifiedHits(hits, verified);
 
     const filtered = ctx !== undefined && ctx.isSystem !== true && this.options.dataEngine !== undefined;
     const widened = byRecord || filtered;
@@ -1807,7 +1812,7 @@ export class KnowledgeService implements IKnowledgeService {
     const first = await this.searchRound(query, sources, firstAsk, opts.filter, refused);
     if (first.size === 0 && refused.length > 0) throw wholeRefusal(this.facedRefusals(refused));
     const raw = [...first.values()].flatMap((answer) => answer.hits);
-    let kept = await this.applyPermissionFilter(raw, ctx, byRecord);
+    let kept = await served(await this.applyPermissionFilter(raw, ctx, byRecord));
     let removed = raw.length - kept.length;
 
     if ((filtered || byRecord) && distinctGroups(kept, groupOf) < topK) {
@@ -1821,7 +1826,7 @@ export class KnowledgeService implements IKnowledgeService {
         // A refilled source's second answer is a superset of its first: its
         // first-round survivors are dropped and the whole answer re-checked.
         const refilledHits = [...refill.values()].flatMap((answer) => answer.hits);
-        const refilledKept = await this.applyPermissionFilter(refilledHits, ctx, byRecord);
+        const refilledKept = await served(await this.applyPermissionFilter(refilledHits, ctx, byRecord));
         const firstRaw = raw.filter((hit) => refill.has(hit.sourceId)).length;
         const firstKept = kept.filter((hit) => refill.has(hit.sourceId)).length;
         kept = [...kept.filter((hit) => !refill.has(hit.sourceId)), ...refilledKept];
@@ -2039,6 +2044,128 @@ export class KnowledgeService implements IKnowledgeService {
   }
 
   /**
+   * The hits of `verified` sources whose stored document is the one the
+   * current recipe assembles from the record as it reads now; every other hit
+   * of those sources is dropped. A hit of any other source passes untouched.
+   *
+   * Why: a source the earlier title rule could serve a field for
+   * (`mayServeEarlierRuleTitle`) is searched without the field gate's former
+   * `title` arm, and its index may still hold a document assembled under
+   * another recipe: one a build walked past and did not purge (a store with
+   * no `listDocuments`, `refresh.onRecordChange: false`, a purge candidate
+   * kept or listed under a foreign id), or one written between two builds
+   * while the object's display field was another field. The recipe hash
+   * cannot see either; this check reads the record. A hit survives only when
+   * its record still belongs to the source (one system read per source,
+   * `{ $and: [where, { id: { $in } }] }`, projected to the fields assembly
+   * reads), its document id is the one the source derives from that record,
+   * and the `docHash` the store holds equals the one {@link recordToDocument}
+   * computes from the row under the current object definition (the title is
+   * part of it). Strict, unlike {@link checkFreshness}: a hit with no record
+   * id or no stored hash, a read that fails or answers no list, a posture
+   * that cannot be read and a hash that cannot be computed each drop the hit.
+   *
+   * The read decides only whether a hit survives: a surviving hit is returned
+   * as the store answered it, and nothing the read returned is put on it. A
+   * stale record's document is repaired in the background ({@link
+   * repairStale}), as the record-level check repairs it.
+   */
+  private async dropUnverifiedHits(hits: KnowledgeHit[], verified: ReadonlySet<string>): Promise<KnowledgeHit[]> {
+    const engine = this.options.dataEngine;
+    const checked = hits.filter((hit) => verified.has(hit.sourceId));
+    if (checked.length === 0) return hits;
+    const passed = new Set<KnowledgeHit>();
+    const dropped = (sourceId: string, count: number, why: string): void => {
+      if (count > 0) {
+        this.options.logger?.debug?.(
+          `[knowledge] ${count} hit(s) of source '${this.faceOfKey(sourceId)}' not served: ${why}`,
+        );
+      }
+    };
+    let posture: TenancyPosture | undefined;
+    let postureRead = true;
+    try {
+      posture = await this.readTenancyPosture();
+    } catch (err) {
+      postureRead = false;
+      this.options.logger?.warn?.(
+        `[knowledge] the tenancy posture could not be read (${errorText(err)}); no hit of a source checked against its ` +
+          'record is served this search (fail-closed).',
+      );
+    }
+    const bySource = new Map<string, KnowledgeHit[]>();
+    for (const hit of checked) bySource.set(hit.sourceId, [...(bySource.get(hit.sourceId) ?? []), hit]);
+    for (const [sourceId, sourceHits] of bySource) {
+      const source = this.handed(sourceId);
+      if (!engine || !postureRead || !source || source.source.kind !== 'object') {
+        dropped(sourceId, sourceHits.length, 'their records cannot be read to check them.');
+        continue;
+      }
+      const objSource = source.source;
+      const usable = sourceHits.filter(
+        (hit) => isRecordId(hit.sourceRecordId) && typeof hit.docHash === 'string' && hit.docHash !== '',
+      );
+      dropped(sourceId, sourceHits.length - usable.length, 'a hit names no record or carries no stored hash.');
+      if (usable.length === 0) continue;
+      const ids = [...new Set(usable.map((hit) => String(hit.sourceRecordId)))];
+      const byId = { id: { $in: ids } };
+      const schema = this.schemaFor(objSource.object);
+      let rows: unknown;
+      try {
+        const fields = freshnessFields(objSource, schema, posture);
+        rows = await engine.find(
+          objSource.object,
+          {
+            where: objSource.where !== undefined ? { $and: [objSource.where, byId] } : byId,
+            ...(fields === undefined ? {} : { fields }),
+          },
+          { context: systemContext() },
+        );
+        if (!Array.isArray(rows)) throw new Error(`the read answered ${describeValue(rows)} instead of a list of rows`);
+      } catch (err) {
+        this.options.logger?.warn?.(
+          `[knowledge] the records of source '${this.faceOfKey(sourceId)}' could not be read to check its hits ` +
+            `(${errorText(err)}); none is served (fail-closed).`,
+        );
+        continue;
+      }
+      const byRow = new Map<string, Record<string, unknown>>();
+      for (const row of rows as Array<Record<string, unknown> | null | undefined>) {
+        if (row && isRecordId(row.id)) byRow.set(String(row.id), row);
+      }
+      const current = new Map<string, string | undefined>();
+      for (const hit of usable) {
+        const recordId = String(hit.sourceRecordId);
+        if (hit.documentId !== documentIdFor(sourceId, recordId)) continue;
+        if (!current.has(recordId)) {
+          const row = byRow.get(recordId);
+          let hash: string | undefined;
+          if (row !== undefined) {
+            try {
+              hash = recordToDocument(source, objSource, row, schema, posture).docHash;
+            } catch {
+              hash = undefined;
+            }
+          }
+          current.set(recordId, hash);
+          if (row === undefined || (hash !== undefined && hash !== hit.docHash)) this.repairStale(source, objSource, recordId);
+        }
+        const hash = current.get(recordId);
+        if (hash !== undefined && hash === hit.docHash) {
+          passed.add(hit);
+          this.freshnessRepairs.delete(documentIdFor(sourceId, recordId));
+        }
+      }
+      dropped(
+        sourceId,
+        usable.filter((hit) => !passed.has(hit)).length,
+        'the record no longer belongs to the source, or the stored document is not the one the current recipe assembles from it.',
+      );
+    }
+    return hits.filter((hit) => !verified.has(hit.sourceId) || passed.has(hit));
+  }
+
+  /**
    * Repair the document of a record the freshness check found stale: the
    * event sync's own path ({@link syncRecord}, serialized per document), run
    * in system context, in this process and NOT awaited — the search that found
@@ -2110,7 +2237,7 @@ export class KnowledgeService implements IKnowledgeService {
           continue;
         }
       }
-      out.push({ ...entry, fingerprint: plan.index.fingerprint });
+      out.push({ ...entry, fingerprint: plan.index.fingerprint, ...(proveIndex === true ? { verifyHits: true as const } : {}) });
     }
     return out;
   }
@@ -3030,6 +3157,8 @@ interface SearchTarget {
   organizationIds?: string[];
   fingerprint?: string;
   scope?: AdapterScopeTerm[];
+  /** Each hit is checked against its live record before it is served ({@link KnowledgeService.dropUnverifiedHits}). */
+  verifyHits?: true;
 }
 
 /** An ADR-0112 coded refusal's code, status and message, or `undefined` for any other thrown value. */

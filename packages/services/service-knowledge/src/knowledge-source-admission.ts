@@ -64,6 +64,14 @@
  * `KNOWLEDGE_REBUILD_REQUIRED` (`KnowledgeService.search`), never served
  * through a gate that asks about `title`.
  *
+ * The proof speaks for the index as its last complete build left it, not for
+ * a document left in place by that build's purge or written after it. So each
+ * hit of a proven source is also checked against its record as it reads now
+ * (`KnowledgeService.dropUnverifiedHits`): it is served only when the record
+ * still belongs to the source and the stored `docHash` is the one the current
+ * recipe assembles from it. A check that cannot be made drops the hit, and the
+ * check's read decides only whether a hit is served.
+ *
  * The fields the source's `where` reads ({@link selectingFieldsOf}) are judged
  * by the same rule, at save and at search: the source selects its records by
  * them, so they are part of what the source reads of the object. None is
