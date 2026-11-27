@@ -8358,25 +8358,25 @@ export function defineList(
  * members inline, and the wall names the derive path for a row whose members
  * cannot be spelled.
  *
- * The refusal itself is `SystemIdentifierSchema`'s grammar message
- * (`shared/identifiers.zod.ts`), reached through `SelectOptionSchema.value`,
+ * The refusal itself is the option-value grammar message
+ * (`SelectOptionValueSchema`, `data/field.zod.ts`), reached through `SelectOptionSchema.value`,
  * which the form face reuses BY REFERENCE (pinned in
  * `form-select-option.test.ts`). That message cannot carry this remedy where it
- * is declared: the same grammar bounds object-field options and three
- * object-storage names, and "derive the members from the served JSON Schema"
+ * is declared: the same grammar bounds object-field options and picklist
+ * items, and "derive the members from the served JSON Schema"
  * is true only on a schema-bound form. `defineForm` is exactly that door — it
  * stamps `data.provider: 'schema'` on every form it builds — so the remedy is
  * appended here, to the issue that door raises, and nowhere else.
  */
 const FORM_OPTION_VALUE_DERIVE_REMEDY =
-  'An enum member carrying a hyphen, a capital or a single character cannot be a form option '
+  'An enum member carrying a hyphen or a capital cannot be a form option '
   + '`value`, which is a lowercase system identifier. When this row edits a spec enum whose '
   + 'members cannot be spelled as option values, omit `options`: the control derives the '
   + 'members from the served JSON Schema, and their meanings go in `helpText`.';
 
 /**
- * The two issue codes the system-identifier grammar raises on a string: the
- * pattern (`invalid_format`) and the two-character floor (`too_small`).
+ * The two issue codes the option-value grammar raises on a string: the
+ * pattern (`invalid_format`) and the empty-value floor (`too_small`).
  */
 const OPTION_VALUE_GRAMMAR_CODES: ReadonlySet<string> = new Set(['invalid_format', 'too_small']);
 

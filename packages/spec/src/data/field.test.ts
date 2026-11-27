@@ -15,6 +15,8 @@ import {
 } from './field.zod';
 import { parseFilterAST } from './filter.zod';
 import { ObjectSchema } from './object.zod';
+import { FormSelectOptionSchema } from '../ui/view.zod';
+import { SnakeCaseIdentifierSchema, SystemIdentifierSchema } from '../shared/identifiers.zod';
 import { MULTI_CAPABLE_TYPES, MULTI_OPTION_TYPES, isMultiValueField } from './field-value.zod';
 
 describe('FieldType', () => {
@@ -3068,5 +3070,56 @@ describe('FieldSchema.lookupFilters — { $record } comparand and orEmpty', () =
       expect(sent.map((e) => e.field)).toEqual(['is_active', 'valid_from', 'valid_to']);
       expect(offered(sent)).toEqual(['2027 export', '2027 domestic', 'generic']);
     });
+  });
+});
+
+/**
+ * A select option's `value` may be ONE character (grade `a` / `b` / `c`): the
+ * option value keeps the system-identifier character rule with a floor of 1.
+ * Only this surface widened — object, field and other machine names keep the
+ * two-character floor of `SystemIdentifierSchema` / `SnakeCaseIdentifierSchema`.
+ */
+describe('select option value: one character is enough', () => {
+  const GRADES = [{ label: 'A', value: 'a' }, { label: 'B', value: 'b' }, { label: 'C', value: 'c' }];
+  const issueAt = (r: { success: boolean; error?: { issues: Array<{ path: PropertyKey[]; code: string }> } }, path: string) =>
+    r.success ? undefined : r.error!.issues.find((i) => i.path.join('.') === path)?.code;
+
+  it('a select with options `a`, `b`, `c` parses — option, field and object', () => {
+    for (const o of GRADES) expect(SelectOptionSchema.safeParse(o).success).toBe(true);
+    expect(FieldSchema.safeParse({ name: 'grade', label: 'Grade', type: 'select', options: GRADES }).success).toBe(true);
+    const obj = ObjectSchema.safeParse({
+      name: 'customer',
+      label: 'Customer',
+      sharingModel: 'private',
+      fields: { grade: { label: 'Grade', type: 'select', options: GRADES } },
+    });
+    expect(obj.success, JSON.stringify(obj.error?.issues)).toBe(true);
+  });
+
+  it('the `Field.select` shorthand `[\'A\', \'B\', \'C\']` yields `a`, `b`, `c` and parses', () => {
+    const field = Field.select(['A', 'B', 'C'], { label: 'Grade' });
+    expect(field.options?.map((o) => o.value)).toEqual(['a', 'b', 'c']);
+    expect(FieldSchema.safeParse({ name: 'grade', ...field }).success).toBe(true);
+  });
+
+  it('the form-view option face takes the same floor', () => {
+    expect(FormSelectOptionSchema.safeParse({ label: 'A', value: 'a' }).success).toBe(true);
+  });
+
+  it.each([
+    ['empty', '', 'too_small'],
+    ['uppercase', 'A', 'invalid_format'],
+    ['a leading digit', '1', 'invalid_format'],
+  ])('still refuses a %s value', (_label, value, code) => {
+    expect(issueAt(SelectOptionSchema.safeParse({ label: 'X', value }), 'value')).toBe(code);
+    expect(issueAt(FormSelectOptionSchema.safeParse({ label: 'X', value }), 'value')).toBe(code);
+    expect(
+      issueAt(FieldSchema.safeParse({ name: 'grade', label: 'Grade', type: 'select', options: [{ label: 'X', value }] }), 'options.0.value'),
+    ).toBe(code);
+  });
+
+  it('no other identifier floor moved: the machine-name schemas still need two characters', () => {
+    expect(issueAt(SystemIdentifierSchema.safeParse('a'), '')).toBe('too_small');
+    expect(issueAt(SnakeCaseIdentifierSchema.safeParse('a'), '')).toBe('too_small');
   });
 });
