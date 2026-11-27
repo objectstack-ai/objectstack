@@ -4645,6 +4645,18 @@ const es = {
     recordCitations: {
       title: 'Citado de registros',
     },
+    questionCard: {
+      aiAsks: 'La IA pregunta:',
+      progress: 'Pregunta {{current}} de {{total}}',
+      typeYourOwn: 'Escribir otra cosa…',
+      recommended: 'Recomendado',
+      skip: 'Omitir',
+      back: 'Anterior',
+      next: 'Siguiente',
+      send: 'Enviar',
+      pending: 'Hay una pregunta esperando tu respuesta',
+      answerLine: '{{header}}: {{answer}}',
+    },
     tool: {
       aggregate_data: "Resumir los datos",
       get_record: "Leer el registro",

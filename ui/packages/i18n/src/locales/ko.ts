@@ -4550,6 +4550,18 @@ const ko = {
     recordCitations: {
       title: '레코드에서 인용',
     },
+    questionCard: {
+      aiAsks: 'AI 질문:',
+      progress: '질문 {{current}}/{{total}}',
+      typeYourOwn: '직접 입력…',
+      recommended: '추천',
+      skip: '건너뛰기',
+      back: '이전',
+      next: '다음',
+      send: '보내기',
+      pending: '답변을 기다리는 질문이 있습니다',
+      answerLine: '{{header}}: {{answer}}',
+    },
     tool: {
       aggregate_data: "관련 데이터 집계하기",
       get_record: "이 레코드 읽기",
