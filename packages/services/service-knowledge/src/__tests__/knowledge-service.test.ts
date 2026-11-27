@@ -2323,3 +2323,118 @@ describe('KnowledgeService — a source naming an adapter that is not mounted', 
     }
   });
 });
+
+/**
+ * [ADR-0161 K4 ◆] A source that names no `adapter` binds to the deployment's
+ * adapter — the store the runtime marked when it mounted it
+ * (`deploymentAdapter`) — else to the only adapter registered. Several
+ * registered and none the deployment's: refused at registration, naming them.
+ */
+describe('KnowledgeService — a source that names no adapter (the deployment\'s store)', () => {
+  const ec = { positions: [], permissions: [], isSystem: true };
+  /** `objectSource` with its `adapter` left out, as an author may now write it. */
+  function unnamed(id: string, object = 'task'): KnowledgeSource {
+    const { adapter: _omitted, ...source } = objectSource(id, object);
+    return source as KnowledgeSource;
+  }
+
+  it('binds to the deployment\'s store when the runtime marked one, beside an adapter application code registered', async () => {
+    const deployment = makeAdapter('turso');
+    const app = makeAdapter('memory');
+    const svc = new KnowledgeService({ deploymentAdapter: 'turso' });
+    svc.registerAdapter('memory', app);
+    svc.registerAdapter('turso', deployment);
+    svc.registerSource(unnamed('s1'));
+    expect(svc.adapterIdFor(svc.getSource('s1')!)).toBe('turso');
+    await svc.search('q', { sourceIds: ['s1'], executionContext: ec });
+    expect(deployment.searchSpy).toHaveBeenCalledOnce();
+    expect(app.searchSpy).not.toHaveBeenCalled();
+    await svc.handleRecordUpsert('task', { id: 'r1', title: 'T', notes: 'N' });
+    expect(deployment.upsertSpy).toHaveBeenCalledOnce();
+    expect(app.upsertSpy).not.toHaveBeenCalled();
+  });
+
+  it('a named adapter is kept as named, whatever the deployment\'s store is', async () => {
+    const deployment = makeAdapter('turso');
+    const app = makeAdapter('memory');
+    const svc = new KnowledgeService({ deploymentAdapter: 'turso' });
+    svc.registerAdapter('turso', deployment);
+    svc.registerAdapter('memory', app);
+    svc.registerSource(objectSource('s1', 'task', 'memory'));
+    await svc.search('q', { sourceIds: ['s1'], executionContext: ec });
+    expect(app.searchSpy).toHaveBeenCalledOnce();
+    expect(deployment.searchSpy).not.toHaveBeenCalled();
+  });
+
+  it('with no mark, binds to the only adapter registered — placed where it is used, so a store registering after the source is found', async () => {
+    const svc = new KnowledgeService();
+    // A source registered in code at init(), before any store's start().
+    svc.registerSource(unnamed('s1'));
+    const only = makeAdapter('memory');
+    svc.registerAdapter('memory', only);
+    await svc.search('q', { sourceIds: ['s1'], executionContext: ec });
+    expect(only.searchSpy).toHaveBeenCalledOnce();
+  });
+
+  it('two adapters registered by application code and none the deployment\'s: refused at registration, naming both', () => {
+    const svc = new KnowledgeService();
+    svc.registerAdapter('memory', makeAdapter('memory'));
+    svc.registerAdapter('pgvector', makeAdapter('pgvector'));
+    let refused: unknown;
+    try {
+      svc.registerSource(unnamed('s1'));
+    } catch (err) {
+      refused = err;
+    }
+    expect(refused).toMatchObject({ code: 'VALIDATION_ERROR', status: 400 });
+    expect(String((refused as Error).message)).toContain("source 's1' names no adapter, and 2 adapters are registered (memory, pgvector)");
+    expect(svc.getSource('s1')).toBeUndefined();
+    // The metadata door refuses the same way.
+    expect(() => svc.registerMetadataSource(unnamed('s2'))).toThrow(/Name one of 'memory', 'pgvector'/);
+    expect(svc.getSource('s2')).toBeUndefined();
+  });
+
+  it('two adapters registered after the source, none the deployment\'s: the search refuses it with the same code, naming both', async () => {
+    const svc = new KnowledgeService();
+    svc.registerSource(unnamed('s1'));
+    svc.registerAdapter('memory', makeAdapter('memory'));
+    svc.registerAdapter('pgvector', makeAdapter('pgvector'));
+    // The only source asked for cannot be searched, so the search answers its refusal.
+    const refused = await svc.search('q', { sourceIds: ['s1'], executionContext: ec }).catch((e: unknown) => e);
+    expect(refused).toMatchObject({ code: 'VALIDATION_ERROR', status: 400 });
+    expect(String((refused as Error).message)).toContain('2 adapters are registered (memory, pgvector)');
+    expect(svc.reportUnmountedAdapters()).toEqual(['s1']);
+  });
+
+  it('the deployment\'s store marked but not mounted, and nothing else: SERVICE_UNAVAILABLE naming the store', async () => {
+    const svc = new KnowledgeService({ deploymentAdapter: 'turso' });
+    svc.registerSource(unnamed('s1'));
+    expect(() => svc.adapterFor(svc.getSource('s1')!)).toThrow(/the deployment's store 'turso' is not mounted/);
+    const refused = await svc.search('q', { sourceIds: ['s1'], executionContext: ec }).catch((e: unknown) => e);
+    expect(refused).toMatchObject({ code: 'SERVICE_UNAVAILABLE', status: 503 });
+  });
+
+  it('the save of an unplaceable source is refused to its author, naming the adapters', async () => {
+    const svc = new KnowledgeService({ dataEngine: {} as IDataEngine });
+    svc.registerAdapter('memory', makeAdapter('memory'));
+    svc.registerAdapter('pgvector', makeAdapter('pgvector'));
+    const verdict = await svc.admitAuthoredSource(unnamed('s1'), { userId: 'u1', positions: [], permissions: [] } as never);
+    expect(verdict).toMatchObject({ admitted: false, code: 'VALIDATION_ERROR', status: 400 });
+    expect((verdict as { message: string }).message).toContain("Name one of 'memory', 'pgvector'");
+  });
+
+  it('KnowledgeServicePlugin hands its `deploymentAdapter` option to the service', async () => {
+    const kernel = new LiteKernel();
+    await kernel.use(new KnowledgeServicePlugin({ deploymentAdapter: 'turso', enableEventSync: false, buildAtBoot: false }));
+    await kernel.bootstrap();
+    try {
+      const svc = kernel.getService<KnowledgeService>('knowledge');
+      svc.registerAdapter('memory', makeAdapter('memory'));
+      svc.registerAdapter('turso', makeAdapter('turso'));
+      svc.registerSource(unnamed('s1'));
+      expect(svc.adapterIdFor(svc.getSource('s1')!)).toBe('turso');
+    } finally {
+      await kernel.shutdown();
+    }
+  });
+});

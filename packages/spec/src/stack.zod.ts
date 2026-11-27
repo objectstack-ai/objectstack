@@ -1232,7 +1232,7 @@ const STACK_DEFINITION_COLLECTIONS_SHAPE = {
    * that does neither serves no such tool, whatever packs it holds.
    */
   aiContexts: z.array(AiContextSchema).optional().describe('AI context packs — the material of one record handed to a model, read as the caller by get_record_context (ADR-0160). A host serves that tool only when it mounts the record-context service: the CLI mounts it where `requires` includes `record-context`, and a host that composes its own kernel lists `RecordContextServicePlugin` in `plugins`'),
-  knowledgeSources: z.array(KnowledgeSourceSchema).optional().describe('Knowledge sources — which object\'s records the knowledge service indexes, which fields are sent to the embedder as content, and which adapter holds the index (ADR-0161 K4). A host indexes them only when it mounts the knowledge service: the CLI mounts it where `requires` includes `knowledge`, and a host that composes its own kernel lists `KnowledgeServicePlugin` in `plugins`'),
+  knowledgeSources: z.array(KnowledgeSourceSchema).optional().describe('Knowledge sources — which object\'s records the knowledge service indexes, which fields are sent to the embedder as content, and which adapter holds the index (ADR-0161 K4). A host indexes them only when it mounts the knowledge service: the CLI mounts it, with the deployment\'s store, where the stack holds a source or `requires` includes `knowledge`, and a host that composes its own kernel lists `KnowledgeServicePlugin` in `plugins`'),
 
   /**
    * ObjectQL: Data Extensions
