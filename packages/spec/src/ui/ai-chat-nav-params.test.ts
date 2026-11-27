@@ -7,7 +7,7 @@
  */
 import { describe, it, expect } from 'vitest';
 import { z } from 'zod';
-import { AppSchema, NavigationItemSchema, ComponentNavItemSchema } from './app.zod';
+import { AppSchema, NavigationItemSchema } from './app.zod';
 import {
   AI_CHAT_COMPONENT_REF,
   AiChatNavParamsSchema,
@@ -87,12 +87,10 @@ describe('AiChatNavParamsSchema — the shape', () => {
 });
 
 describe('ai:chat params — judged at every navigation door', () => {
-  it('the component arm and the navigation union refuse bad params at `params.<key>`', () => {
-    for (const schema of [ComponentNavItemSchema, NavigationItemSchema]) {
-      const r = schema.safeParse(askEntry({ suggestions: ['a', 'b', 'c', 'd', 'e'] }));
-      expect(r.success).toBe(false);
-      expect(issuesOf(r).map((i) => i.path)).toContain('params.suggestions');
-    }
+  it('the navigation union refuses bad params at `params.<key>`', () => {
+    const r = NavigationItemSchema.safeParse(askEntry({ suggestions: ['a', 'b', 'c', 'd', 'e'] }));
+    expect(r.success).toBe(false);
+    expect(issuesOf(r).map((i) => i.path)).toContain('params.suggestions');
   });
 
   it('an app reports the issue at `navigation.<i>.params.<key>`', () => {

@@ -745,7 +745,7 @@ export const ComponentNavItemSchema = lazySchema(() => strictObject(navItemSurfa
   // OPEN by design: props are the component's own contract — except for
   // `componentRef: 'ai:chat'`, whose params `checkAiChatNavParams` judges.
   params: z.record(z.string(), z.unknown()).optional().describe("Props passed to the component. For `componentRef: 'ai:chat'` they are the AI inquiry page's copy, judged by `AiChatNavParamsSchema`."),
-}).superRefine(checkAiChatNavParams));
+}));
 
 /**
  * The name rule a `doc` target shares with the doc it names — `DocSchema.name`
@@ -1167,7 +1167,9 @@ export const NavigationItemSchema: z.ZodType<NavigationItem, NavigationItemInput
     // the array is widened for the discriminator-typed overload; runtime
     // discrimination works on all of them (asserted in app.test.ts).
   ] as unknown as readonly [z.ZodObject<z.ZodRawShape>, ...z.ZodObject<z.ZodRawShape>[]])
-    .superRefine(navItemVisibleDataNeedsDataSource) as unknown as z.ZodType<NavigationItem, NavigationItemInput>
+    .superRefine(navItemVisibleDataNeedsDataSource)
+    // `componentRef: 'ai:chat'` entries: params judged by `AiChatNavParamsSchema`.
+    .superRefine(checkAiChatNavParams) as unknown as z.ZodType<NavigationItem, NavigationItemInput>
 );
 
 /**

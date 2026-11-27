@@ -88,10 +88,11 @@ export type AiChatNavParams = z.infer<typeof AiChatNavParamsSchema>;
  * Judge an `ai:chat` component entry's `params` against
  * {@link AiChatNavParamsSchema}; every other entry is left alone.
  *
- * Mounted on the component arm of the navigation union
- * (`ComponentNavItemSchema`), so it reaches every navigation door —
+ * Mounted once, on `NavigationItemSchema` itself (beside
+ * `navItemVisibleDataNeedsDataSource`), so it reaches every navigation door —
  * `app.navigation`, `app.areas[].navigation`, every `children` array at any
- * depth, and a navigation contribution's `items`. Each issue is re-raised with
+ * depth, and a navigation contribution's `items`. The exported per-branch
+ * `ComponentNavItemSchema` does not chain it, the same posture as that rule. Each issue is re-raised with
  * `params` prefixed to its path, so the author reads
  * `navigation.<i>.params.<key>`.
  *
