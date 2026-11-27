@@ -1429,8 +1429,10 @@ export const AUTHORING_RULES: readonly AuthoringRule[] = [
     // write reaches `validateObjectReferences` alone (an action's `objectName`,
     // the Seeds and actions family's binding line) and no parser loads —
     // `runtime-lazy-deps.test.ts` gates an action write carrying a body to prove
-    // it. `seed` joins for the same member (a seed dataset's `object`). `hook`
-    // stays out: no member judges a hook write.
+    // it. `seed` stays out: the save door already refuses a seed over an object
+    // nothing resolves (#34864), with the draft and publish-promotion carve-outs
+    // a snapshot of served objects cannot see. `hook` stays out: no member
+    // judges a hook write.
     // [#30023] `page` joins, NARROW by the same mechanism: a page write reaches
     // exactly `validateSortableFields`, the one member that declares `page`,
     // so a stored page sort naming a field the list door refuses
@@ -1438,7 +1440,7 @@ export const AUTHORING_RULES: readonly AuthoringRule[] = [
     // does not have, as `page-field-unknown`) is refused at publish rather
     // than at its first fetch. Every other member keeps its declaration.
     surfaces: CLI_AND_RUNTIME,
-    runtimeTypes: ['flow', 'view', 'object', 'dataset', 'report', 'page', 'seed', 'action'],
+    runtimeTypes: ['flow', 'view', 'object', 'dataset', 'report', 'page', 'action'],
     run: (stack, ctx) => validateReferenceIntegrity(stack, ctx),
   },
   // ADR-0078 / #5068 — the SDUI component-props gate. `PageComponent.properties`

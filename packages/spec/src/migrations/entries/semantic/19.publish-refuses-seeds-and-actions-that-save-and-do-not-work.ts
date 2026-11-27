@@ -16,7 +16,8 @@ export const entry: SemanticMigration = {
     + 'platform injects on it (`seed-record-unknown-field`); a seed dataset, a flow `get_record` / `create_record` / '
     + '`update_record` / `delete_record` / object-form `screen` node, or a standalone action bound to an object that '
     + 'does not exist (`object-reference-unknown`, a warning `object-reference-unregistered-platform` for a '
-    + 'platform-prefixed name no known package registers); an L2 action body that calls a `ctx.api` write without '
+    + 'platform-prefixed name no known package registers; the seed binding on the CLI only, because at the publish '
+    + 'door the save door already refuses a seed over an unknown object); an L2 action body that calls a `ctx.api` write without '
     + '`api.write` in its `body.capabilities` (`action-body-write-capability-undeclared`)',
   replacement:
     'Spell the seed key as the field it means, declare the field, or drop the key; point the binding at an object the '

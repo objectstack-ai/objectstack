@@ -534,20 +534,16 @@ describe('[#35143] validateObjectReferences — the object a seed, a flow node o
     const objectRefErrors = (r: { errors: Array<{ rule: string; path: string }> }) =>
       r.errors.filter((e) => e.rule === OBJECT_REFERENCE_UNKNOWN).map((e) => e.path);
 
-    it('a `seed` write over an object the deployment does not serve is refused; over a served one it passes', () => {
-      const refused = runRuntimeAuthoringRules({
+    it('a `seed` write does not run the ladder: the save door owns a seed over an unknown object (#34864)', () => {
+      // The save door refuses it with the draft and publish-promotion carve-outs
+      // a snapshot of served objects cannot see, so the member stays off `seed`.
+      const result = runRuntimeAuthoringRules({
         type: 'seed',
         item: { object: 'crm_led', externalId: 'name', records: [{ name: 'a' }] },
         context: { objects },
       });
-      expect(objectRefErrors(refused)).toEqual(['data[0].object']);
-      const passed = runRuntimeAuthoringRules({
-        type: 'seed',
-        item: { object: 'crm_lead', externalId: 'name', records: [{ name: 'a' }] },
-        context: { objects },
-      });
-      expect(passed.errors).toEqual([]);
-      expect(passed.rulesRun).toContain('validateReferenceIntegrity');
+      expect(objectRefErrors(result)).toEqual([]);
+      expect(result.rulesRun).not.toContain('validateReferenceIntegrity');
     });
 
     it('an `action` write bound to an object the deployment does not serve is refused; bound to a served one it passes', () => {
@@ -559,6 +555,18 @@ describe('[#35143] validateObjectReferences — the object a seed, a flow node o
         });
       expect(objectRefErrors(write('crm_laed'))).toEqual(['actions[0].objectName']);
       expect(write('crm_lead').errors).toEqual([]);
+    });
+
+    it('an empty object set with no closure is no universe, so no verdict; under a closure it is one (#24668, #24563)', () => {
+      const write = (packageScope?: { packageId: string; dependencies: string[] }) =>
+        runRuntimeAuthoringRules({
+          type: 'action',
+          item: { name: 'go', label: 'Go', objectName: 'crm_lead', type: 'script', locations: ['record_header'], body: { language: 'js', source: 'return 1;' } },
+          context: { objects: [] },
+          ...(packageScope ? { packageScope } : {}),
+        });
+      expect(objectRefErrors(write())).toEqual([]);
+      expect(objectRefErrors(write({ packageId: 'com.acme.ext', dependencies: [] }))).toEqual(['actions[0].objectName']);
     });
 
     it('an `action` saved into a package is judged against its closure: another package\'s object resolves only once declared', () => {

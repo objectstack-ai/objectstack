@@ -506,8 +506,8 @@ orthogonal to both, and no cell here can carry it; it is written out in
 | Filter placeholder resolvability (#3574) | ✓ | ✓ | ✓ | — |
 | Ordering comparands naming a date-range preset — `last_30_days` in a `>=` position (#8793) | ✓ | ✓ | ✓ | ✓ᵈᵛᵒᵖᶠʳ |
 | Empty filter combinators — `$and: []`, `$or: []`, `$not: {}` (#5330) | ✓ | ✓ | ✓ | ✓ᶠʳ |
-| Object & action name references (#3583) — and the object a seed dataset, a flow `get_record` / `create_record` / `update_record` / `delete_record` / object-form `screen` node or a standalone action is bound to (`object-reference-unknown`, #35143) | ✓ | ✓ | ✓ | ✓ᶠᵈᵗˢᵃᶜ |
-| Reference integrity — flow node writes, template paths, read-only writes (#3583); at the publish door each write type runs only the members that declare it, and the flow members run on `flow` alone (#9313) | ✓ | ✓ | ✓ | ✓ᶠᵛᵒᵈᵗʳᵖˢᵃᶜ |
+| Object & action name references (#3583) — and the object a seed dataset, a flow `get_record` / `create_record` / `update_record` / `delete_record` / object-form `screen` node or a standalone action is bound to (`object-reference-unknown`, #35143); at the publish door a seed over an unknown object is the save door's own refusal (#34864) | ✓ | ✓ | ✓ | ✓ᶠᵈᵗᵃᶜ |
+| Reference integrity — flow node writes, template paths, read-only writes (#3583); at the publish door each write type runs only the members that declare it, and the flow members run on `flow` alone (#9313) | ✓ | ✓ | ✓ | ✓ᶠᵛᵒᵈᵗʳᵖᵃᶜ |
 | List-view field members — a list view's `sort` (a `sortable: false` field, a `formula`, an unknown name: `sort-field-unsortable`), its `searchableFields` (`searchable-field-unknown`) and its field references, columns, filter keys, grouping and the board bindings (`list-view-field-unknown`); the row merges three members, so its codes follow no one rule's order, and the `page` door runs the sort member only (#9313, #15495, #30095) | ✓ | ✓ | ✓ | ✓ᶠᵛᵒᵖ |
 | Page-component field bindings (#3583) | ✓ | ✓ | ✓ | ✓ᶠ |
 | React page block field bindings — §10 (#4340) | ✓ | ✓ | ✓ | ✓ᶠ |

@@ -569,9 +569,10 @@ export function validateObjectReferences(
   //
   //  - a seed dataset's `object`. `defineStack` refuses an unprefixed miss
   //    already, but answers a platform-prefixed name by its prefix alone
-  //    (`isPlatformObjectName`), so `sys_nothing_here` built clean; and a
-  //    `seed` saved at the runtime publish door was judged by nothing. The
-  //    seed load looks the object up, finds none and loads no record of it.
+  //    (`isPlatformObjectName`), so `sys_nothing_here` built clean. The seed
+  //    load looks the object up, finds none and loads no record of it. This
+  //    site is the CLI's: at the runtime `seed` door the save door's own
+  //    refusal (#34864) answers it, so the member does not run there.
   //  - a flow node's `config.objectName` — `get_record`, `create_record`,
   //    `update_record`, `delete_record`, and a `screen` that renders an
   //    object's form. Nothing resolved it at all: the step reaches the engine
@@ -595,7 +596,14 @@ export function validateObjectReferences(
     const n = strName(ext.extend);
     if (n) extended.add(n);
   }
+  // An empty object set with no closure in force is not a verdict, as at the
+  // list-view member (#24668): no deployment serves zero objects, so a runtime
+  // host that hands none over supplied no universe, and an app that declares
+  // none binds objects its dependencies own. Under a stated closure an empty
+  // set is still a verdict (#24563): every binding is then outside it.
+  const noUniverse = resolvable.size === 0 && !closure;
   const checkBound = (target: string | undefined, where: string, path: string, subject: string) => {
+    if (noUniverse) return;
     const name = strName(target);
     if (name && extended.has(name)) return;
     check(name, where, path, subject);
