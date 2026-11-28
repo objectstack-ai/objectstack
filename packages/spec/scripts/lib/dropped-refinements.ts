@@ -109,8 +109,27 @@ export const DROPPED_REFINEMENTS_BASELINE_FILE = 'dropped-refinements.baseline.j
  */
 export { CUSTOM_CHECK_KIND };
 
-/** How deep the graph walk goes before it stops descending. */
-const MAX_DEPTH = 14;
+/**
+ * How many `lazySchema()` Proxy layers `identityOf` unwraps. A bound on a
+ * prototype chain, not on the graph walk — the walk has no depth cap at all.
+ */
+const MAX_PROXY_HOPS = 14;
+
+/**
+ * The depth at which the walk stops trusting itself and THROWS.
+ *
+ * ⛔ Not a cap. The walk used to stop descending at 14 hops and say nothing, so
+ * a refinement nested deeper held no ledger row while the census printed "all
+ * declared" — measured on `api/InstalledPackageAtEitherStage`, whose
+ * `flows.records.fields.valueType` leaf sits past hop 14 behind an `options[1]`
+ * edge. Termination is the identity-keyed `visited` set's job: every node is
+ * queued at most once per export, so a finite graph ends on its own however
+ * deep it nests. A path this long means that guarantee failed — a `lazy`
+ * getter building a FRESH node on every call, say — and the only honest answer
+ * then is a refusal naming where it happened, never a truncated census that
+ * reads as complete.
+ */
+export const RUNAWAY_WALK_DEPTH = 256;
 
 /** One node that carries at least one refinement, and what became of it. */
 export interface RefinementSite {
@@ -464,7 +483,7 @@ function readablePath(raw: string): string {
 function identityOf(schema: z.ZodType): unknown {
   let internals = (schema as unknown as { _zod?: object })._zod;
   if (!internals || typeof internals !== 'object') return schema;
-  for (let hop = 0; hop < MAX_DEPTH; hop += 1) {
+  for (let hop = 0; hop < MAX_PROXY_HOPS; hop += 1) {
     const proto = Object.getPrototypeOf(internals) as object | null;
     if (!proto || proto === Object.prototype) break;
     if (!Object.prototype.hasOwnProperty.call(proto, 'def')) break;
@@ -475,6 +494,9 @@ function identityOf(schema: z.ZodType): unknown {
 
 /**
  * Walk one published schema and classify every refinement under it.
+ *
+ * The walk is UNBOUNDED in depth: the visited set is what terminates it (see
+ * {@link RUNAWAY_WALK_DEPTH} for what happens when it does not).
  *
  * The visited set is per export and holds node IDENTITIES, so a shared
  * sub-schema is reported once per published file that reaches it — which is the
@@ -512,7 +534,15 @@ export function collectDroppedRefinements(defKey: string, root: z.ZodType): Refi
       else undecidable.push(site);
     }
 
-    if (depth >= MAX_DEPTH) continue;
+    if (depth >= RUNAWAY_WALK_DEPTH) {
+      throw new Error(
+        `dropped-refinements census: the walk under ${defKey} reached depth ${depth} at ` +
+          `"${readablePath(path) || '<root>'}" without its identity guard closing it. The census ` +
+          `refuses rather than truncate: a truncated walk would print "all declared" over sites ` +
+          `it never reached. A node reached this deep is almost certainly a \`lazy\` getter ` +
+          `that builds a new schema instance on every call — return one cached instance instead.`,
+      );
+    }
     for (const child of labelledChildren(schema)) {
       if (visited.has(identityOf(child.schema))) continue;
       queue.push({

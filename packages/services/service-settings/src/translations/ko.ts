@@ -563,9 +563,6 @@ export const ko: PlatformTranslationData = {
       keys: {
         chunk_target: { label: '목표 청크 크기(자)', help: '지식 서비스가 문서를 나눌 때 구절 하나의 최대 문자 수입니다. 지식 소스 자체에 설정한 크기가 우선하며, 임베딩 모델의 입력 한도에 따라 더 작아질 수 있습니다.' },
       },
-      actions: {
-        test: { label: '연결 테스트' },
-      },
     },
     lifecycle: {
       title: '데이터 수명 주기',

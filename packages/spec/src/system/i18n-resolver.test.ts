@@ -3959,8 +3959,8 @@ describe('toLocaleDescriptors', () => {
     // The SUBSTANCE pin: producer output vs the DECLARED shape, both halves.
     //
     // `GetLocalesResponseSchema` described `label` as "Display name of the
-    // locale" while this helper — the ONLY producer, shared by the
-    // dispatcher's `/i18n` domain and service-i18n's route — echoed the code
+    // locale" while this helper — the ONLY producer, used by the runtime
+    // dispatcher's `/i18n` domain, which mounts the route — echoed the code
     // back. Declared ≠ enforced, one field wide (ADR-0049), and it misleads in
     // exactly one direction: a client that trusts the describe renders `th`
     // where `ไทย` belongs. objectui#4039 hit that and routed around the field
@@ -3997,9 +3997,9 @@ describe('toLocaleDescriptors', () => {
 
 describe('normalizeSupportedLocales — the declared supportedLocales narrow the advertised set', () => {
   // The narrowing rule both providers of the `i18n` slot share. Held here,
-  // next to `toLocaleDescriptors`, because both of them can be the thing
-  // mounting `GET /i18n/locales` and a second copy is how that route came to
-  // answer in two shapes before.
+  // next to `toLocaleDescriptors`, because either can be the provider behind
+  // `GET /i18n/locales` (the runtime dispatcher mounts it), and a second
+  // copy is how that route came to answer in two shapes before.
 
   it('returns the declared codes in DECLARED order', () => {
     // Order is authored, so it is preserved: a picker rendering the app's own

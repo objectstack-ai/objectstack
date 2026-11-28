@@ -14,11 +14,21 @@
     {
       "id": 2,
       "prompt": "Our copilot should use Anthropic with a low temperature (0.3) and cap responses at 2000 tokens. Where do these settings go in the metadata?",
-      "expected_output": "Places sampling under the agent's `model` block (`AIModelConfigSchema`): `temperature: 0.3` (0–2, outside is a parse error) and `maxTokens: 2000`, and states that there is no top-level `temperature` / `maxTokens` on an agent. Writes no provider key: `provider` is retired in protocol 19 and a parse error, because the deployment's AI settings choose the provider, not the agent. To run on an Anthropic model, names that model in the free-string `model` (the deployment resolves the name among the providers turned on) or omits it to run on the host's default model; turning Anthropic on is done in the deployment's AI settings, not in metadata.",
+      "expected_output": "Places sampling under the agent's `model` block (`AIModelConfigSchema`): `temperature: 0.3` (0–2, outside is a parse error) and `maxTokens: 2000`, and states that there is no top-level `temperature` / `maxTokens` on an agent. Writes no provider key: `provider` is retired in protocol 19 and refused, because the deployment's AI settings choose the provider, not the agent. To run on an Anthropic model, names that model in the free-string `model` (the deployment resolves the name among the providers turned on) or omits it to run on the host's default model; turning Anthropic on is done in the deployment's AI settings, not in metadata.",
       "files": [],
       "assertions": {
         "must_contain": ["temperature", "maxTokens", "deployment"],
-        "must_not_contain": ["provider: 'anthropic',"]
+        "must_not_contain": [
+          "provider: 'anthropic',",
+          "provider: \"anthropic\",",
+          "provider: 'anthropic'\n",
+          "provider: \"anthropic\"\n",
+          "provider: 'anthropic' }",
+          "provider: \"anthropic\" }",
+          "provider: 'anthropic'}",
+          "provider: \"anthropic\"}",
+          "\"provider\": \"anthropic\""
+        ]
       }
     },
     {
@@ -58,7 +68,7 @@
       "expected_output": "Does not decide on the token: the script may list the queue (`client.ai.pendingActions.list({ status: 'pending' })`), but approving or rejecting an item is the person's own act, done in the app on their signed-in session by the person the assistant call ran as. An API key or token is refused on the decide door, even the person's own, and so is an AI identity; another user's `ai:approve` does not decide the item, and the model's own confirmation does not count. The script reports or notifies the stale items instead; where a second person must approve the write, that is the approvals engine's `held` outcome.",
       "files": [],
       "assertions": {
-        "must_contain_any": [["ai:approve", "signed-in session", "refused", "never decides"]],
+        "must_contain_any": [["ai:approve", "signed-in session", "refused", "refuses", "never decides"]],
         "must_not_contain": ["pendingActions.approve("]
       }
     },
@@ -68,7 +78,8 @@
       "expected_output": "Stop sending `confirm`: `run_action` and `resume_run` refuse any call that carries the member, on every action, because the agent cannot confirm for the person. Call `run_action({ actionName: 'crm_close_deal', recordId })` without it. Where the host registers a pending-confirmation service, the answer is `status: 'pending_confirmation'` with a `pendingId` and a message: that is a success, not an error, and nothing has run. Relay the message, tell the user to approve it in the app, and do not retry. On a host with no such service (the open-source build ships none) the call is refused 428 `ACTION_CONFIRMATION_REQUIRED` with `details.reason: 'no_confirmation_service'`, and the person performs the action in the app. The two delete tools still take the member.",
       "files": [],
       "assertions": {
-        "must_contain": ["pending_confirmation", "pendingId", "no_confirmation_service", "do not retry"],
+        "must_contain": ["pending_confirmation", "pendingId", "no_confirmation_service"],
+        "must_contain_any": [["do not retry", "Do not retry", "don't retry", "Don't retry"]],
         "must_not_contain": ["recordId, confirm: true", "then retry with"]
       }
     },
@@ -136,7 +147,7 @@
     {
       "id": 14,
       "prompt": "Our app ships no knowledge source in its package: admins will create them at run time in Studio, and an agent of ours saves them over MCP. What does `objectstack.config.ts` need so those sources are indexed and searchable? Answer from what is stated here.",
-      "expected_output": "Adds `requires: ['knowledge']` to the stack: a source the app ships in `knowledgeSources` mounts the knowledge service and its store by itself, but an app that ships none and authors its sources at run time must list the token, or a saved source is never indexed and no search tool serves it. Names no `adapter` requirement (the deployment's store is used) and adds no `knowledgeSources` entry the prompt did not ask for. Says that creating or changing a source at run time needs `manage_knowledge_sources` beside `manage_metadata`.",
+      "expected_output": "Adds `requires: ['knowledge']` to the stack: a source the app ships in `knowledgeSources` mounts the knowledge service and its store by itself, but an app that ships none and authors its sources at run time must list the token, or a run-time save is refused (`503 SERVICE_UNAVAILABLE`, nothing written) until the stack declares it and the server restarts. Names no `adapter` requirement (the deployment's store is used) and adds no `knowledgeSources` entry the prompt did not ask for. Says that creating or changing a source at run time needs `manage_knowledge_sources` beside `manage_metadata`.",
       "files": [],
       "assertions": {
         "must_contain_any": [["requires: ['knowledge']", "requires: [\"knowledge\"]"]],

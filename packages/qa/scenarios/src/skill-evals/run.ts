@@ -8,7 +8,9 @@
  * The login guard is the scenario runner's, imported and never copied
  * (`subscriptionOnlyEnv`, `assertSubscriptionLogin`): a round refuses to start
  * while `ANTHROPIC_API_KEY` or `ANTHROPIC_AUTH_TOKEN` is set or the CLI reports
- * an API-key login, and every turn is spawned with neither variable.
+ * an API-key login, and every turn is spawned with neither variable. Nor is a
+ * turn spawned with the host's memory variables (`CLAUDE_MEMORY_ENV`): a round
+ * run inside a project container never reads that project's memory.
  *
  * What a turn's record can say:
  *
@@ -36,7 +38,7 @@ import { spawnSync } from 'node:child_process';
 import { mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 
-import { assertSubscriptionLogin, CLAUDE_EFFORT_ENV, effortLevelsFromHelp, subscriptionOnlyEnv } from '../runner/driver.js';
+import { assertSubscriptionLogin, CLAUDE_EFFORT_ENV, CLAUDE_MEMORY_ENV, effortLevelsFromHelp, subscriptionOnlyEnv } from '../runner/driver.js';
 import { runTurnProcess, type TurnProcessRun } from '../runner/drivers/process.js';
 import { parseStreamJson } from '../runner/transcript.js';
 import type { TurnProcess } from '../runner/transcript.js';
@@ -492,10 +494,15 @@ export function preflight(bin: string, env: NodeJS.ProcessEnv = process.env, run
   return { version: ver.stdout.trim(), authMethod };
 }
 
-/** A turn's environment: no API-billing variable, and no effort variable overriding `--effort`. */
+/**
+ * A turn's environment: no API-billing variable, no effort variable overriding
+ * `--effort`, and no memory variable pointing the turn at the host's memory
+ * store, so a turn sees only what its arm gives it.
+ */
 export function turnEnv(env: NodeJS.ProcessEnv = process.env): NodeJS.ProcessEnv {
   const out = subscriptionOnlyEnv(env);
   delete out[CLAUDE_EFFORT_ENV];
+  for (const k of CLAUDE_MEMORY_ENV) delete out[k];
   return out;
 }
 

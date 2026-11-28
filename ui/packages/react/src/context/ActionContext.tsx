@@ -13,13 +13,10 @@
  * Components can consume actions without creating their own runner instances.
  */
 
-import React, { createContext, useCallback, useContext, useMemo, useRef, useState } from 'react';
+import React, { createContext, useCallback, useContext, useMemo, useState } from 'react';
 import {
   ActionRunner,
-  isAskAiAction,
   subjectPermissionsOf,
-  type AssistantFocus,
-  type AssistantFocusHandler,
   type ActionContext as ActionCtx,
   type ActionDef,
   type ActionResult,
@@ -49,16 +46,6 @@ export interface ActionProviderProps {
   onParamCollection?: ParamCollectionHandler;
   /** Custom result-dialog handler — show one-shot reveal of API response after success */
   onResultDialog?: ResultDialogHandler;
-  /**
-   * The host's in-app assistant, for `type: 'ask_ai'` actions (ADR-0160 D7):
-   * pin the record as the conversation's focus and expand the assistant. Pass
-   * it only where the assistant's pin control is drawn (the assistant surface
-   * on, and the AI service advertising that it honours a focus). Without it an
-   * `ask_ai` action is absent from every surface under this provider that
-   * asks {@link useDrawsAction}. It may come and go between renders: the
-   * catalog that decides it loads after the first one.
-   */
-  onAskAi?: AssistantFocusHandler;
   /** Pre-registered custom action handlers */
   handlers?: Record<string, (action: ActionDef, ctx: ActionCtx) => Promise<ActionResult>>;
 }
@@ -78,15 +65,6 @@ interface ActionContextValue {
   runner: ActionRunner;
   /** Update context data */
   updateContext: (ctx: Partial<ActionCtx>) => void;
-  /**
-   * Whether a surface draws `action` at all under this provider — `false` only
-   * for an `ask_ai` action where the host gave no in-app assistant
-   * (ADR-0160 D7). Changes identity when that answer can change, so a surface
-   * that memoises its filtered list on it re-filters. Optional so a
-   * hand-built context value (a test, a routed wrapper) need not carry it:
-   * {@link useDrawsAction} falls back to the runner's own answer.
-   */
-  drawsAction?: (action: unknown) => boolean;
 }
 
 export const ActionCtxReact = createContext<ActionContextValue | null>(null);
@@ -115,7 +93,6 @@ export const ActionProvider: React.FC<ActionProviderProps> = ({
   onNavigate,
   onParamCollection,
   onResultDialog,
-  onAskAi,
   handlers,
 }) => {
   const [loading, setLoading] = useState(false);
@@ -160,28 +137,6 @@ export const ActionProvider: React.FC<ActionProviderProps> = ({
     return r;
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [JSON.stringify(context)]);
-
-  // ADR-0160 D7 — the in-app assistant `ask_ai` hands its record to. Unlike the
-  // handlers above it is (re)installed on every change, not only when the
-  // runner is built: whether the host has an assistant is decided by a catalog
-  // that resolves after the first render, and the answer is what draws or
-  // hides every `ask_ai` action under this provider. Bound during render, so
-  // no child renders against the previous answer; the runner calls the latest
-  // `onAskAi` through a ref, so a new function identity alone changes nothing.
-  const askAiRef = useRef(onAskAi);
-  askAiRef.current = onAskAi;
-  const hasAskAi = onAskAi !== undefined;
-  useMemo(() => {
-    runner.setAssistantFocusHandler(
-      hasAskAi ? (focus: AssistantFocus) => { askAiRef.current?.(focus); } : null,
-    );
-  }, [runner, hasAskAi]);
-  const drawsAction = useCallback(
-    (action: unknown) => runner.drawsAction(action),
-    // `hasAskAi` is the answer's input the runner does not change identity on.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    [runner, hasAskAi],
-  );
 
   // The acting subject the surrounding predicate scope binds as `current_user`
   // (objectui#11242): the ONE object `ExpressionProvider` publishes under
@@ -277,8 +232,8 @@ export const ActionProvider: React.FC<ActionProviderProps> = ({
   );
 
   const value = useMemo<ActionContextValue>(
-    () => ({ execute, executeChain, loading, error, result, runner, updateContext, drawsAction }),
-    [execute, executeChain, loading, error, result, runner, updateContext, drawsAction],
+    () => ({ execute, executeChain, loading, error, result, runner, updateContext }),
+    [execute, executeChain, loading, error, result, runner, updateContext],
   );
 
   return (
@@ -312,28 +267,6 @@ export function useAction(): ActionContextValue {
     };
   }
   return ctx;
-}
-
-/** No provider: no host assistant, so only `ask_ai` is not drawn. */
-const drawsWithoutProvider = (action: unknown): boolean => !isAskAiAction(action);
-
-/**
- * `(action) => boolean`: whether a surface draws `action` at all under the
- * nearest `ActionProvider` — `false` only for a `type: 'ask_ai'` action where
- * that provider has no in-app assistant (ADR-0160 D7: absent, not disabled).
- * A surface asks it beside `isActionSwitchedOff` and the capability gate, on
- * the same list. The answer reads the provider whose runner would execute the
- * action, so a drawn `ask_ai` button is one a click can serve.
- */
-export function useDrawsAction(): (action: unknown) => boolean {
-  const ctx = useContext(ActionCtxReact);
-  const runner = ctx?.runner;
-  const own = ctx?.drawsAction;
-  const fromRunner = useCallback(
-    (action: unknown) => (runner ? runner.drawsAction(action) : drawsWithoutProvider(action)),
-    [runner],
-  );
-  return own ?? fromRunner;
 }
 
 /**

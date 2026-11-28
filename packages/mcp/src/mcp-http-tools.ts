@@ -120,6 +120,7 @@ import type { AuthoredExpressionSite } from '@objectstack/lint';
 // the `packages/spec` campaign standardised on — already carried in
 // `api-surface/shared.json`, so reusing it adds nothing to any public surface.
 import { strictUnknownKeyError } from '@objectstack/spec/shared';
+import { MAX_ECHOED_KEYS, echoedKey } from './argument-echo.js';
 // [#27411] The input schemas the save/build gate parses an expression slot
 // with. `validate_expression` parses with the SAME schema before it runs the
 // formula checks, so a blank source gets the gate's verdict and its published
@@ -3167,6 +3168,27 @@ function withoutHistorySentence(map: z.core.$ZodErrorMap): z.core.$ZodErrorMap {
 }
 
 /**
+ * [#37411] Name a rejected object's unknown keys bounded and sanitised
+ * (`argument-echo.ts`): the factory is handed at most `MAX_ECHOED_KEYS` of
+ * them, each through {@link echoedKey}, and the rest are counted in one
+ * closing sentence. The keys the factory sees are the ones it renders AND the
+ * ones it looks up in the alias table, so a plain misspelling (`sort`) still
+ * gets its rename advice: {@link echoedKey} hands such a key back unchanged.
+ * Only the rendering is bounded; the issue's own `keys` are not edited.
+ */
+function withBoundedKeyEcho(map: z.core.$ZodErrorMap): z.core.$ZodErrorMap {
+  return (issue) => {
+    if (issue.code !== 'unrecognized_keys') return map(issue);
+    const keys: readonly string[] = issue.keys ?? [];
+    const shown = keys.slice(0, MAX_ECHOED_KEYS).map(echoedKey);
+    const answer = map({ ...issue, keys: shown });
+    const notShown = keys.length - shown.length;
+    if (typeof answer !== 'string' || notShown <= 0) return answer;
+    return `${answer} ${notShown} more unrecognized key(s) not shown.`;
+  };
+}
+
+/**
  * Close an MCP tool's argument shape against keys it does not declare.
  *
  * ## Why the shape has to become a real schema
@@ -3249,7 +3271,7 @@ function strictToolInput<T extends z.ZodRawShape>(
 ) {
   return z
     .object(shape, {
-      error: withoutHistorySentence(strictUnknownKeyError({
+      error: withBoundedKeyEcho(withoutHistorySentence(strictUnknownKeyError({
         surface: options.surface,
         knownKeys: Object.keys(shape),
         aliases: options.aliases,
@@ -3262,7 +3284,7 @@ function strictToolInput<T extends z.ZodRawShape>(
         // HERE opt out; the dataset pair takes spec `strictObject` schemas and
         // keeps the spec refusal.
         retiredKeyUpgradeGuide: false,
-      })),
+      }))),
     })
     .strict();
 }

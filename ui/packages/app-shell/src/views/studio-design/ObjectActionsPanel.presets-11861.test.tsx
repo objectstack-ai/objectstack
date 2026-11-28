@@ -343,13 +343,6 @@ describe('the preset module’s written-out tables agree with the spec (objectui
       // A `url` target is a path since `@objectstack/spec` 18, which refuses a bare
       // relative one at `target` (objectui#12030); every other type takes a name.
       const target = type === 'url' ? '/x_target' : 'x_target';
-      // `ask_ai` takes no target at all (ADR-0160 D7): one is refused, and the
-      // editor holds nothing for it, because there is no input to fill.
-      if (type === 'ask_ai') {
-        expect(refusedAt({ ...seed, type, target }, 'target')).toBe(true);
-        expect(heldInputKey({ ...seed, type })).toBeNull();
-        return;
-      }
       expect(refusedAt({ ...seed, type, target }, 'target')).toBe(false);
       expect(heldInputKey({ ...seed, type, target })).toBeNull();
     },

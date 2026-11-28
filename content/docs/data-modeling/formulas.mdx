@@ -562,13 +562,17 @@ as a `YYYY-MM-DD` string, and CEL treats a string and a timestamp as unequal —
 the natural "is it due today" predicate used to silently return `false`. The
 engine now rewrites temporal `==` / `!=` comparisons (coercing the field operand
 with `date(...)`), so `record.due_date == today()` matches on the calendar day.
-The counterpart may be a temporal **call** (`today()`, `now()`, `daysFromNow()`,
-`daysAgo()`) or a **binding that holds a `Date`** — which covers the
+The counterpart may be any **call that returns a timestamp** (`today()`, `now()`,
+`daysFromNow()`, `daysAgo()`, `addDays()`, `addMonths()`, `date()`, `datetime()`,
+`timestamp()`, `addWorkingDays()`, `addWorkingHours()`; #38135) or a **binding
+that holds a `Date`** — which covers the
 mixed-provenance comparison `record.due == previous.due`, where `previous`
 arrives from the driver as a `Date` while `record` arrives from a JSON payload as
 a `YYYY-MM-DD` string (#7168). This applies to formulas, defaults, validation
-rules, and hook/flow conditions. Ordering (`< > <= >=`) and string equality
-(`record.d == "2026-06-20"`) were always fine. The coercion is deliberately
+rules, and hook/flow conditions. Ordering (`< > <= >=`) against any of those
+calls converts the field the same way, so `record.due_date < addDays(today(), 30)`
+answers what `record.due_date < daysFromNow(30)` answers; string equality
+(`record.d == "2026-06-20"`) was always fine. The coercion is deliberately
 narrow — it requires one side to be a real `Date` and the other an ISO-8601
 date/date-time string — so a non-date string compared against a `Date` still
 answers `false` instead of being coerced into a match. This is the read-side

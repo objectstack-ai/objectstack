@@ -352,6 +352,7 @@ export {
   detectSampleDataCleanup,
   detectPackageRemoval,
   detectPendingApproval,
+  extractDraftReview,
   chartsFromParts,
   chartAnswerParts,
   storedAnswerParts,
@@ -441,3 +442,9 @@ export type { QuestionCardProps, QuestionCardQuestion, QuestionCardOption } from
 // ChatbotEnhanced keeps a skipped question skipped per conversation in
 // localStorage under this prefix; a host's sign-out cleanup clears it.
 export { QUESTION_SKIP_STORAGE_PREFIX } from './chat/questionSkip';
+
+// The card that lists the drafts an ask turn saved (the `data-draft-review`
+// part), with Studio review links. `ChatbotEnhanced` draws it itself; the
+// reader is exported for hosts that render their own transcript.
+export { DraftReviewCard } from './chat/DraftReviewCard';
+export type { DraftReviewCardProps } from './chat/DraftReviewCard';

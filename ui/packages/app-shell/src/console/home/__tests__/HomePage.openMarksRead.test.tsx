@@ -86,7 +86,7 @@ vi.mock('../../../hooks/useFavorites', () => ({ useFavorites: () => ({ favorites
 // the AI surface whether to draw an app's `ai:chat` entry (objectstack#37833).
 vi.mock('../../../hooks/useAiSurface', () => ({
   resolveAiApiBase: () => '',
-  useAiSurfaceEnabled: () => ({ enabled: false, isLoading: false, buildServed: false, focusServed: false }),
+  useAiSurfaceEnabled: () => ({ enabled: false, isLoading: false, buildServed: false }),
 }));
 vi.mock('../../../views/metadata-admin/useMetadata', () => ({
   useMetadataClient: () => ({ listDrafts: async () => [] }),

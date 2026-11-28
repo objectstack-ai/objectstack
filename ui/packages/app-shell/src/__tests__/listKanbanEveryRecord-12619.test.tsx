@@ -35,7 +35,7 @@
  */
 import React from 'react';
 import { describe, it, expect, vi, afterEach } from 'vitest';
-import { act, cleanup, render, screen, waitFor, within } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import '@testing-library/jest-dom';
 import { ValueDataSource } from '@object-ui/core';
 import { ActionProvider, SchemaRendererProvider } from '@object-ui/react';
@@ -626,6 +626,233 @@ describe('a lookup-laned board under a list view counts and totals each whole la
     await waitFor(() => expect(screen.getByRole('group', { name: 'Cyan Corp' })).toBeInTheDocument());
     expect(within(lane('Cyan Corp')).getByText('Cards not loaded: 10')).toBeInTheDocument();
     expect(within(lane('Cyan Corp')).queryByText('No cards')).toBeNull();
+  });
+
+  /**
+   * objectstack#37516 — the "Uncategorized" lane past the page. Deals 60–69
+   * have no account, all past the first page: the lane read counts them under
+   * the empty key, and no card on the page draws the lane.
+   */
+  const NO_ACCOUNT_PAST_PAGE: Row[] = DEALS.map((d, i) => (i >= 60 ? { ...d, account: null } : d));
+  const laneNames = () => screen.queryAllByRole('group').map((g) => g.getAttribute('aria-label'));
+
+  it('a lane of records with no account, all past the page, is drawn last as "Uncategorized", counting its 10 records', async () => {
+    const ds = dealSource(true, NO_ACCOUNT_PAST_PAGE);
+    mountBoard(ds, BOARD_VIEW);
+
+    await onePageDrawn();
+    await waitFor(() => expect(screen.getByRole('group', { name: 'Uncategorized' })).toBeInTheDocument());
+    expect(laneBadge('Uncategorized')).toBe('10');
+    expect(within(lane('Uncategorized')).queryAllByRole('listitem')).toHaveLength(0);
+    expect(within(lane('Uncategorized')).getByText('Cards not loaded: 10')).toBeInTheDocument();
+    expect(laneNames().slice(-3)).toEqual(['acc-a', 'acc-b', 'Uncategorized']);
+  });
+
+  it('CONTROL: with two of them on the page, "Uncategorized" is drawn as before: its 2 cards, counting all 12', async () => {
+    const rows = DEALS.map((d, i) => (i >= 60 || i < 2 ? { ...d, account: null } : d));
+    mountBoard(dealSource(true, rows), BOARD_VIEW);
+
+    await waitFor(() => expect(cards()).toHaveLength(25));
+    await waitFor(() => expect(laneBadge('Uncategorized')).toBe('12'));
+    expect(within(lane('Uncategorized')).getAllByRole('listitem')).toHaveLength(2);
+    expect(laneNames().filter((name) => name === 'Uncategorized')).toHaveLength(1);
+  });
+
+  it.each([
+    ['has no grouped door', false],
+    ['refuses the read', 'refuse'],
+    ['cuts the read (hasMore)', 'cut'],
+  ] as const)('CONTROL: when the source %s, no "Uncategorized" lane is drawn from it', async (_, door) => {
+    const ds = dealSource(door, NO_ACCOUNT_PAST_PAGE);
+    mountBoard(ds, BOARD_VIEW);
+
+    await onePageDrawn();
+    if (door !== false) await waitFor(() => expect(ds.queryGroupHeaders).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(laneBadge('acc-a')).toBe('13+'));
+    expect(screen.queryByRole('group', { name: 'Uncategorized' })).toBeNull();
+  });
+
+  /**
+   * objectstack#37517 — a lane that draws fewer cards than the lane read counts
+   * loads the rest in place: "Load more" at its foot reads the lane's next
+   * records under the view's query (its filter AND the lane value, its order,
+   * its search), from right after the lane's cards on the page.
+   */
+  const loadMore = (title: string) => within(lane(title)).queryByRole('button', { name: 'Load more' });
+  /** The lane reads "Load more" sent: every `crm_deal` read that names a `$skip`. */
+  const laneReads = (ds: any) =>
+    ds.find.mock.calls.filter((call: any[]) => call[0] === DEAL && call[1] && '$skip' in call[1]).map((call: any[]) => call[1]);
+  const hostPageRead = (ds: any) =>
+    ds.find.mock.calls.find((call: any[]) => call[0] === DEAL && call[1] && !('$skip' in call[1]))![1];
+  const cardNames = (title: string) => within(lane(title)).queryAllByRole('listitem').map((card) => card.textContent);
+
+  it('a lane past the page loads its 10 cards in place, from its first record, and stops offering more', async () => {
+    const ds = dealSource();
+    mountBoard(ds, BOARD_VIEW);
+
+    await onePageDrawn();
+    await waitFor(() => expect(loadMore('Cyan Corp')).not.toBeNull());
+    // The lane still says what it has not loaded while it offers to load it.
+    expect(within(lane('Cyan Corp')).getByText('Cards not loaded: 10')).toBeInTheDocument();
+    expect(laneReads(ds)).toHaveLength(0);
+
+    fireEvent.click(loadMore('Cyan Corp')!);
+
+    // Drawn from its cards now, the lane is titled as the page's lanes are: by
+    // the record its cards reference, which this source does not expand, so by
+    // its key (`acc-c`), and in the same place.
+    await waitFor(() => expect(within(lane('acc-c')).getAllByRole('listitem')).toHaveLength(10));
+    expect(laneNames().slice(-3)).toEqual(['acc-a', 'acc-b', 'acc-c']);
+    expect(loadMore('acc-c')).toBeNull();
+    expect(laneBadge('acc-c')).toBe('10');
+    expect(within(lane('acc-c')).queryByText('Cards not loaded: 10')).toBeNull();
+    // The other lanes keep their page's cards.
+    expect(within(lane('acc-a')).getAllByRole('listitem')).toHaveLength(13);
+    expect(cards()).toHaveLength(35);
+    const reads = laneReads(ds);
+    expect(reads).toHaveLength(1);
+    expect(reads[0]).toMatchObject({ $skip: 0, $top: 50, $count: true });
+    expect(JSON.stringify(reads[0].$filter)).toContain('"account","=","acc-c"');
+    expect(reads[0].$orderby).toEqual(hostPageRead(ds).$orderby);
+  });
+
+  it('a lane on the page with 13 of its 30 cards loads the other 17 from its 14th record, none twice', async () => {
+    const ds = dealSource();
+    mountBoard(ds, BOARD_VIEW);
+
+    await onePageDrawn();
+    await waitFor(() => expect(loadMore('acc-a')).not.toBeNull());
+    expect(loadMore('acc-b')).not.toBeNull();
+
+    fireEvent.click(loadMore('acc-a')!);
+
+    await waitFor(() => expect(within(lane('acc-a')).getAllByRole('listitem')).toHaveLength(30));
+    expect(new Set(cardNames('acc-a')).size).toBe(30);
+    expect(loadMore('acc-a')).toBeNull();
+    expect(laneBadge('acc-a')).toBe('30');
+    // acc-b is untouched: its page's 12 and its "Load more".
+    expect(within(lane('acc-b')).getAllByRole('listitem')).toHaveLength(12);
+    expect(loadMore('acc-b')).not.toBeNull();
+    const reads = laneReads(ds);
+    expect(reads).toHaveLength(1);
+    expect(reads[0]).toMatchObject({ $skip: 13, $top: 50 });
+    expect(JSON.stringify(reads[0].$filter)).toContain('"account","=","acc-a"');
+  });
+
+  it('a page that repeats a card the lane already holds draws it once', async () => {
+    // A source whose lane read starts two records early, as a sort with ties
+    // may answer: deals 22 and 24 come back a second time.
+    const ds = dealSource();
+    const find = ds.find.getMockImplementation();
+    ds.find.mockImplementation((object: string, params: any) =>
+      find(object, params && '$skip' in params ? { ...params, $skip: Math.max(0, params.$skip - 2) } : params));
+    mountBoard(ds, BOARD_VIEW);
+
+    await onePageDrawn();
+    await waitFor(() => expect(loadMore('acc-a')).not.toBeNull());
+    fireEvent.click(loadMore('acc-a')!);
+
+    await waitFor(() => expect(laneReads(ds)).toHaveLength(1));
+    await waitFor(() => expect(within(lane('acc-a')).getAllByRole('listitem')).toHaveLength(30));
+    expect(new Set(cardNames('acc-a')).size).toBe(30);
+    expect(laneBadge('acc-a')).toBe('30');
+  });
+
+  it('reads under the view\'s filter, the one its own window was fetched with', async () => {
+    const ds = dealSource();
+    mountBoard(ds, { ...BOARD_VIEW, filter: [{ field: 'amount', operator: 'greater_than', value: 9 }] });
+
+    await waitFor(() => expect(cards()).toHaveLength(25));
+    await waitFor(() => expect(loadMore('acc-a')).not.toBeNull());
+    fireEvent.click(loadMore('acc-a')!);
+
+    // 10, 12, … 58: 25 records, 13 of them on the page.
+    await waitFor(() => expect(within(lane('acc-a')).getAllByRole('listitem')).toHaveLength(25));
+    expect(loadMore('acc-a')).toBeNull();
+    const read = laneReads(ds)[0];
+    expect(read.$skip).toBe(13);
+    expect(JSON.stringify(read.$filter)).toContain('amount');
+    expect(JSON.stringify(read.$filter)).toContain('"account","=","acc-a"');
+  });
+
+  it('the "Uncategorized" lane past the page loads its records with no account', async () => {
+    const ds = dealSource(true, NO_ACCOUNT_PAST_PAGE);
+    mountBoard(ds, BOARD_VIEW);
+
+    await onePageDrawn();
+    await waitFor(() => expect(loadMore('Uncategorized')).not.toBeNull());
+    expect(within(lane('Uncategorized')).getByText('Cards not loaded: 10')).toBeInTheDocument();
+    fireEvent.click(loadMore('Uncategorized')!);
+
+    await waitFor(() => expect(within(lane('Uncategorized')).getAllByRole('listitem')).toHaveLength(10));
+    expect(loadMore('Uncategorized')).toBeNull();
+    expect(laneBadge('Uncategorized')).toBe('10');
+    const read = laneReads(ds)[0];
+    expect(read.$skip).toBe(0);
+    expect(JSON.stringify(read.$filter)).toContain('"account","is_null"');
+  });
+
+  it('the cards a lane loaded go when the list reads its page again (Refresh), and the lane offers them again', async () => {
+    const ds = dealSource();
+    mountBoard(ds, { ...BOARD_VIEW, compactToolbar: false });
+
+    await onePageDrawn();
+    await waitFor(() => expect(loadMore('Cyan Corp')).not.toBeNull());
+    fireEvent.click(loadMore('Cyan Corp')!);
+    await waitFor(() => expect(within(lane('acc-c')).getAllByRole('listitem')).toHaveLength(10));
+
+    fireEvent.click(screen.getByTestId('refresh-button'));
+
+    await waitFor(() => expect(within(lane('Cyan Corp')).queryAllByRole('listitem')).toHaveLength(0));
+    await waitFor(() => expect(loadMore('Cyan Corp')).not.toBeNull());
+    expect(within(lane('Cyan Corp')).getByText('Cards not loaded: 10')).toBeInTheDocument();
+    expect(cards()).toHaveLength(25);
+  });
+
+  it('the cards a lane loaded go when the toolbar search changes, and the next read carries the search', async () => {
+    const ds = dealSource();
+    mountBoard(ds, { ...BOARD_VIEW, compactToolbar: false });
+
+    await onePageDrawn();
+    await waitFor(() => expect(loadMore('Cyan Corp')).not.toBeNull());
+    fireEvent.click(loadMore('Cyan Corp')!);
+    await waitFor(() => expect(within(lane('acc-c')).getAllByRole('listitem')).toHaveLength(10));
+
+    // Every deal is named "Deal …", so the search keeps every record.
+    fireEvent.click(screen.getByTestId('search-icon-button'));
+    fireEvent.change(screen.getByPlaceholderText(/search/i), { target: { value: 'Deal' } });
+
+    await waitFor(() => expect(within(lane('Cyan Corp')).queryAllByRole('listitem')).toHaveLength(0));
+    await waitFor(() => expect(loadMore('Cyan Corp')).not.toBeNull());
+    fireEvent.click(loadMore('Cyan Corp')!);
+    await waitFor(() => expect(within(lane('acc-c')).getAllByRole('listitem')).toHaveLength(10));
+    const reads = laneReads(ds);
+    expect(reads).toHaveLength(2);
+    expect(reads[0].$search).toBeUndefined();
+    expect(reads[1]).toMatchObject({ $search: 'Deal', $skip: 0 });
+  });
+
+  it.each([
+    ['has no grouped door', false],
+    ['refuses the read', 'refuse'],
+    ['cuts the read (hasMore)', 'cut'],
+  ] as const)('CONTROL: when the source %s, no lane offers "Load more"', async (_, door) => {
+    const ds = dealSource(door, NO_ACCOUNT_PAST_PAGE);
+    mountBoard(ds, BOARD_VIEW);
+
+    await onePageDrawn();
+    if (door !== false) await waitFor(() => expect(ds.queryGroupHeaders).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(laneBadge('acc-a')).toBe('13+'));
+    expect(screen.queryAllByRole('button', { name: 'Load more' })).toHaveLength(0);
+    expect(laneReads(ds)).toHaveLength(0);
+  });
+
+  it('CONTROL: a board laned by a text field offers no "Load more"', async () => {
+    mountBoard(dealSource(), { ...BOARD_VIEW, kanban: { ...BOARD_VIEW.kanban, groupByField: 'tier' } });
+
+    await waitFor(() => expect(cards()).toHaveLength(25));
+    await waitFor(() => expect(laneBadge('gold')).toBe('30'));
+    expect(screen.queryAllByRole('button', { name: 'Load more' })).toHaveLength(0);
   });
 
   it('a board laned by a text field counts each whole lane but draws no lane past the page', async () => {

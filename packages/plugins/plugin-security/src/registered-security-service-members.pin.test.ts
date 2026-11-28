@@ -75,6 +75,7 @@ const DECLARED_MEMBERS = {
   resolveWriteScope: 'required',
   describeDelegationNarrowing: 'optional',
   checkAuthoredRowWrite: 'optional',
+  getAuthoredRowWriteFilter: 'optional',
   checkControlledByParentWrite: 'optional',
   explain: 'required',
   describeDelegableScope: 'required',

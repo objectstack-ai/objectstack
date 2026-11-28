@@ -63,6 +63,7 @@ import { REFERENCE_VALUE_TYPES, referenceTargetOf } from '@objectstack/spec/data
 import { closureDependencyRemedy, recordsOf } from './object-graph.js';
 import {
   injectedColumnDefsFor,
+  injectedColumnsFor,
   unprovisionedAnchorFix,
   unprovisionedAnchorVerdict,
   unprovisionedInjectedColumnsFor,
@@ -103,6 +104,12 @@ const strings = (v: unknown): string[] => (Array.isArray(v) ? v.filter((x): x is
  * the injected one of its name. `get_record_context` judges a pack against
  * the published definition, which carries those columns, and reads them: a
  * verdict over the declared fields alone warns on a name the tool serves.
+ *
+ * This map answers what a field IS (its type, its reference target). Whether
+ * a name EXISTS is asked through {@link injectedColumnsFor} as well
+ * (`fieldExists` in the rule), as `system-fields.ts` prescribes for an
+ * existence check: `id`, which the driver provisions, has no definition table
+ * and so is absent from this map, yet the pack reads it.
  */
 function fieldMapOf(object: AnyRec): Map<string, AnyRec> | undefined {
   const raw = object.fields;
@@ -139,6 +146,18 @@ export function validateAiContext(
   // (the field map above) and provenance are separate questions: a name this
   // set holds resolves, and is judged here instead of as unknown.
   const anchorsOf = new Map<string, ReadonlySet<string>>();
+  /**
+   * Does `name` exist on `object`: a field of its effective map, or a column
+   * addressable without a declaration ({@link injectedColumnsFor}, which also
+   * holds the driver's `id`).
+   */
+  const addressable = new Map<string, ReadonlySet<string>>();
+  const fieldExists = (object: string, fields: Map<string, AnyRec>, name: string): boolean => {
+    if (fields.has(name)) return true;
+    let names = addressable.get(object);
+    if (!names) addressable.set(object, (names = injectedColumnsFor(objects.get(object))));
+    return names.has(name);
+  };
   const unprovisionedOf = (object: string): ReadonlySet<string> => {
     let anchors = anchorsOf.get(object);
     if (!anchors) anchorsOf.set(object, (anchors = unprovisionedInjectedColumnsFor(objects.get(object))));
@@ -196,7 +215,7 @@ export function validateAiContext(
     };
     const unknownFields = (names: string[], fields: Map<string, AnyRec>, object: string, where: string, path: string) => {
       names.forEach((name, k) => {
-        if (fields.has(name)) {
+        if (fieldExists(object, fields, name)) {
           if (unprovisionedOf(object).has(name)) {
             unprovisioned(object, name, where, `${path}[${k}]`, `names field '${name}'`, 'the pack reads it empty on every record');
           }
@@ -220,7 +239,7 @@ export function validateAiContext(
       const bodyField = str(body?.field);
       if (bodyField) {
         const def = rootFields.get(bodyField);
-        if (!def) {
+        if (!fieldExists(root, rootFields, bodyField)) {
           out.push({
             severity: 'warning',
             rule: AI_CONTEXT_FIELD_UNKNOWN,
@@ -229,14 +248,14 @@ export function validateAiContext(
             message: `\`body.field\` names '${bodyField}', which object '${root}' does not define, so the pack carries no body`,
             hint: `Name a long-text field of '${root}' (check the spelling)`,
           });
-        } else if (!(AI_CONTEXT_BODY_FIELD_TYPES as readonly string[]).includes(str(def.type))) {
+        } else if (!(AI_CONTEXT_BODY_FIELD_TYPES as readonly string[]).includes(str(def?.type))) {
           out.push({
             severity: 'warning',
             rule: AI_CONTEXT_BODY_NOT_LONG_TEXT,
             where: `${at} · body`,
             path: `aiContexts[${i}].body.field`,
             message:
-              `\`body.field\` names '${bodyField}', a ${str(def.type) || 'untyped'} field; a body is a long-text ` +
+              `\`body.field\` names '${bodyField}', a ${str(def?.type) || 'untyped'} field; a body is a long-text ` +
               `field (${AI_CONTEXT_BODY_FIELD_TYPES.join(', ')}), so the pack carries no body`,
             hint: `Name a long-text field of '${root}' as the body, or list '${bodyField}' in \`fields\` instead`,
           });
@@ -275,7 +294,7 @@ export function validateAiContext(
       };
       const noRows = 'a condition on it can never match a real value and the list reads no rows';
       for (const name of aiContextWhereFields(entry.where)) {
-        if (!childFields.has(name)) listLeftOut(name, 'where', `${path}.where`);
+        if (!fieldExists(child, childFields, name)) listLeftOut(name, 'where', `${path}.where`);
         else if (unprovisionedOf(child).has(name)) unprovisioned(child, name, where, `${path}.where`, `\`where\` names field '${name}'`, noRows);
       }
       const orderBy = Array.isArray(entry.orderBy) ? (entry.orderBy as unknown[]) : [];
@@ -284,7 +303,7 @@ export function validateAiContext(
       orderBy.forEach((node, k) => {
         const name = node && typeof node === 'object' ? str((node as AnyRec).field) : '';
         if (!name) return;
-        if (!childFields.has(name)) {
+        if (!fieldExists(child, childFields, name)) {
           listLeftOut(name, 'orderBy', `${path}.orderBy[${k}].field`);
           return;
         }

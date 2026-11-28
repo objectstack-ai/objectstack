@@ -75,6 +75,7 @@ import {
 import { detectPackageRemovedResult } from './mapMessages';
 import { AnswerSourceBlock } from './AnswerSource';
 import { RecordCitations } from './RecordCitations';
+import { DraftReviewCard } from './chat/DraftReviewCard';
 import type {
   ChatbotEnhancedMessage,
   ChatbotEnhancedProps,
@@ -221,6 +222,8 @@ const ChatbotEnhanced = React.forwardRef<HTMLDivElement, ChatbotEnhancedProps>(
         `The package was partly deleted: ${failed} ${failed === 1 ? 'item was' : 'items were'} not removed.`,
       onOpenRecord,
       onOpenList,
+      onOpenReviewLink,
+      reviewLinkHref,
       surfaceContextLabel,
       surfaceContextTitle,
       processVisibility = 'summary',
@@ -912,6 +915,14 @@ const ChatbotEnhanced = React.forwardRef<HTMLDivElement, ChatbotEnhancedProps>(
                       {/* ADR-0160 D9 — the records the answer rests on. */}
                       {!isUser && message.recordCitations ? (
                         <RecordCitations citations={message.recordCitations} onOpenRecord={onOpenRecord} />
+                      ) : null}
+                      {/* The drafts the turn saved; reviewed and published in Studio, never here. */}
+                      {!isUser && message.draftReview ? (
+                        <DraftReviewCard
+                          review={message.draftReview}
+                          onOpenReviewLink={onOpenReviewLink}
+                          reviewLinkHref={reviewLinkHref}
+                        />
                       ) : null}
                       {!isUser && sources.length > 0 ? (
                         <Sources>

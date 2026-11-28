@@ -241,8 +241,9 @@ the same schema. A source is identified by its package and `name`; the ☁️
 `search_knowledge` tool lists a package's source to agents as `NAMESPACE-NAME`
 (bare for one no package holds), and a code registration and an environment
 item of one name are one slot, the second refused. A shipped item mounts the
-knowledge service and its store; an app that ships none and authors sources at
-run time needs `requires: ['knowledge']`, or its items are never indexed.
+knowledge service and its store; where an app ships none, a run-time save is
+refused (`503 SERVICE_UNAVAILABLE`, nothing written) until you add
+`requires: ['knowledge']` to the stack and restart the server.
 
 **A source is an egress and cost decision.** Its first build sends every listed
 field of every matching record to the embedding provider and keeps the text (and
@@ -362,15 +363,16 @@ live, but listing-only: carried onto the tool, never sent to the model).
 ## Model Configuration
 
 Sampling lives under an agent's `model` (`AIModelConfigSchema`), **never a
-top-level `temperature` / `maxTokens`** (`packages/spec/src/ai/agent.zod.ts:87-95`).
-The block names a model, never a provider: the deployment's AI settings choose
-the provider and resolve the model name among the providers turned on.
-`provider` is retired (protocol 19): writing it is a parse error. Delete it.
+top-level `temperature` / `maxTokens`** (`packages/spec/src/ai/agent.zod.ts:89-97`).
+The block names a model: the deployment's AI settings choose the provider and
+resolve the model name among the ones turned on. `provider` is retired
+(protocol 19) and refused, except the `'openai'` an 18.x toolchain wrote out,
+which parses and is stripped. Delete it.
 
 | Key | Contract |
 |:--|:--|
-| `model` | Optional free-string model name; absent = the host's default model for the environment |
-| `temperature` | `min(0).max(2)`, default `0.7`. **Outside 0–2 is a parse error** |
+| `model` | Optional free-string name; absent = the host's default model |
+| `temperature` | Default `0.7`. **Outside 0–2 is a parse error** |
 | `maxTokens` / `topP` | Optional, schema-unbounded numbers |
 
 ---

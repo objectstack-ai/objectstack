@@ -7,7 +7,8 @@
  */
 
 import * as React from 'react';
-import { isUnsetFieldValue, unsetNoticeApplies } from './flow-node-config.js';
+import { unsetNoticeApplies } from './flow-node-config.js';
+import { isUnsetFieldValue } from '../storedValue.js';
 import type { FlowConfigField, InactiveRetainedKind } from './flow-node-config.js';
 import { t, tFormat } from '../i18n.js';
 import { useObjectFields } from '../previews/useObjectFields.js';

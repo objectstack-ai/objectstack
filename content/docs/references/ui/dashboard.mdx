@@ -56,7 +56,7 @@ const result = DashboardSchema.parse(data);
 | :--- | :--- | :--- | :--- |
 | **showTitle** | `boolean` | optional (default: `true`) | Show dashboard title in header |
 | **showDescription** | `boolean` | optional (default: `true`) | Show dashboard description in header |
-| **actions** | `{ label: string \| Record<string, string>; actionUrl: string; actionType?: Enum<'script' \| 'url' \| 'modal' \| 'flow' \| 'api' \| 'form' \| 'ask_ai'>; icon?: string }[]` | optional | Header action buttons |
+| **actions** | `{ label: string \| Record<string, string>; actionUrl: string; actionType?: Enum<'script' \| 'url' \| 'modal' \| 'flow' \| 'api' \| 'form'>; icon?: string }[]` | optional | Header action buttons |
 
 ### Nested Shape: `Dashboard.widgets[number]`
 
@@ -131,7 +131,7 @@ Dashboard header configuration
 | :--- | :--- | :--- | :--- |
 | **showTitle** | `boolean` | optional (default: `true`) | Show dashboard title in header |
 | **showDescription** | `boolean` | optional (default: `true`) | Show dashboard description in header |
-| **actions** | `{ label: string \| Record<string, string>; actionUrl: string; actionType?: Enum<'script' \| 'url' \| 'modal' \| 'flow' \| 'api' \| 'form' \| 'ask_ai'>; icon?: string }[]` | optional | Header action buttons |
+| **actions** | `{ label: string \| Record<string, string>; actionUrl: string; actionType?: Enum<'script' \| 'url' \| 'modal' \| 'flow' \| 'api' \| 'form'>; icon?: string }[]` | optional | Header action buttons |
 
 ### Nested Shape: `DashboardHeader.actions[number]`
 
@@ -141,7 +141,7 @@ Dashboard header action
 | :--- | :--- | :--- | :--- |
 | **label** | `string \| Record<string, string>` | ✅ | Action button label |
 | **actionUrl** | `string` | ✅ | URL or target for the action. When actionType is 'url' or omitted: an http:// or https:// URL, a mailto: address, or an in-app path starting with / or ./ — every other scheme and a protocol-relative //host are refused. |
-| **actionType** | `Enum<'script' \| 'url' \| 'modal' \| 'flow' \| 'api' \| 'form' \| 'ask_ai'>` | optional | Type of action |
+| **actionType** | `Enum<'script' \| 'url' \| 'modal' \| 'flow' \| 'api' \| 'form'>` | optional | Type of action |
 | **icon** | `string` | optional | Icon identifier for the action button |
 
 
@@ -157,7 +157,7 @@ Dashboard header action
 | :--- | :--- | :--- | :--- |
 | **label** | `string \| Record<string, string>` | ✅ | Action button label |
 | **actionUrl** | `string` | ✅ | URL or target for the action. When actionType is 'url' or omitted: an http:// or https:// URL, a mailto: address, or an in-app path starting with / or ./ — every other scheme and a protocol-relative //host are refused. |
-| **actionType** | `Enum<'script' \| 'url' \| 'modal' \| 'flow' \| 'api' \| 'form' \| 'ask_ai'>` | optional | Type of action |
+| **actionType** | `Enum<'script' \| 'url' \| 'modal' \| 'flow' \| 'api' \| 'form'>` | optional | Type of action |
 | **icon** | `string` | optional | Icon identifier for the action button |
 
 
@@ -375,7 +375,6 @@ Widget action type
 * `flow`
 * `api`
 * `form`
-* `ask_ai`
 
 
 ---

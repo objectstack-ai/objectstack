@@ -23,7 +23,7 @@ import { EngineQueryOptionsSchema, DATA_ACTION_TO_API_OPERATION } from '@objects
 import type { ExecutionContext } from '@objectstack/spec/kernel';
 import { isStoredMetadataBodyObject } from '@objectstack/spec/kernel';
 import type { IHttpServer, IObjectQLEngine, InternalFieldEvaluationQuery, QueryEvaluationGate, ServiceSlotContract, ServiceSlotContracts } from '@objectstack/spec/contracts';
-import { standardErrorCodeForHttpStatus, type MetadataProtocol } from '@objectstack/spec/api';
+import { standardErrorCodeForHttpStatus, type MetadataProtocol, type ValidateDataIssue } from '@objectstack/spec/api';
 import { renderOperationMessage } from '@objectstack/spec/system';
 // [#15942 / #16293] The confirmation member's SPELLING is the contract, so it
 // is imported, never hand-spelled: the door that refuses and the client that
@@ -1360,9 +1360,6 @@ export function isHeadlessInvokableAction(_deps: ActionExecutionDeps, action: an
     // forwards it in-process to its declared `target` (see
     // {@link forwardApiAction}). An off-origin one stays browser-only.
     if (type === 'api') return isSameOriginApiTarget(action?.target);
-    // `url`, `modal`, `form` and `ask_ai` (ADR-0160 D7 — it focuses the
-    // console's assistant on a record and is never an AI tool) have no server
-    // dispatch.
     return false;
 }
 
@@ -2505,16 +2502,6 @@ export function headlessActionTypeError(_deps: ActionExecutionDeps, action: any,
             `forward to it. Only a same-origin \`target\` (a path starting with \`/\`) is dispatched through ` +
             `this door. Call ${target ? `\`${target}\`` : 'its `target` endpoint'} directly` +
             `${typeof action?.method === 'string' ? ` (${action.method})` : ''}.`
-        );
-    }
-    if (type === 'ask_ai') {
-        // ADR-0160 D7: `ask_ai` names nothing and runs nothing server-side —
-        // the console focuses its in-app assistant on the record. The generic
-        // sentence below ("the renderer opens its `target`") would describe a
-        // key this type refuses at parse.
-        return (
-            `Action '${name}'${on} is \`type: 'ask_ai'\` — a client-side action with no server dispatch. ` +
-            `The console opens its in-app assistant focused on the record; there is nothing for the server to run.`
         );
     }
     return (
@@ -5035,6 +5022,26 @@ export interface DeclarativeUpdateResult {
     record: Record<string, unknown>;
     /** Present only when the action declares `undoable: true`. */
     undo?: DeclarativeUpdateUndo;
+    /**
+     * [#37867] The advisory validation-rule hits (`severity: 'warning' | 'info'`)
+     * of THIS write, exactly as the data-plane update answered them — the
+     * element is `ValidateDataIssue`, the data door's own `warnings` vocabulary.
+     * Present only when the write raised one: the same rule on the same write
+     * answers the same warnings whichever door the person used.
+     */
+    warnings?: ValidateDataIssue[];
+}
+
+/**
+ * [#37867] The `warnings` a data-plane write answer carries, or `undefined`
+ * when it carries none. The protocol's `updateData` sets the member only when
+ * the write raised an advisory rule hit, so an empty or absent member answers
+ * the same: no warnings. Only the protocol arm of `callData` produces it; the
+ * ObjectQL fallback arm answers none, and this reads none from it.
+ */
+function writeAnswerWarnings(written: unknown): ValidateDataIssue[] | undefined {
+    const warnings = (written as { warnings?: unknown } | null | undefined)?.warnings;
+    return Array.isArray(warnings) && warnings.length > 0 ? (warnings as ValidateDataIssue[]) : undefined;
 }
 
 /**
@@ -5288,12 +5295,19 @@ export async function executeDeclarativeUpdateAction(
         };
     }
 
+    // [#37867] The write's advisory rule hits ride the answer. A warning rule
+    // lets the save through and tells the person; the data door answers it as
+    // `warnings`, and a button that performs the same write owes the same
+    // answer, or the warning holds only for people who edit the form.
+    const warnings = writeAnswerWarnings(written);
+
     const result: DeclarativeUpdateResult = {
         operation: DECLARATIVE_UPDATE_OPERATION,
         object: objectName,
         id: recordId,
         record,
         ...(undo ? { undo } : {}),
+        ...(warnings ? { warnings } : {}),
     };
     if (stale) throw withEarnedAnswer(stale, { ...result });
     return result;

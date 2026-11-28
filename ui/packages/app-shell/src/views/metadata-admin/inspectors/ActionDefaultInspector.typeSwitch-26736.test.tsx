@@ -183,9 +183,6 @@ describe('typeSwitchPin — TYPE_SCOPED_KEYS matches the spec (objectstack#26736
   const base = (type: string): Draft =>
     type === 'script'
       ? { name: 'probe', label: 'Probe', type, body: { language: 'expression', source: 'true' } }
-      : type === 'ask_ai'
-      // ADR-0160 D7: `ask_ai` takes no target, so its minimal action has none.
-      ? { name: 'probe', label: 'Probe', type }
       : { name: 'probe', label: 'Probe', type, target: type === 'url' ? 'https://example.com' : 'probe_target' };
   const SAMPLE: Record<string, unknown> = {
     body: { language: 'expression', source: 'true' },
