@@ -356,17 +356,21 @@
  * whose row names the fences and the status alone. Otherwise it seals
  * `ADVISORY_READ_FIELDS` of the answer to the action's `public_key`
  * (`advisoryReadPlaintext`, `sealAdvisoryRead`, bound to the request id, the
- * action's index and the id) and emits the sealed answer as notice parts
+ * action's index and the id) — ONE page of it, the action's `page`, padded to
+ * the channel's full size (`advisoryReadPage`, `ops.mjs` "One page a stroke"),
+ * so every landed read is ten parts — and emits the sealed page as notice parts
  * (`advisoryReadParts`, `relayAdvisoryReadAnnotationMessage`) — the ONE
  * channel back, the one a seat container can read. A seal that throws is a
  * FAILED action with `ADVISORY_READ_SEAL_FAILED`, ⛔ never the exception's
- * message, and no part; one too large for the run's ten notices is a FAILED
- * action naming its counts, and no part. It LANDS only on a 200 whose fences
+ * message, and no part, and so is a seal that is not exactly the channel's
+ * size; an answer over `ADVISORY_READ_MAX_PAGES` pages is a FAILED action
+ * with the one sentence `ADVISORY_READ_OVER_CAP`, and no part. It LANDS only on a 200 whose fences
  * hold and whose seal succeeded and fit.
  *
  * ⛔ What this path prints — the row, the log line, the step summary — is the
- * HTTP status, the counts and `advisoryReadCall`, the call with the id left
- * out. Never the id, the state, the platform's message unless
+ * HTTP status, one fixed sentence (`ADVISORY_READ_LANDED` or the failure's)
+ * and `advisoryReadCall`, the call with the id left out — the same lines for
+ * every size and every page, so no line but the ciphertext varies with it. Never the id, the state, the platform's message unless
  * `ADVISORY_PLATFORM_MESSAGES` names it, or any field of the answer; the
  * notices carry the ciphertext alone. The self-test serves the marker in the
  * summary, the description and the vulnerabilities and finds it in no line,
@@ -702,6 +706,8 @@ import {
   ADVISORY_READ_ACCESS_REMEDY,
   ADVISORY_READ_FIELDS,
   ADVISORY_READ_LANDED,
+  ADVISORY_READ_MAX_PAGES,
+  ADVISORY_READ_PAGE_CHUNK_BYTES,
   ADVISORY_READ_OVER_CAP,
   ADVISORY_READ_SEAL_FAILED,
   ADVISORY_READ_UNREACHED,
@@ -769,7 +775,9 @@ import {
   advisoryReadCall,
   advisoryReadFenceFailures,
   advisoryReadFenceText,
+  advisoryReadAssemble,
   advisoryReadPage,
+  advisoryReadPageOf,
   advisoryReadParts,
   advisoryReadPlaintext,
   openAdvisoryRead,
@@ -4769,12 +4777,18 @@ export async function selfTest() {
         },
       });
       const sealedOf = (r) => (r.annotations ?? []).filter((n) => n.op === 'advisory_read').sort((a, b) => a.part - b.part).map((n) => n.sealed).join('');
-      const opens = (r, { key = SEAT.privateKey, action = 1, ghsaId = GHSA } = {}) => {
+      // The page the parts open to, as the seat reads it (`advisoryReadPageOf`) — or the refusal's sentence.
+      const pageOf = (r, { key = SEAT.privateKey, action = 1, ghsaId = GHSA } = {}) => {
         try {
-          return openAdvisoryRead({ sealed: sealedOf(r), privateKey: key, aad: advisoryReadAad({ requestId: 'fw-test-1', action, ghsaId }) });
+          return advisoryReadPageOf(openAdvisoryRead({ sealed: sealedOf(r), privateKey: key, aad: advisoryReadAad({ requestId: 'fw-test-1', action, ghsaId }) })) ?? 'refused: not a page';
         } catch (e) {
           return `refused: ${e.message}`;
         }
+      };
+      // A one-page answer, opened and joined back — byte for byte what was sealed, or the refusal's sentence.
+      const opens = (r, opts) => {
+        const page = pageOf(r, opts);
+        return typeof page === 'string' ? page : (advisoryReadAssemble([page]).plaintext ?? `refused: ${advisoryReadAssemble([page]).why}`);
       };
       const picked = (json) => JSON.stringify(Object.fromEntries(ADVISORY_READ_FIELDS.filter((f) => Object.hasOwn(json, f)).map((f) => [f, json[f]])));
       const notices = (r) => r.logs.filter((l) => l.startsWith('::notice '));
@@ -4790,7 +4804,7 @@ export async function selfTest() {
       // ⭐ Landed.
       const served = advisory();
       const landed = await readRun([read()], { ...allowed, [A_GET]: served });
-      t('⭐ a read is ONE GET of the advisory under the App token after the sender gate, ZERO writes, exit 0 — and its row prints the call with the id LEFT OUT, the status and the counts', [landed.exit, landed.seen.map((s) => s.call), landed.seen.map((s) => s.auth), writes(landed.seen).length, landed.rows.map((x) => [x.op, x.call, x.status]), /^sealed \d+ byte\(s\) of the answer to the seat's one-time key — \d+ character\(s\) in 1 notice part\(s\), which only that seat's process opens$/.test(landed.rows[0]?.result ?? '')], [EXIT_OK, [PERM, A_GET], [`Bearer ${TOKEN}`, `Bearer ${TOKEN}`], 0, [['advisory_read', CALL, 200]], true]);
+      t('⭐ a read is ONE GET of the advisory under the App token after the sender gate, ZERO writes, exit 0 — and its row prints the call with the id LEFT OUT, the status and the ONE landed sentence, no count of the answer', [landed.exit, landed.seen.map((s) => s.call), landed.seen.map((s) => s.auth), writes(landed.seen).length, landed.rows.map((x) => [x.op, x.call, x.status]), landed.rows[0]?.result === ADVISORY_READ_LANDED], [EXIT_OK, [PERM, A_GET], [`Bearer ${TOKEN}`, `Bearer ${TOKEN}`], 0, [['advisory_read', CALL, 200]], true]);
       const opened = opens(landed);
       const openedJson = (() => {
         try {
@@ -4801,14 +4815,29 @@ export async function selfTest() {
       })();
       t('⭐ the seat\'s key opens the parts to the GET answer BYTE FOR BYTE — the summary, the description and the vulnerabilities as the platform answered them, CJK, an emoji, a newline, a quote and a backslash among them', [opened === picked(served.json), Buffer.compare(Buffer.from(opened, 'utf8'), Buffer.from(picked(served.json), 'utf8')), ['summary', 'description', 'vulnerabilities'].map((f) => JSON.stringify(openedJson?.[f]) === JSON.stringify(served.json[f])), Object.keys(openedJson ?? {})], [true, 0, [true, true, true], [...ADVISORY_READ_FIELDS]]);
       const parsedBack = notices(landed).map((l) => parseRelayAdvisoryReadAnnotation(l.slice(l.indexOf('::', 2) + 2)));
-      t("the parts are notice commands titled `fleet-write advisory_read`, the reader's own parser reads back exactly what was emitted, and each message is inside the runner's 4,096-character cut", [notices(landed).map((l) => l.slice(0, l.indexOf('::', 2) + 2)), parsedBack, notices(landed).every((l) => l.length - l.indexOf('::', 2) - 2 <= 4096), ADVISORY_READ_OPS], [['::notice title=fleet-write advisory_read::'], landed.annotations, true, ['advisory_read', 'advisory_list']]);
+      t("the parts are notice commands titled `fleet-write advisory_read`, the reader's own parser reads back exactly what was emitted, and each message is inside the runner's 4,096-character cut", [notices(landed).map((l) => l.slice(0, l.indexOf('::', 2) + 2)), parsedBack, notices(landed).every((l) => l.length - l.indexOf('::', 2) - 2 <= 4096), ADVISORY_READ_OPS], [Array(10).fill('::notice title=fleet-write advisory_read::'), landed.annotations, true, ['advisory_read', 'advisory_list']]);
       const sealedText = sealedOf(landed);
       t('⛔ the sealed answer ALONE carries none of the marker — not in its characters, not in its decoded bytes — though the text it opens to does (the positive control)', [sealedText.includes('ADVISORY'), Buffer.from(sealedText, 'base64url').includes(Buffer.from('ADVISORY MARKER')), opened.includes('ADVISORY MARKER')], [false, false, true]);
       t("⛔ it opens for the seat's key and THIS read alone: another key pair, another action index and another advisory id are each refused", [opens(landed, { key: pair().privateKey }), opens(landed, { action: 2 }), opens(landed, { ghsaId: OTHER })].map((x) => x.startsWith('refused: ')), [true, true, true]);
-      // Many parts.
+      // Many parts — every read is ten, whatever its size.
       const long = advisory({ description: `${MARKER} ${'the long description, line by line.\n'.repeat(600)}` });
       const many = await readRun([read()], { ...allowed, [A_GET]: long });
-      t('a long answer is cut into its parts, in order, each part numbered k/n with one n, every message inside the cut, and still opens byte for byte', [many.exit, many.annotations.length > 1, many.annotations.map((n) => `${n.part}/${n.of}`).join(' ') === many.annotations.map((_, k) => `${k + 1}/${many.annotations.length}`).join(' '), notices(many).every((l) => l.length - l.indexOf('::', 2) - 2 <= 4096), opens(many) === picked(long.json)], [EXIT_OK, true, true, true, true]);
+      t('a long answer that fits one page is the same ten parts, in order, each numbered k/10, every message inside the cut, and still opens byte for byte', [many.exit, many.annotations.length, many.annotations.map((n) => `${n.part}/${n.of}`).join(' ') === many.annotations.map((_, k) => `${k + 1}/10`).join(' '), notices(many).every((l) => l.length - l.indexOf('::', 2) - 2 <= 4096), opens(many) === picked(long.json)], [EXIT_OK, 10, true, true, true]);
+      // ⭐ One page a stroke: an answer over 29,939 bytes, read page by page, lands whole and opens byte-identical.
+      const paged = advisory({ description: `${MARKER} 漢字 and 🎉 ${'a paged description, past one page of the channel — é\n'.repeat(1_400)}` });
+      const pagedText = picked(paged.json);
+      const firstPage = await readRun([read()], { ...allowed, [A_GET]: paged });
+      const n = pageOf(firstPage).pages;
+      const rest = [];
+      for (let k = 2; k <= n; k++) rest.push(await readRun([read({ page: k })], { ...allowed, [A_GET]: paged }));
+      const joined = advisoryReadAssemble([firstPage, ...rest].map((r) => pageOf(r)));
+      t('⭐ a read of MORE than 29,939 bytes of answer lands WHOLE: each page its own stroke (one GET, exit 0, ten parts), and the pages joined open to the GET\'s fields BYTE FOR BYTE — CJK, an emoji and a newline among them', [Buffer.byteLength(pagedText, 'utf8') > 29_939, n, [firstPage, ...rest].map((r) => [r.exit, r.seen.length, r.annotations.length]), joined.plaintext === pagedText, Buffer.compare(Buffer.from(joined.plaintext ?? '', 'utf8'), Buffer.from(pagedText, 'utf8'))], [true, 3, [firstPage, ...rest].map(() => [EXIT_OK, 2, 10]), true, 0]);
+      const small = await readRun([read()], { ...allowed, [A_GET]: advisory() });
+      const pastEnd = await readRun([read({ page: 5 })], { ...allowed, [A_GET]: paged });
+      // Every line of a run with the ciphertext blanked: the same text, whatever the size and whichever page.
+      const publicOf = (r) => [...r.logs, ...(r.lines ?? []), r.summary ?? '', JSON.stringify(r.rows)].join('\n').replace(/sealed=[A-Za-z0-9_-]+/g, 'sealed=CIPHERTEXT');
+      t('⭐ NO line but the ciphertext varies with the size: a one-page answer, each page of a three-page one and a page past its end print the SAME log lines, rows and step summary once the ciphertext is blanked — and the same ten parts', [[firstPage, ...rest, pastEnd].map((r) => publicOf(r) === publicOf(small)), [small, firstPage, ...rest, pastEnd].map((r) => [r.annotations.length, r.annotations.map((x) => x.sealed.length).join(',')])], [[true, true, true, true], [small, firstPage, ...rest, pastEnd].map(() => [10, Array(10).fill(4000).join(',')])], publicOf(firstPage).split('\n').find((l, i) => l !== publicOf(small).split('\n')[i]));
+      t('…positive control: the blanking hides only the ciphertext — the runs\' raw notices DO differ, and a page past the end opens to its header and pad alone', [notices(small).join('') === notices(firstPage).join(''), pageOf(pastEnd).length, pageOf(pastEnd).pages], [false, 0, 3]);
       // ⚖ The sender gate: target-write, by the maintainer's ruling — judged on the stroke before the GET, nothing more after it.
       const PERM_B = `GET /repos/${REPO}/collaborators/os-dev-b/permission`;
       const writerB = { [PERM_B]: { status: 200, json: { permission: 'write', role_name: 'write', user: { login: 'os-dev-b' } } } };
@@ -4833,20 +4862,21 @@ export async function selfTest() {
       const thrown = await readRun([read()], { ...allowed, [A_GET]: advisory() }, { advisoryRead: { seal: () => { throw new Error(`seal blew up holding ${MARKER}`); } } });
       const unsealed = await readRun([read()], { ...allowed, [A_GET]: advisory() }, { advisoryRead: { seal: ({ plaintext }) => plaintext } });
       t("⛔ a failed encryption sends NOTHING back and fails: a seal that throws — its message carrying the marker — and one that hands back the plaintext unsealed are each FAILED with the one fixed sentence, no part and no notice, the exception's message printed nowhere", [thrown, unsealed].map((r) => [r.exit, r.annotations.length, notices(r).length, r.rows[0]?.result]), [thrown, unsealed].map(() => [EXIT_ACTION_FAILED, 0, 0, `FAILED: ${ADVISORY_READ_SEAL_FAILED}`]));
-      const huge = advisory({ description: `${MARKER} ${'x'.repeat(31_000)}` });
+      const huge = advisory({ description: `${MARKER} ${'x'.repeat(ADVISORY_READ_MAX_PAGES * ADVISORY_READ_PAGE_CHUNK_BYTES)}` });
       const over = await readRun([read()], { ...allowed, [A_GET]: huge });
-      t('⛔ an answer too large for the run\'s ten notices is FAILED naming its counts alone — nothing emitted', [over.exit, over.annotations.length, notices(over).length, /^FAILED: the sealed answer is \d+ character\(s\) \(\d+ byte\(s\) of the answer\), over the 40000 the run's notices carry \(10 of 4000\) — nothing was emitted/.test(over.rows[0]?.result ?? '')], [EXIT_ACTION_FAILED, 0, 0, true]);
+      const overLast = await readRun([read({ page: ADVISORY_READ_MAX_PAGES })], { ...allowed, [A_GET]: huge });
+      t('⛔ the over-cap refusal still fires ABOVE the new limit: an answer needing more than 64 pages is FAILED on its first page and its last alike with the ONE fixed sentence — no count — nothing sealed, nothing emitted', [over, overLast].map((r) => [r.exit, r.annotations.length, notices(r).length, r.rows[0]?.result]), [over, overLast].map(() => [EXIT_ACTION_FAILED, 0, 0, `FAILED: ${ADVISORY_READ_OVER_CAP}`]));
       // ⛔ Refused before any request.
       const gated = [];
-      for (const actions of [[read({ public_key: MARKER })], [read({ public_key: `${SEAT.spki.slice(0, 59)}A` })], [read({ ghsa_id: `${GHSA}/cve` })], [read({ summary: MARKER })], [read(), { op: 'comment', issue: 1, body: 'x' }], [read(), read({ public_key: pair().spki })], [{ op: 'advisory_read', ghsa_id: GHSA }]]) {
+      for (const actions of [[read({ public_key: MARKER })], [read({ public_key: `${SEAT.spki.slice(0, 59)}A` })], [read({ ghsa_id: `${GHSA}/cve` })], [read({ summary: MARKER })], [read(), { op: 'comment', issue: 1, body: 'x' }], [read(), read({ public_key: pair().spki })], [{ op: 'advisory_read', ghsa_id: GHSA }], [read({ page: 0 })], [read({ page: ADVISORY_READ_MAX_PAGES + 1 })]]) {
         const r = await readRun(actions, { ...allowed, [A_GET]: advisory() });
         gated.push([r.exit, r.seen.length]);
       }
-      t('⛔ refused before ANY request, the sender gate included: a key that is prose or one character off, a malformed id, a field it would read, a read beside a comment, two reads, and a read with no key — exit 2', gated, gated.map(() => [EXIT_REFUSED, 0]));
+      t('⛔ refused before ANY request, the sender gate included: a key that is prose or one character off, a malformed id, a field it would read, a read beside a comment, two reads, a read with no key, and a page of 0 or past the cap — exit 2', gated, gated.map(() => [EXIT_REFUSED, 0]));
       // ⛔ The sweep: every run above, every channel this file emits on — no marker, and no advisory id.
       const emitted = swept.map(({ r, paceLines }) => [...(r.logs ?? []), ...(r.lines ?? []), r.summary ?? '', JSON.stringify(r.rows ?? []), ...(r.annotations ?? []).map((n) => relayAdvisoryReadAnnotationMessage(n)), ...paceLines].join('\n'));
       const leaks = emitted.map((text, i) => (text.includes('ADVISORY MARKER') ? i : null)).filter((i) => i !== null);
-      t('⛔ THE MARKER TEST: across every run of this battery — landed, long, a sender outside the collaborators, one refused at the stroke\'s sender gate, the unknown and retired gates, read and advisory fences, a GET that never reached the platform, a seal that throws, one that does not seal, one too large, refused payloads — the marker served in the summary, the description and the vulnerabilities (and every other field) reaches NO log line, row, step summary, annotation or pace-log line', [swept.length, leaks], [20, []], leaks.map((i) => emitted[i].split('\n').find((l) => l.includes('ADVISORY MARKER'))).join(' | '));
+      t('⛔ THE MARKER TEST: across every run of this battery — landed, long, every page of a paged read and a page past its end, a sender outside the collaborators, one refused at the stroke\'s sender gate, the unknown and retired gates, read and advisory fences, a GET that never reached the platform, a seal that throws, one that does not seal, one too large on its first and last page, refused payloads — the marker served in the summary, the description and the vulnerabilities (and every other field) reaches NO log line, row, step summary, annotation or pace-log line', [swept.length, leaks], [28, []], leaks.map((i) => emitted[i].split('\n').find((l) => l.includes('ADVISORY MARKER'))).join(' | '));
       const named = emitted.map((text, i) => ([GHSA, OTHER].some((id) => text.includes(id)) ? i : null)).filter((i) => i !== null);
       t("⛔ …and NO advisory id: neither the one asked for nor the one answered appears on any line, row, summary or annotation of any run — the call's placeholder stands where every other row prints its path", named, [], named.map((i) => emitted[i].split('\n').find((l) => l.includes(GHSA) || l.includes(OTHER))).join(' | '));
       t('…positive control: every answer served carried the marker and the id, the request carried the id to the platform — where it belongs — and the generic row printer, given the same answer, WOULD print both', [swept.every(({ answers }) => JSON.stringify(answers).includes('ADVISORY MARKER') && JSON.stringify(answers).includes(GHSA)), landed.seen.some((s) => s.call === A_GET), resultOf({}, served.json).includes('ADVISORY MARKER') && resultOf({}, served.json).includes(GHSA)], [true, true, true]);

@@ -852,16 +852,60 @@
  * data, so a sealed answer opens for the read that asked for it and no other.
  * Node's own `crypto`, and nothing else. The sealed answer leaves the run on
  * ONE channel, the one a seat container can read: notice annotations on the
- * job's check run, at most `ADVISORY_READ_MAX_PARTS` of
+ * job's check run, exactly `ADVISORY_READ_MAX_PARTS` of
  * `ADVISORY_READ_PART_CHARS` characters (`advisoryReadParts`), inside the
  * runner's measured caps — ten notices a step and a message cut at 4,096
- * characters (`actions/runner`, `ExecutionContext.cs`). An answer too large
- * for them is a FAILED action naming byte counts alone. The seat reassembles
- * the parts, opens them with its private key (`openAdvisoryRead`), and prints
- * the text to its own stdout, and only on `--reveal`.
+ * characters (`actions/runner`, `ExecutionContext.cs`) — carrying ONE page of
+ * the answer (below). The seat reassembles the parts, opens them with its
+ * private key (`openAdvisoryRead`), joins the pages, and prints the text to
+ * its own stdout, and only on `--reveal`.
  *
- * ⛔ What crosses the public run: the HTTP status, the byte and part counts,
- * and the ciphertext. NOT the id — the row's call is `ADVISORY_READ_CALL`, a
+ * ### One page a stroke — an answer of any size, in one length class
+ *
+ * Every read seals ONE page (`advisoryReadPage`): a fixed-width header — the
+ * page's number and the count, its span of the answer's UTF-8 bytes, the
+ * answer's size and SHA-256 — then that span, cut on a character's boundary
+ * (`advisoryReadPageSpans`), then spaces to exactly `ADVISORY_READ_PAGE_BYTES`,
+ * the listing's 29,939 bytes. So every sealed page of every answer, and the
+ * listing, is `ADVISORY_READ_MAX_SEALED_CHARS` characters in
+ * `ADVISORY_READ_MAX_PARTS` parts: ONE sealed length class. The payload's
+ * optional `page` (1 to `ADVISORY_READ_MAX_PAGES`, absent is 1) names the
+ * page; a page past the last is the header and the pad alone and lands
+ * exactly as any other. The seat's door (`dispatch.mjs`, `pageAdvisoryRead`)
+ * reads page 1, learns the count inside the ciphertext, then sends pages
+ * 2..n, each its own stroke under its own one-time key and request id, opens
+ * each, and joins them (`advisoryReadAssemble`) only when every page names one
+ * size and one digest and the joined bytes hold both — an advisory changed
+ * between its pages is UNVERIFIED, never a spliced answer. An answer over
+ * `ADVISORY_READ_MAX_PAGES` pages is a FAILED action on every page with the
+ * one sentence `ADVISORY_READ_OVER_CAP`, nothing emitted.
+ *
+ * Why pages and not more parts in one run, measured against the runner's
+ * source (`actions/runner` main at 4812b901, `src/Runner.Worker/ExecutionContext.cs`:
+ * `_maxCountPerIssueType = 10` notices, warnings and errors each per step, a
+ * message cut at `_maxIssueMessageLength = 4096`) and the toolkit's
+ * documented limits (`actions/toolkit` main at 0c3a9c33,
+ * `docs/problem-matchers.md`: 50 annotations a job, summed over its steps,
+ * enforced by the service, not measured here). Ten parts are the one
+ * emitting step's notice cap. More parts in one run needs more emitting
+ * steps — a workflow change — and still stops at 50 a job, of which the mint
+ * step's own warning spends one on every advisory stroke: about 49 parts,
+ * under 150 KB, never "any size". Pages need no workflow change and no new
+ * grant. The page cap of 64 (about 1.9 MB of answer) is this row's own
+ * bound: the platform's largest advisory answer is UNVERIFIED.
+ *
+ * ⛔ The length class holds on every LINE, not on the run list: each page is
+ * its own run, so how many reads a seat sends in a row is public, and a reader
+ * of the run list can count an answer's pages — its size to within one page.
+ * That cannot hold without a fixed number of strokes per read, which would
+ * cap the size again; it is stated here and pinned (`validate.mjs` and
+ * `execute.mjs` self-tests: the same lines for every size and every page,
+ * past-the-end included, so nothing BUT the stroke count tells pages apart).
+ *
+ * ⛔ What crosses the public run: the HTTP status, the one landed sentence
+ * `ADVISORY_READ_LANDED` (the channel's fixed counts, the same on every read)
+ * or one refusal, and the ciphertext. NO count of the answer, NO page number,
+ * and NOT the id — the row's call is `ADVISORY_READ_CALL`, a
  * placeholder where every other row prints its path — nor the state, the
  * platform's `message` unless `ADVISORY_PLATFORM_MESSAGES` names it, or any
  * field of the answer. A seal that fails is a FAILED action that prints
