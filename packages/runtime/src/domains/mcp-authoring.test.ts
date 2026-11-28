@@ -1430,7 +1430,12 @@ describe('done when: an OAuth author saves an app-crm flow draft with no routabl
     const metadata = new MetadataManager({} as never);
     metadata.setTypeRegistry(DEFAULT_METADATA_TYPE_REGISTRY);
     const protocol = await realProtocol(new Map([['metadata', metadata]]));
-    const { authoring } = await authorThroughDomain({ protocol, systemPermissions: ['manage_metadata', 'manage_knowledge_sources'] });
+    // A deployment that mounts a knowledge service admitting the source (on one with none, ruled D refuses the save).
+    const { authoring } = await authorThroughDomain({
+      protocol,
+      systemPermissions: ['manage_metadata', 'manage_knowledge_sources'],
+      knowledge: { admitAuthoredSource: async () => ({ admitted: true }) },
+    });
     const entry = (await protocol.getMetaTypes!()).entries!.find((e) => e.type === 'knowledge_source') as any;
 
     const { contract } = (await call(authoring, 'list_metadata_items', { type: 'knowledge_source', contract: true })).body;
