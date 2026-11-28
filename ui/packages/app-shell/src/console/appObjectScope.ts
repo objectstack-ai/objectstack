@@ -1019,7 +1019,7 @@ export function useAppObjectScopePrefetch(): void {
     // Named by the list in hand already: the effect below enters it now.
     if (bundleAppName || !routeSegment || !dataSource || !ensure || typeof load !== 'function') return;
     let live = true;
-    void ensure('app').then((list) => {
+    void ensure('app').then((list: unknown) => {
       if (!live) return;
       const listed = matchAppBySegment(Array.isArray(list) ? (list as ListedApp[]) : [], routeSegment);
       const name = typeof listed?.name === 'string' && listed.name ? listed.name : undefined;
