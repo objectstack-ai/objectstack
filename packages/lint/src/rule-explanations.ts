@@ -6188,6 +6188,99 @@ const AI_CONTEXT_SORT_FIELD_UNSORTABLE_EXPLANATION: RuleExplanation = {
   ],
 };
 
+// ── Knowledge sources (`validate-knowledge-source.ts`) ──
+
+const KNOWLEDGE_SOURCE_DOORS =
+  'Judged by `os validate`, `os build` and `os lint`, and at the runtime publish gate for a ' +
+  '`knowledge_source` write (Studio, the metadata API, MCP), with the same rule id and message. An error ' +
+  'refuses the publish (ADR-0161 K4): a source over a missing object has nothing to index, a missing field ' +
+  'indexes no text for that member, and a gated object is never searched for a caller the service judges.';
+
+const KNOWLEDGE_SOURCE_OBJECT_UNKNOWN_EXPLANATION: RuleExplanation = {
+  rule: 'knowledge-source-object-unknown',
+  covers: 'why a knowledge source must name an existing object',
+  paragraphs: [
+    'A knowledge source (`knowledgeSources`, ADR-0161 K4) indexes the records of one object, `source.object`. ' +
+      'An object nothing defines has no records, so the source is built empty and every search over it ' +
+      'answers nothing, with no error anywhere.',
+    'Defined means an object of this stack, of a package in the same artifact (`packages[]`), or, at the ' +
+      'publish gate, an object the host serves. A platform object a known package registers (`sys_user`) is ' +
+      'not judged when the stack does not carry its definition. A name with a platform prefix that no known ' +
+      'package registers is a warning, because a third-party package may still provide it. When the publish ' +
+      'gate states the package\'s closure (the package, the packages its manifest declares in ' +
+      '`dependencies`, and platform objects), an object outside it is reported with the remedy to declare the ' +
+      'dependency.',
+    'On the command line a package the manifest declares in `dependencies` but the artifact does not carry ' +
+      'is out of sight: its objects cannot be read there. So while the manifest declares such a dependency, ' +
+      'an object the stack does not define is a warning, which clears when that dependency defines it (the ' +
+      'publish gate judges the source against the package\'s closure, which holds the dependency\'s objects). ' +
+      'With no such dependency it is an error, which clears only by naming an object that exists.',
+    KNOWLEDGE_SOURCE_DOORS,
+  ],
+};
+
+const KNOWLEDGE_SOURCE_FIELD_UNKNOWN_EXPLANATION: RuleExplanation = {
+  rule: 'knowledge-source-field-unknown',
+  covers: 'why each listed field must exist on the object',
+  paragraphs: [
+    'A source lists the fields whose text becomes each document (`source.content`) and the fields projected ' +
+      'into a hit\'s metadata (`source.metadataFields`). A name the object does not define reads nothing on ' +
+      'every record: the document is built without that text, or the metadata without that value.',
+    'Defined means declared in the object\'s `fields` (an object extension of the same stack included) or ' +
+      'addressable without a declaration: `id`, which the driver provisions, and the system columns the ' +
+      'platform injects (`owner_id`, `created_at` and the rest) are read like any field. An object whose ' +
+      'definition carries no readable field map is not judged.',
+    KNOWLEDGE_SOURCE_DOORS,
+  ],
+};
+
+const KNOWLEDGE_SOURCE_OBJECT_NOT_SEARCHABLE_EXPLANATION: RuleExplanation = {
+  rule: 'knowledge-source-object-not-searchable',
+  covers: 'why the API must serve the object for search',
+  paragraphs: [
+    'A knowledge search is a search over the object\'s records, so the knowledge service searches a source ' +
+      'only when the API exposure serves its object for `search`: the decision `canServeApiOperation` in ' +
+      '`@objectstack/spec/data` answers, the one every door serving object rows asks. `enable.apiEnabled: ' +
+      'false` refuses it. So does an `enable.apiMethods` list that does not grant `list`, from which search ' +
+      'derives (`search` itself is a retired list value the parse strips), or one that grants `list` beside ' +
+      '`enable.searchable: false`. With no `apiMethods` list, `searchable: false` does not refuse it.',
+    'To clear it, keep `enable.apiEnabled` true and, where the object declares `enable.apiMethods`, include ' +
+      '`list` with `enable.searchable` not false; or index another object.',
+    'This gate needs no caller, so it is judged here. The gates that need one (the object\'s package is not ' +
+      'disabled, and the author may query every field the source serves) are asked when the source is saved, ' +
+      'as its author.',
+    KNOWLEDGE_SOURCE_DOORS,
+  ],
+};
+
+const KNOWLEDGE_SOURCE_SYSTEM_OBJECT_NOT_AI_READABLE_EXPLANATION: RuleExplanation = {
+  rule: 'knowledge-source-system-object-not-ai-readable',
+  covers: 'why a system object source must opt into AI reads',
+  paragraphs: [
+    'A system object (a `sys_` name) is indexed and searched only when its own definition opts into AI reads ' +
+      'with `enable.aiReadable: true`, the posture the MCP record tools take (`isAiReadExposed` in ' +
+      '`@objectstack/spec/data`). The objects that store serialized metadata bodies are never opened, ' +
+      'whatever they declare.',
+    'The declaration belongs to the system object\'s author, not to the source: index a business object, or a ' +
+      'system object that declares it.',
+    KNOWLEDGE_SOURCE_DOORS,
+  ],
+};
+
+const KNOWLEDGE_SOURCE_FIELD_NEVER_INDEXED_EXPLANATION: RuleExplanation = {
+  rule: 'knowledge-source-field-never-indexed',
+  covers: 'why a credential-class or internal field is skipped',
+  paragraphs: [
+    'Embedding is egress: the text of every listed field is sent to the embedding provider and kept in an ' +
+      'index outside the row store. So the index never carries a credential-class field (a `secret`, or a ' +
+      '`password` the platform masks on read) or a field declared `internal: true`, even when the source ' +
+      'names it (ADR-0161 K5). The member is skipped, and the documents read less than the list says.',
+    'A warning, not a refusal: the rest of the source is indexed. Remove the member from `content` or ' +
+      '`metadataFields`. Judged by `os validate`, `os build` and `os lint`, and at the runtime publish gate ' +
+      'for a `knowledge_source` write, where it rides the advisories.',
+  ],
+};
+
 // ── Assignment rules (`validate-assignment-rules.ts`) ──
 
 const ASSIGNMENT_RULE_USER_TARGET_EXPLANATION: RuleExplanation = {
@@ -7271,6 +7364,11 @@ export const RULE_EXPLANATIONS: Readonly<Record<string, RuleExplanation>> = Obje
   [AI_CONTEXT_RELATED_LINK_UNKNOWN_EXPLANATION.rule]: AI_CONTEXT_RELATED_LINK_UNKNOWN_EXPLANATION,
   [AI_CONTEXT_BODY_NOT_LONG_TEXT_EXPLANATION.rule]: AI_CONTEXT_BODY_NOT_LONG_TEXT_EXPLANATION,
   [AI_CONTEXT_SORT_FIELD_UNSORTABLE_EXPLANATION.rule]: AI_CONTEXT_SORT_FIELD_UNSORTABLE_EXPLANATION,
+  [KNOWLEDGE_SOURCE_OBJECT_UNKNOWN_EXPLANATION.rule]: KNOWLEDGE_SOURCE_OBJECT_UNKNOWN_EXPLANATION,
+  [KNOWLEDGE_SOURCE_FIELD_UNKNOWN_EXPLANATION.rule]: KNOWLEDGE_SOURCE_FIELD_UNKNOWN_EXPLANATION,
+  [KNOWLEDGE_SOURCE_OBJECT_NOT_SEARCHABLE_EXPLANATION.rule]: KNOWLEDGE_SOURCE_OBJECT_NOT_SEARCHABLE_EXPLANATION,
+  [KNOWLEDGE_SOURCE_SYSTEM_OBJECT_NOT_AI_READABLE_EXPLANATION.rule]: KNOWLEDGE_SOURCE_SYSTEM_OBJECT_NOT_AI_READABLE_EXPLANATION,
+  [KNOWLEDGE_SOURCE_FIELD_NEVER_INDEXED_EXPLANATION.rule]: KNOWLEDGE_SOURCE_FIELD_NEVER_INDEXED_EXPLANATION,
   [ASSIGNMENT_RULE_USER_TARGET_EXPLANATION.rule]: ASSIGNMENT_RULE_USER_TARGET_EXPLANATION,
   [ASSIGNMENT_RULE_QUEUE_UNSTAFFED_EXPLANATION.rule]: ASSIGNMENT_RULE_QUEUE_UNSTAFFED_EXPLANATION,
   [SEED_VALUE_OUTSIDE_STATE_MACHINE_EXPLANATION.rule]: SEED_VALUE_OUTSIDE_STATE_MACHINE_EXPLANATION,
