@@ -24,6 +24,9 @@
 import '@testing-library/jest-dom/vitest';
 import * as React from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+// The source under test reaches `celAuthoring`'s dynamic `@objectstack/lint`
+// import; its first load is paid here, at collection (`check:test-source-alias`).
+import '@objectstack/lint';
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import { z } from 'zod';
@@ -106,6 +109,9 @@ registerBuiltinPreviews();
 registerBuiltinInspectors();
 
 beforeEach(() => {
+  // objectstack#38149 — a create whose address names no package asks for one
+  // first; this create's address names its package, as Setup's list now writes.
+  window.history.replaceState(null, '', '/?package=app.test');
   server.puts = [];
   registry.servedAtMount = true;
   registry.release = null;
@@ -113,6 +119,7 @@ beforeEach(() => {
 });
 afterEach(() => {
   cleanup();
+  window.history.replaceState(null, '', '/');
   window.localStorage.removeItem('metadata-admin:autosave');
 });
 

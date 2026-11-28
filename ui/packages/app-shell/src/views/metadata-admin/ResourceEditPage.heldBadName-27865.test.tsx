@@ -29,6 +29,11 @@
 import '@testing-library/jest-dom/vitest';
 import * as React from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+// The source under test reaches `celAuthoring`'s dynamic `@objectstack/lint`
+// import; its first load is paid here, at collection (`check:test-source-alias`).
+import '@objectstack/lint';
+// …and `anchors.ts`'s dynamic `@object-ui/plugin-detail` import, the same way.
+import '@object-ui/plugin-detail';
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import { z } from 'zod';
@@ -54,6 +59,10 @@ async function serve(input: RequestInfo | URL, init?: RequestInit): Promise<Resp
   const seg = meta[1].split('/').map(decodeURIComponent);
   if (seg[0] === '_drafts') return json(200, { drafts: [] });
   if (seg.length === 1) return json(200, { items: [] });
+  // objectstack#38149 — a create into a package is a draft and its publish.
+  if (method === 'POST' && seg[2] === 'publish') {
+    return json(200, { success: true, version: 'hmac-sha256:v1', seq: 2, state: 'active', message: `Published ${seg[0]}/${seg[1]}` });
+  }
   if (method === 'PUT') {
     const name = seg[1]!;
     server.puts.push({ name, body: JSON.parse(String(init?.body ?? '{}')) as Record<string, unknown> });
@@ -116,11 +125,15 @@ registerDefaultMetadataSchemas();
 registerBuiltinAnchors();
 
 beforeEach(() => {
+  // objectstack#38149 — a create whose address names no package asks for one
+  // first; this create's address names its package, as Setup's list now writes.
+  window.history.replaceState(null, '', '/?package=app.test');
   server.puts = [];
   seedExtra.current = {};
 });
 afterEach(() => {
   cleanup();
+  window.history.replaceState(null, '', '/');
 });
 
 const saveButton = () => screen.getByTestId('resource-save');

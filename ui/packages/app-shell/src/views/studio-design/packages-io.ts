@@ -305,7 +305,9 @@ export async function ensureCustomizationPackage(baseId: string): Promise<Ensure
   }).finally(forgetPackageListReads);
   const payload = (await res.json().catch(() => null)) as Record<string, unknown> | null;
   if (!res.ok) {
-    throw new Error(readEnvelopeFailureText(payload) ?? `HTTP ${res.status}`);
+    // objectstack#38149 — the status rides along: a `403` refuses this caller
+    // itself, which a console create says instead of asking for a package.
+    throw Object.assign(new Error(readEnvelopeFailureText(payload) ?? `HTTP ${res.status}`), { status: res.status });
   }
   // The dispatcher envelope `{ success, data }`; the declaration is the `data`.
   const parsed = EnsureCustomizationPackageResponseSchema.safeParse(payload?.data);

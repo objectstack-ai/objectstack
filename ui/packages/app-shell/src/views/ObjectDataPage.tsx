@@ -92,7 +92,8 @@ import { RECORD_PAGE_PUSHED_STATE } from './recordPagePush.js';
 import { PageHeader } from '../layout/PageHeader.js';
 import { useMetadataClient } from './metadata-admin/useMetadata.js';
 import { createRuntimeMetadata, viewEnvelope } from './runtime-metadata-persistence.js';
-import { useRuntimeCreateApp } from './objectViewViewCrud.js';
+import { reportViewNotSaved, useRuntimeCreateApp } from './objectViewViewCrud.js';
+import { useMetadataLocale } from './metadata-admin/i18n.js';
 import { buildNewViewSpec } from './newViewSpec.js';
 import { CreateViewDialog } from './CreateViewDialog.js';
 import {
@@ -336,7 +337,8 @@ export function ObjectDataPage({ dataSource, objects }: any) {
   const { appName, objectName } = useParams();
   const { t, language } = useObjectTranslation();
   // objectstack#35624 — the app Save as view saves the new view into.
-  const createApp = useRuntimeCreateApp(t);
+  const createApp = useRuntimeCreateApp();
+  const metadataLocale = useMetadataLocale();
   const { objectLabel, objectPluralLabel, fieldLabel, translateOptions } = useObjectLabel();
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
@@ -838,6 +840,8 @@ export function ObjectDataPage({ dataSource, objects }: any) {
         }
         return true;
       } catch (err) {
+        // objectstack#38149 — no package took it: nothing was written.
+        if (reportViewNotSaved(err, metadataLocale)) return false;
         console.error('[ObjectDataPage] Failed to save view:', err);
         // objectui#11578: a refused save is SAID, with the door's own message
         // (the field-anchored issues of a 422, or the refusal's text), and
@@ -849,7 +853,7 @@ export function ObjectDataPage({ dataSource, objects }: any) {
         return false;
       }
     },
-    [columns, urlFilters, metadataClient, dataSource, navigate, objectName, previewDrafts, t, createApp],
+    [columns, urlFilters, metadataClient, dataSource, navigate, objectName, previewDrafts, t, createApp, metadataLocale],
   );
 
   // ─── The CRUD affordance matrix for this surface (#5164) ──────────────
@@ -1072,6 +1076,7 @@ export function ObjectDataPage({ dataSource, objects }: any) {
 
   return (
     <div className="h-full flex flex-col bg-background min-w-0 overflow-hidden" data-testid="object-data-page">
+      {createApp.askDialog}
       {sourceCrumbs}
       <div className="hidden sm:block">
         <PageHeader

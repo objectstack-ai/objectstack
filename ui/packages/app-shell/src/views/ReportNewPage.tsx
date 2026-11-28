@@ -41,10 +41,12 @@ import type { ReportDraft } from '@object-ui/plugin-report';
 import { ReportBuilderHost } from './ReportBuilderHost.js';
 import { useDesignModeActive, useHoldDesignModeOut } from '../layout/designMode.js';
 import {
-  resolveRuntimeCreatePackage,
+  isRuntimeCreateNotSaved,
+  pickRuntimeCreatePackage,
   saveAndPublishInPackage,
-  saveAndPublishRuntimeMetadata,
 } from './runtime-metadata-persistence.js';
+import { runtimeCreateRefusalText, usePackageCreateAsk } from './metadata-admin/PackageCreateAsk.js';
+import { useMetadataLocale } from './metadata-admin/i18n.js';
 import { draftBarPackageOf } from '../preview/DraftPreviewBar.js';
 import { useMetadataClient } from './metadata-admin/useMetadata.js';
 import { useMetadata } from '../providers/MetadataProvider.js';
@@ -122,15 +124,27 @@ export function ReportNewPage({ dataSource }: { dataSource?: DataSource }) {
   // objectstack#36906, objectstack#37261 — a new report is saved in the app's
   // package, where Studio's report list finds it, as a new view made in an app
   // is (`resolveRuntimeCreatePackage`): the package when it is writable, else
-  // its customization package through the ensure door, else, when neither can
-  // be had, naming no package, and a notice says so. One rule for both ways in:
-  // Studio's report list and the app's own reports index. Outside any app it
-  // names no package, as a view does.
+  // its customization package through the ensure door. One rule for both ways
+  // in: Studio's report list and the app's own reports index.
+  // objectstack#38149 — when neither can be had, or outside any app, the
+  // author picks a package or creates one before anything is written; in a
+  // system app the report is refused, naming where to make it instead.
   const appPackageId = draftBarPackageOf(appName, apps as Parameters<typeof draftBarPackageOf>[1]);
+  const { ask: askPackage, dialog: packageAskDialog } = usePackageCreateAsk();
+  const metadataLocale = useMetadataLocale();
 
   const handleSave = React.useCallback(
     async (draft: ReportDraft): Promise<boolean> => {
       if (!metadataClient) return false;
+      let packageId: string;
+      try {
+        packageId = await pickRuntimeCreatePackage({ packageId: appPackageId, askPackage }, 'report');
+      } catch (err) {
+        if (!isRuntimeCreateNotSaved(err)) throw err;
+        const refusal = runtimeCreateRefusalText(err, 'report', metadataLocale);
+        if (refusal) toast.error(t('form.saveError'), { description: refusal });
+        return false;
+      }
       await loadHanRomanizer().catch(() => {});
       const taken = new Set(((reports as Array<{ name?: unknown }>) ?? []).map((r) => String(r?.name ?? '')));
       // A report needs a name to be listed by: one left blank is saved under
@@ -150,19 +164,11 @@ export function ReportNewPage({ dataSource }: { dataSource?: DataSource }) {
         }
         const body = { ...draft, label, name };
         const ctx = { metadataClient, dataSource: dataSource as any };
-        const packageId = await resolveRuntimeCreatePackage(appPackageId, 'report');
-        const outcome = packageId
-          ? await saveAndPublishInPackage('report', name, body, packageId, ctx)
-          : await saveAndPublishRuntimeMetadata('report', name, body, ctx);
+        const outcome = await saveAndPublishInPackage('report', name, body, packageId, ctx);
         if (outcome === 'pending-draft') {
           toast.error(t('form.saveError'), { description: t('report.builder.pendingDraft') });
           return false;
         }
-        // The app's package (or its customization package) could not be had,
-        // so the report was saved naming no package: Studio's report list does
-        // not show it. Say so, whichever way the builder was opened, as a new
-        // view saved outside its app does (`onSavedOutsideApp`).
-        if (appPackageId && !packageId) toast.info(t('report.builder.savedOutsideApp'));
       } catch (err) {
         toast.error(t('form.saveError'), {
           description: formatMetadataError(err),
@@ -177,7 +183,7 @@ export function ReportNewPage({ dataSource }: { dataSource?: DataSource }) {
       });
       return true;
     },
-    [metadataClient, reports, language, dataSource, refresh, navigate, appName, t, studioReturn, appPackageId],
+    [metadataClient, reports, language, dataSource, refresh, navigate, appName, t, studioReturn, appPackageId, askPackage, metadataLocale],
   );
 
   if (loading || !isResolved) {
@@ -212,11 +218,14 @@ export function ReportNewPage({ dataSource }: { dataSource?: DataSource }) {
   }
 
   return (
-    <ReportBuilderHost
-      initial={NEW_REPORT_SEED}
-      onSave={handleSave}
-      onClose={backToReports}
-      dataSource={dataSource}
-    />
+    <>
+      <ReportBuilderHost
+        initial={NEW_REPORT_SEED}
+        onSave={handleSave}
+        onClose={backToReports}
+        dataSource={dataSource}
+      />
+      {packageAskDialog}
+    </>
   );
 }

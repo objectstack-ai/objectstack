@@ -60,6 +60,9 @@
  */
 
 import '@testing-library/jest-dom/vitest';
+// The source under test reaches a dynamic `@objectstack/lint` import; its first
+// load is paid here, at collection (`check:test-source-alias`).
+import '@objectstack/lint';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import React from 'react';
 import { render, screen, fireEvent, waitFor } from '@testing-library/react';
@@ -93,6 +96,11 @@ vi.mock('@object-ui/plugin-designer', async (importOriginal) => ({
 // identical to the component's own, so ESM hands the lazy factory this
 // already-resolved module.
 import '@object-ui/plugin-designer';
+// objectstack#38149 — the route's lazy boundary is now the console's wrapper
+// (`React.lazy(() => import('./ConsoleCreateAppPage.js'))`), whose own graph
+// (the package ask, the Packages page's create dialog) was a second unbounded
+// load inside the same `findByTestId` budget. Paid here too, for the same reason.
+import '../ConsoleCreateAppPage';
 
 vi.mock('@object-ui/i18n', async (importOriginal) => ({
   ...(await importOriginal<Record<string, unknown>>()),

@@ -93,6 +93,8 @@ client.current = new MetadataClient({ baseUrl: '', fetch: vi.fn(serve) as unknow
 registerDefaultMetadataSchemas();
 
 const PKG = 'com.acme.crm';
+/** The package a Setup create's address names. */
+const SETUP_PKG = 'app.setup_side';
 const AREA: MetadataAreaHost = { packageId: PKG, readOnly: false, basePath: `/studio/${PKG}/metadata` };
 
 beforeEach(() => {
@@ -124,7 +126,8 @@ function Landed() {
 async function createAndSave(type: 'dashboard' | 'view', host: MetadataAreaHost | null) {
   const base = host ? host.basePath : '/apps/setup/metadata';
   // The page binds its saves to `?package=` (`readActivePackageBinding`), as the area's address does.
-  if (host?.packageId) window.history.replaceState(null, '', `/?package=${host.packageId}`);
+  // Setup's create names its package too (objectstack#38149: else it asks first).
+  window.history.replaceState(null, '', `/?package=${host?.packageId ?? SETUP_PKG}`);
   const tree = (
     <MemoryRouter initialEntries={[`${base}/${type}`, `${base}/${type}/new`]} initialIndex={1}>
       <Routes>
@@ -163,6 +166,6 @@ describe("the create landing's history entry, at the real page (objectstack#3690
   it("CONTROL: with no area host (Setup), a dashboard's create landing PUSHES, as before", async () => {
     const item = await createAndSave('dashboard', null);
     await waitFor(() => expect(screen.getByTestId('landed')).toHaveTextContent(`${item} PUSH`), { timeout: 8000 });
-    expect(server.puts).toEqual([{ key: 'dashboard/pipeline', packageId: null }]);
+    expect(server.puts).toEqual([{ key: 'dashboard/pipeline', packageId: SETUP_PKG }]);
   });
 });

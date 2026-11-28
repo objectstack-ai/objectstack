@@ -21,6 +21,9 @@
  */
 
 import '@testing-library/jest-dom/vitest';
+// The source under test reaches a dynamic `@objectstack/lint` import; its first
+// load is paid here, at collection (`check:test-source-alias`).
+import '@objectstack/lint';
 import * as React from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
@@ -100,11 +103,15 @@ registerBuiltinPreviews();
 registerBuiltinInspectors();
 
 beforeEach(() => {
+  // objectstack#38149 — a create whose address names no package asks for one
+  // first; this create's address names its package, as Setup's list now writes.
+  window.history.replaceState(null, '', '/?package=app.test');
   server.puts = [];
   window.localStorage.setItem('metadata-admin:autosave', '0');
 });
 afterEach(() => {
   cleanup();
+  window.history.replaceState(null, '', '/');
   window.localStorage.removeItem('metadata-admin:autosave');
 });
 

@@ -23,7 +23,7 @@
 import '@testing-library/jest-dom/vitest';
 import * as React from 'react';
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
-import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { MemoryRouter, Route, Routes, useLocation, useNavigate } from 'react-router-dom';
 
 const DRAFT = vi.hoisted(() => ({
@@ -80,7 +80,7 @@ vi.mock('../providers/MetadataProvider.js', () => ({
 
 /** The package doors `resolveRuntimeCreatePackage` asks: the listed packages, and the ensure door. */
 const doors = vi.hoisted(() => ({
-  listed: new Map<string, { writable: boolean }>(),
+  listed: new Map<string, { writable: boolean; manifest?: Record<string, unknown> }>(),
   ensure: vi.fn(async (_base: string): Promise<{ packageId: string; writable: boolean }> => {
     throw new Error('not asked');
   }),
@@ -93,6 +93,8 @@ vi.mock('./studio-design/packages-io.js', async (importOriginal) => ({
     return doors.listed;
   },
   ensureCustomizationPackage: (base: string) => doors.ensure(base),
+  // objectstack#38149 — the list the create ask offers.
+  fetchPackages: async () => [{ id: 'app.alpha', name: 'Alpha', writable: true, namespace: 'alpha' }],
 }));
 
 vi.mock('@object-ui/auth', async (importOriginal) => ({
@@ -343,28 +345,68 @@ describe("the app's own New saves into the app's package, as a new view does (ob
     expect(toastInfo).not.toHaveBeenCalled();
   });
 
-  it('control: when the ensure door refuses, Save falls back to naming no package, and says so, as a new view does', async () => {
+  // objectstack#38149 (decisions Q-b of topic objectstack#37424, answered C):
+  // the package-less fallback is retired. The ensure door refusing this caller
+  // (403) refuses the save with the door's reason, and nothing is written.
+  it('control: when the ensure door refuses the caller, Save is refused with its reason and nothing is written', async () => {
     doors.listed = new Map([[PKG, { writable: false }]]);
     doors.ensure.mockImplementation(async () => {
       throw Object.assign(new Error('Forbidden'), { status: 403 });
     });
-    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
-    try {
-      await saveFromApp();
-      expect(doors.ensure).toHaveBeenCalledWith(PKG);
-      expect(client.save).not.toHaveBeenCalled();
-      expect(saveAndPublish).toHaveBeenCalledWith(
-        'report',
-        'payment_analysis',
-        { ...DRAFT, name: 'payment_analysis' },
-        expect.objectContaining({ metadataClient: client }),
-      );
-      expect(toastInfo).toHaveBeenCalledTimes(1);
-      expect(toastInfo).toHaveBeenCalledWith('report.builder.savedOutsideApp');
-      expect(warn).toHaveBeenCalledWith(expect.stringContaining('the report is saved naming no package'), expect.anything());
-    } finally {
-      warn.mockRestore();
-    }
+    mount();
+    fireEvent.click(screen.getByText('save'));
+    await waitFor(() => expect(toastError).toHaveBeenCalledTimes(1));
+    expect(doors.ensure).toHaveBeenCalledWith(PKG);
+    expect(toastError).toHaveBeenCalledWith('form.saveError', { description: expect.stringContaining('Forbidden') });
+    expect(client.save).not.toHaveBeenCalled();
+    expect(client.publish).not.toHaveBeenCalled();
+    expect(saveAndPublish).not.toHaveBeenCalled();
+    expect(toastInfo).not.toHaveBeenCalled();
+    expect(screen.getByTestId('where')).not.toHaveTextContent('/apps/crm/report/payment_analysis');
+  });
+
+  it('objectstack#38149: an app package the server does not list asks, and the report is saved where the person chose', async () => {
+    doors.listed = new Map();
+    mount();
+    fireEvent.click(screen.getByText('save'));
+    const dialog = await screen.findByTestId('package-create-ask');
+    expect(client.save).not.toHaveBeenCalled();
+    fireEvent.click(await within(dialog).findByTestId('package-create-ask-option-app.alpha'));
+    fireEvent.click(within(dialog).getByTestId('package-create-ask-continue'));
+    await waitFor(() => expect(screen.getByTestId('where')).toHaveTextContent('/apps/crm/report/payment_analysis'));
+    expect(client.save).toHaveBeenCalledWith(
+      'report',
+      'payment_analysis',
+      { ...DRAFT, name: 'payment_analysis' },
+      { mode: 'draft', ifNoneMatch: '*', packageId: 'app.alpha' },
+    );
+    expect(saveAndPublish).not.toHaveBeenCalled();
+  });
+
+  it('objectstack#38149: a cancelled ask writes nothing and says nothing', async () => {
+    doors.listed = new Map();
+    mount();
+    fireEvent.click(screen.getByText('save'));
+    fireEvent.click(within(await screen.findByTestId('package-create-ask')).getByTestId('package-create-ask-cancel'));
+    await waitFor(() => expect(screen.queryByTestId('package-create-ask')).toBeNull());
+    expect(client.save).not.toHaveBeenCalled();
+    expect(saveAndPublish).not.toHaveBeenCalled();
+    expect(toastError).not.toHaveBeenCalled();
+    expect(screen.getByTestId('builder')).toBeInTheDocument();
+  });
+
+  it('objectstack#38149 (Q-b, C): in a system app the report is refused with the reason, and the ensure door is never asked', async () => {
+    doors.listed = new Map([[PKG, { writable: false, manifest: { id: PKG, scope: 'system' } }]]);
+    mount();
+    fireEvent.click(screen.getByText('save'));
+    await waitFor(() => expect(toastError).toHaveBeenCalledTimes(1));
+    expect(toastError).toHaveBeenCalledWith('form.saveError', {
+      description: expect.stringContaining('Create the report in one of your business apps instead.'),
+    });
+    expect(doors.ensure).not.toHaveBeenCalled();
+    expect(client.save).not.toHaveBeenCalled();
+    expect(saveAndPublish).not.toHaveBeenCalled();
+    expect(screen.queryByTestId('package-create-ask')).toBeNull();
   });
 });
 
@@ -466,35 +508,20 @@ describe("opened from Studio's report list (objectstack#36906, decision 13)", ()
     expect(toastInfo).not.toHaveBeenCalled();
   });
 
-  it('control: when the ensure door refuses, Save falls back to naming no package, and says so, as a new view does', async () => {
+  // objectstack#38149: as on the app leg, the refusal is said and nothing is written.
+  it('control: when the ensure door refuses the caller, Save is refused with its reason and stays on the builder', async () => {
     doors.listed = new Map([[PKG, { writable: false }]]);
     doors.ensure.mockImplementation(async () => {
       throw Object.assign(new Error('Forbidden'), { status: 403 });
     });
-    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
-    try {
-      mountFromStudio();
-      fireEvent.click(screen.getByText('save'));
-      await waitFor(() =>
-        expect(screen.getByTestId('where-full').textContent).toBe(`/apps/crm/report/payment_analysis${fromStudio}`),
-      );
-      expect(doors.ensure).toHaveBeenCalledWith(PKG);
-      expect(client.save).not.toHaveBeenCalled();
-      expect(saveAndPublish).toHaveBeenCalledWith(
-        'report',
-        'payment_analysis',
-        { ...DRAFT, name: 'payment_analysis' },
-        expect.objectContaining({ metadataClient: client }),
-      );
-      // The author is told the report is not where the Studio list looks.
-      expect(toastInfo).toHaveBeenCalledTimes(1);
-      // (This harness registers no locale pack, so `t` answers the key itself.)
-      expect(toastInfo).toHaveBeenCalledWith('report.builder.savedOutsideApp');
-      // The developer-console line names the type it saved, not a view.
-      expect(warn).toHaveBeenCalledWith(expect.stringContaining('the report is saved naming no package'), expect.anything());
-    } finally {
-      warn.mockRestore();
-    }
+    mountFromStudio();
+    fireEvent.click(screen.getByText('save'));
+    await waitFor(() => expect(toastError).toHaveBeenCalledTimes(1));
+    expect(doors.ensure).toHaveBeenCalledWith(PKG);
+    expect(client.save).not.toHaveBeenCalled();
+    expect(saveAndPublish).not.toHaveBeenCalled();
+    expect(toastInfo).not.toHaveBeenCalled();
+    expect(screen.getByTestId('builder')).toBeInTheDocument();
   });
 
   it("Save lands on the new report's page, which keeps the way back to Studio", async () => {

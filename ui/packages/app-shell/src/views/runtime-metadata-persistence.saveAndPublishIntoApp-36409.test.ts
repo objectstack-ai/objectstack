@@ -5,10 +5,11 @@
  * and published in one act (`saveAndPublishRuntimeMetadata`), and its first
  * write lands in the app it was made in, exactly as `createRuntimeMetadata`
  * saves a new view (objectstack#35624, ruling C): the app's own package when
- * the server lists it writable, else the pair the ensure door names, else no
+ * the server lists it writable, else the pair the ensure door names, else
+ * (objectstack#38149) the package the person picks when asked — never no
  * package at all. Only the SAVE names a package: the publish, and the discard
  * a refused publish runs, address the name's one holder (ADR-0146 D8). A type
- * other than `view` ignores the app.
+ * other than `view` is saved into the app too (objectstack#38149).
  *
  * A REAL `MetadataClient` writes, so each pin reads the request the server
  * would receive; the two package doors answer through the page's `fetch`,
@@ -18,6 +19,9 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { MetadataClient } from '@object-ui/data-objectstack';
 import { saveAndPublishRuntimeMetadata, viewEnvelope } from './runtime-metadata-persistence';
+
+/** An ask no case here reaches: a writable or paired app package answers first. */
+const NO_ASK = async () => null;
 
 const json = (status: number, body: unknown) =>
   new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } });
@@ -103,7 +107,7 @@ describe('saveAndPublishRuntimeMetadata saves a new shared view into the app it 
       saveAndPublishRuntimeMetadata('view', env.name, env, {
         metadataClient: realClient(),
         objectName: 'crm_account',
-        app: { packageId: 'com.acme.helpdesk' },
+        app: { packageId: 'com.acme.helpdesk', askPackage: NO_ASK },
       }),
     ).resolves.toBe('published');
 
@@ -122,7 +126,7 @@ describe('saveAndPublishRuntimeMetadata saves a new shared view into the app it 
     await saveAndPublishRuntimeMetadata('view', env.name, env, {
       metadataClient: realClient(),
       objectName: 'crm_account',
-      app: { packageId: 'com.example.crm' },
+      app: { packageId: 'com.example.crm', askPackage: NO_ASK },
     });
 
     expect(pageCalls).toEqual([
@@ -134,15 +138,25 @@ describe('saveAndPublishRuntimeMetadata saves a new shared view into the app it 
     expect(packagesNamedAfterSave()).toEqual([null]);
   });
 
-  it('an app whose package cannot be resolved (not listed), or no app: the save names none', async () => {
+  it('an app whose package cannot be resolved (not listed), or no app: the person is asked, and the save names the answer', async () => {
+    stubPageFetch([{ id: 'com.other.app', writable: true }]);
+    const askPackage = vi.fn(async () => 'app.chosen');
+
+    await saveAndPublishRuntimeMetadata('view', env.name, env, { metadataClient: realClient(), app: { packageId: 'com.example.crm', askPackage } });
+    await saveAndPublishRuntimeMetadata('view', env.name, env, { metadataClient: realClient(), app: { packageId: null, askPackage } });
+
+    expect(askPackage).toHaveBeenCalledTimes(2);
+    expect(pageCalls).toEqual(['GET /api/v1/packages']);
+    expect(writes.map((w) => w.url.searchParams.get('package'))).toEqual(['app.chosen', null, 'app.chosen', null]);
+  });
+
+  it('control: no app context (a write that creates nothing in an app) names no package and asks nothing', async () => {
     stubPageFetch([{ id: 'com.other.app', writable: true }]);
 
-    await saveAndPublishRuntimeMetadata('view', env.name, env, { metadataClient: realClient(), app: { packageId: 'com.example.crm' } });
-    await saveAndPublishRuntimeMetadata('view', env.name, env, { metadataClient: realClient(), app: { packageId: null } });
     await saveAndPublishRuntimeMetadata('view', env.name, env, { metadataClient: realClient() });
 
-    expect(pageCalls).toEqual(['GET /api/v1/packages']);
-    expect(writes.map((w) => w.url.searchParams.get('package'))).toEqual([null, null, null, null, null, null]);
+    expect(pageCalls).toEqual([]);
+    expect(writes.map((w) => w.url.searchParams.get('package'))).toEqual([null, null]);
   });
 
   it('a refused publish: the discard of the draft this call wrote names no package either', async () => {
@@ -151,7 +165,7 @@ describe('saveAndPublishRuntimeMetadata saves a new shared view into the app it 
     await expect(
       saveAndPublishRuntimeMetadata('view', env.name, env, {
         metadataClient: realClient(true),
-        app: { packageId: 'com.example.crm' },
+        app: { packageId: 'com.example.crm', askPackage: NO_ASK },
       }),
     ).rejects.toBeTruthy();
 
@@ -161,15 +175,15 @@ describe('saveAndPublishRuntimeMetadata saves a new shared view into the app it 
     expect(packagesNamedAfterSave().every((p) => p === null)).toBe(true);
   });
 
-  it('a type other than view ignores the app: no package door is asked and the save names none', async () => {
+  it('a type other than view is saved into the app too (objectstack#38149)', async () => {
     stubPageFetch([{ id: 'com.acme.helpdesk', writable: true }]);
 
     await saveAndPublishRuntimeMetadata('dashboard', 'ops_board', { name: 'ops_board' }, {
       metadataClient: realClient(),
-      app: { packageId: 'com.acme.helpdesk' },
+      app: { packageId: 'com.acme.helpdesk', askPackage: NO_ASK },
     });
 
-    expect(pageCalls).toEqual([]);
-    expect(writes.map((w) => w.url.searchParams.get('package'))).toEqual([null, null]);
+    expect(pageCalls).toEqual(['GET /api/v1/packages']);
+    expect(writes.map((w) => w.url.searchParams.get('package'))).toEqual(['com.acme.helpdesk', null]);
   });
 });

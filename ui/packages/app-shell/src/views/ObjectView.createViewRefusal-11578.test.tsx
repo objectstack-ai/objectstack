@@ -62,7 +62,9 @@ vi.mock('@object-ui/auth', async (importOriginal) => ({
   useAuth: () => ({ user: { id: 'u1', name: 'Ada' }, activeOrganization: null }),
   // The add-view button and the dialog are admin-only.
   useWorkspaceAdminStatus: () => ({ isAdmin: true, isResolved: true }),
-  createAuthenticatedFetch: () => vi.fn(),
+  // objectstack#38149 — the package list a create reads goes through the
+  // page's `fetch`, so the routed app's writable package answers it.
+  createAuthenticatedFetch: () => (input: RequestInfo | URL, init?: RequestInit) => globalThis.fetch(input, init),
 }));
 
 vi.mock('@object-ui/collaboration', async (importOriginal) => ({
@@ -211,7 +213,16 @@ beforeEach(() => {
   cleanup();
   puts.length = 0;
   client = new MetadataClient({ baseUrl: 'http://localhost', fetch: wire() as unknown as typeof fetch });
-  vi.stubGlobal('fetch', vi.fn(async () => json({ data: [] }, 200)));
+  // objectstack#38149 — the routed app `demo` is a writable package, so the
+  // create saves into it; every other page read answers empty, as before.
+  vi.stubGlobal(
+    'fetch',
+    vi.fn(async (input: RequestInfo | URL) =>
+      String(input) === '/api/v1/packages'
+        ? json({ success: true, data: { packages: [{ manifest: { id: 'demo', name: 'Demo' }, writable: true }] } }, 200)
+        : json({ data: [] }, 200),
+    ),
+  );
   vi.spyOn(console, 'error').mockImplementation(() => {});
 });
 

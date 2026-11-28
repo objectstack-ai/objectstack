@@ -18,8 +18,9 @@
  * its transport an in-memory server that records each PUT's `mode`, package
  * and first-write pin, as in `ResourceEditPage.liveCreate-7611.test.tsx`:
  *
- *  - outside a package: ONE live PUT (no `mode`, no `package`) with the
- *    first-write pin, and the editor opens the created position;
+ *  - outside a package: superseded by objectstack#38149 (decisions Q-a of
+ *    topic objectstack#37424, answered A): the create asks for its package
+ *    first, and no live PUT is sent;
  *  - under a package binding the create stays a package draft (control), the
  *    ADR-0086 package door's draft semantics.
  */
@@ -27,7 +28,10 @@
 import '@testing-library/jest-dom/vitest';
 import * as React from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+// The source under test reaches `celAuthoring`'s dynamic `@objectstack/lint`
+// import; its first load is paid here, at collection (`check:test-source-alias`).
+import '@objectstack/lint';
+import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { MemoryRouter, Route, Routes, useLocation } from 'react-router-dom';
 import { MetadataClient } from '@object-ui/data-objectstack';
 
@@ -84,6 +88,12 @@ vi.mock('./useMetadata', async (importOriginal) => {
   };
 });
 
+/** The package list the create ask reads (objectstack#38149). */
+vi.mock('../studio-design/packages-io', async (importOriginal) => ({
+  ...(await importOriginal<Record<string, unknown>>()),
+  fetchPackages: async () => [{ id: 'app.alpha', name: 'Alpha', writable: true, namespace: 'alpha' }],
+}));
+
 import { MetadataResourceEditPage } from './ResourceEditPage';
 // The position's registration — its only one — lives in the built-in
 // component module, not in `anchors.ts`.
@@ -134,10 +144,17 @@ async function createPosition() {
 }
 
 describe('a position is created live from Setup (objectstack#26192)', () => {
-  it('outside a package: one live PUT with the first-write pin, then the editor opens', async () => {
+  // objectstack#38149 (decisions Q-a of topic objectstack#37424, answered A)
+  // supersedes the live package-less create: a create whose address names no
+  // package asks for one first, and the live write is never sent.
+  it('outside a package: the create asks for its package, and no live PUT is sent', async () => {
     await createPosition();
-    await waitFor(() => expect(screen.getByTestId('where')).toHaveTextContent('/metadata/position/regional_lead'), { timeout: 8000 });
-    expect(server.puts).toEqual([{ name: 'regional_lead', mode: null, packageId: null, ifNoneMatch: '*' }]);
+    const dialog = await screen.findByTestId('package-create-ask', {}, { timeout: 8000 });
+    expect(server.puts).toEqual([]);
+    fireEvent.click(within(dialog).getByTestId('package-create-ask-cancel'));
+    await waitFor(() => expect(screen.queryByTestId('package-create-ask')).toBeNull());
+    expect(server.puts).toEqual([]);
+    expect(screen.getByTestId('where')).toHaveTextContent('/metadata/position/new');
   });
 
   it('under a package binding the create stays a package draft (control)', async () => {

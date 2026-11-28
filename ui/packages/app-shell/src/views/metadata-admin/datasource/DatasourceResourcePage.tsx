@@ -33,8 +33,12 @@
  *  - **Test** a connection (saved → `POST …/:name/test`; draft in the editor →
  *    `POST …/test`).
  *  - **Sync objects**: introspect remote tables (`GET …/remote-tables`), pick
- *    which to import, generate an object definition for each (`POST …/object-draft`),
- *    and create it through the normal metadata channel (`MetadataClient.save('object', …)`).
+ *    which to import, and import each through the federation's import door
+ *    (`POST …/:name/external/tables/:remote/import`), which drafts the object
+ *    and saves it where the server's import landing puts it: the datasource's
+ *    own package, its read-only base's `.custom` pair, or no package for a
+ *    datasource that has none (objectstack#38149; the landing is the server's,
+ *    never chosen here).
  *    Offered only on a federation source (`offersSync`, objectui#13318); a
  *    managed row says why it has none (`explainsNoSync`). Once
  *    an object is created the dialog stays open on the result: it links each
@@ -811,13 +815,14 @@ export function DatasourceResourcePage(_props: { type?: string }): React.ReactEl
     const failed: unknown[] = [];
     for (const table of selected) {
       try {
-        const { draft } = await api(`/api/v1/datasources/${encodeURIComponent(syncName)}/object-draft`, {
-          method: 'POST',
-          body: JSON.stringify({ table }),
-        });
-        await metaClient.save('object', draft.name, draft.definition);
-        const label = draft.definition?.label;
-        created.push({ name: draft.name, label: typeof label === 'string' ? label : undefined });
+        // objectstack#38149 — the import door, never a client save naming no
+        // package: the server lands the object in the datasource's package.
+        const { object } = await api(
+          `/api/v1/datasources/${encodeURIComponent(syncName)}/external/tables/${encodeURIComponent(table)}/import`,
+          { method: 'POST', body: JSON.stringify({}) },
+        );
+        const label = object.definition?.label;
+        created.push({ name: String(object.name), label: typeof label === 'string' ? label : undefined });
       } catch (err) {
         failures.push(`${table}: ${(err as Error).message}`);
         failed.push(err);

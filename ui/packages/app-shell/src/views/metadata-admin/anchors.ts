@@ -444,8 +444,12 @@ export function registerBuiltinAnchors(): void {
       { from: 'label', to: 'name', transform: 'slugify', untilUserEdits: true },
     ],
     createDefaults: { objects: {} },
-    // The set's EditPage, `PermissionMatrixEditPage`, edits the live set
-    // outside a package and reads no draft (objectui#7611).
+    // The set's EditPage, `PermissionMatrixEditPage`, edits the live set and
+    // reads no draft (objectui#7611). objectstack#38149 — a create asks for
+    // its package first, so a new set is saved as a draft there and published
+    // at once (`createLive` holds only for a package-less create, which the
+    // editor no longer starts); the matrix's live save of it, naming no
+    // package, lands on that package's row.
     createLive: true,
   });
 

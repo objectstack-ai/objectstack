@@ -324,6 +324,8 @@ describe('Save takes effect at once (objectstack#36902 item 1)', () => {
 
 describe('a create publishes after its save (objectstack#36902 item 2)', () => {
   function renderCreate() {
+    // objectstack#38149 — the create's address names its package (else it asks first).
+    window.history.replaceState(null, '', '/?package=app.test');
     render(
       <MemoryRouter initialEntries={['/metadata/doc/new']}>
         <Routes>

@@ -8,11 +8,18 @@ const SYSTEM_SCOPES = new Set(['system', 'cloud']);
  * valid authoring destinations (ADR-0070 D2). Code/installed (system|cloud)
  * packages are filtered out.
  *
- * There is no package-less "Local / Custom" scope: every runtime-authored item
- * lives in a writable base (ADR-0070 D1/D5 — the kernel rejects orphan creates
- * with `writable_package_required`, and legacy orphans are adopted into a base),
- * so the selector never offers an orphan bucket. The kernel keeps `null` /
- * `sys_metadata` provenance only as a read-side rehydration tag for legacy rows.
+ * There is no package-less "Local / Custom" scope, so the selector never
+ * offers an orphan bucket. A create in the console names its package: where
+ * none is named, the person is asked to pick one or create one
+ * (`PackageCreateAsk.tsx`, objectstack#38149, ADR-0070 D3). The kernel does
+ * NOT yet refuse a create that names no package — the metadata door still
+ * accepts a `null` package and stores the row package-less (a loose item,
+ * which Packages → Adopt loose items moves into a base); that refusal is the
+ * kernel-close card's of topic objectstack#37424. Until it lands, the ask is
+ * the console's only guard.
+ *
+ * These options carry no writability: the server's `writable` verdict is read
+ * where a create's package is chosen (the ask), not here.
  */
 export function buildPackageScopeOptions(
   rawList: unknown[] | null | undefined,

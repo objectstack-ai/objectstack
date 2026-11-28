@@ -167,7 +167,8 @@ const MetadataResourceHistoryPage = routeChunk.lazy(() => import('../views/metad
 // App authoring + dashboard editor pages — sourced from
 // @object-ui/plugin-designer so third-party hosts can opt out by not
 // registering these routes.
-const CreateAppPage = routeChunk.lazy(() => import('@object-ui/plugin-designer').then(m => m.CreateAppPage));
+// objectstack#38149 — the console's wrapper saves the new app into a package the author picks or creates.
+const CreateAppPage = routeChunk.lazy(() => import('./ConsoleCreateAppPage.js').then(m => m.ConsoleCreateAppPage));
 const EditAppPage = routeChunk.lazy(() => import('@object-ui/plugin-designer').then(m => m.EditAppPage));
 const DashboardDesignPage = routeChunk.lazy(() => import('@object-ui/plugin-designer').then(m => m.DashboardDesignPage));
 

@@ -17,7 +17,7 @@
  */
 
 import * as React from 'react';
-import { Navigate, Route, Routes, useLocation } from 'react-router-dom';
+import { Navigate, Route, Routes, useLocation, useParams } from 'react-router-dom';
 import { Alert, AlertDescription } from '@object-ui/components';
 import { usePermissions } from '@object-ui/permissions';
 import { MetadataAreaHostContext, type MetadataAreaHost } from '../metadata-admin/metadataAreaHost.js';
@@ -49,6 +49,7 @@ function Loading({ locale }: { locale: string }): React.ReactElement {
 
 export function AccessDirectoryPage(): React.ReactElement {
   const { pathname, search } = useLocation();
+  const { '*': splat } = useParams();
   const locale = useMetadataLocale();
   const { systemPermissions } = usePermissions();
   const allowed = holdsAccessDirectoryCapability(systemPermissions);
@@ -65,9 +66,15 @@ export function AccessDirectoryPage(): React.ReactElement {
     );
   }
 
-  const rest = pathname.startsWith(ACCESS_DIRECTORY_PATH)
-    ? pathname.slice(ACCESS_DIRECTORY_PATH.length).replace(/^\/+/, '')
-    : '';
+  // The sub-path below this page is the route's own splat, so it is read on
+  // every address the shell serves the page at: the shell serves Setup at its
+  // package id (`/apps/com.objectstack.setup/...`), not at the `setup` alias
+  // `ACCESS_DIRECTORY_PATH` spells (objectstack#38206). The prefix read stays
+  // only for a mount without a splat.
+  const rest = (
+    splat ??
+    (pathname.startsWith(ACCESS_DIRECTORY_PATH) ? pathname.slice(ACCESS_DIRECTORY_PATH.length) : '')
+  ).replace(/^\/+/, '');
   const redirect = accessDirectoryLocation(rest, search);
   if (redirect) return <Navigate to={redirect} replace />;
 

@@ -122,7 +122,9 @@ vi.mock('@object-ui/auth', async (importOriginal) => ({
   ...(await importOriginal<Record<string, unknown>>()),
   useAuth: () => ({ user: { id: 'u1', name: 'Ada' }, activeOrganization: null }),
   useWorkspaceAdminStatus: () => ({ isAdmin: true, isResolved: true }),
-  createAuthenticatedFetch: () => vi.fn(),
+  // objectstack#38149 — the package list a create reads goes through the
+  // page's `fetch`, so the routed app's writable package answers it.
+  createAuthenticatedFetch: () => (input: RequestInfo | URL, init?: RequestInit) => globalThis.fetch(input, init),
 }));
 vi.mock('@object-ui/plugin-list', async (importOriginal) => ({
   ...(await importOriginal<typeof import('@object-ui/plugin-list')>()),

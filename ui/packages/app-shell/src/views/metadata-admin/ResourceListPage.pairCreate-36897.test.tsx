@@ -120,10 +120,11 @@ function Location() {
   return <div data-testid="location">{`${l.pathname}${l.search}`}</div>;
 }
 
-function mount(host: MetadataAreaHost | null, type: string) {
+function mount(host: MetadataAreaHost | null, type: string, setupPackage?: string) {
   const base = host?.basePath ?? '/apps/setup/metadata';
+  const named = host?.packageId ?? setupPackage;
   const tree = (
-    <MemoryRouter initialEntries={[`${base}/${type}${host ? `?package=${host.packageId}` : ''}`]}>
+    <MemoryRouter initialEntries={[`${base}/${type}${named ? `?package=${named}` : ''}`]}>
       <Routes>
         <Route path={`${base}/${type}`} element={<MetadataResourceListPage type={type} />} />
         <Route path="*" element={null} />
@@ -165,8 +166,9 @@ describe('the list offers 「新建」 on a read-only base, into its pair (objec
     expect(createButton()).toBeNull();
   });
 
+  // Setup's address names the package (objectstack#38149: a heuristic pick asks first).
   it('CONTROL — Setup: 新建 goes to the item create and opens no dialog', async () => {
-    mount(null, 'object');
+    mount(null, 'object', BASE);
     await screen.findByTestId(`metadata-row-crm_object_one`);
     fireEvent.click(createButton()!);
     await waitFor(() => expect(screen.getByTestId('location').textContent).toMatch(/^\/apps\/setup\/metadata\/object\/new/));

@@ -2,19 +2,20 @@
 
 /**
  * objectstack#35624, design step 3 — when the app's customization package
- * cannot be had, the create still saves, as before this card (naming no
- * package), and the author is told where the view went.
+ * could not be had, the create still saved naming no package, and the author
+ * was told where the view went.
  *
- * The case the ruling names: under a wall, `POST /packages/:base/ensure-customization`
- * answers a tenant administrator `403` (`refuseWalledCatalogPackageWrite`). The
- * refusal is answered here in the router's error envelope, the shape
- * examples/app-crm served for its `404` (`{ success: false, error: { code,
- * message, httpStatus } }`). An app whose package the server does not list
- * takes the same fallback: there is no package to judge.
+ * objectstack#38149 (decisions Q-b of topic objectstack#37424, answered C)
+ * supersedes that fallback: a console create never names no package.
  *
- * The notice itself is `useRuntimeCreateApp`'s: the routed app's package by
- * the draft preview bar's rule, and an info toast that says the bar does not
- * count the view and where to publish it.
+ *  - Under a wall, `POST /packages/:base/ensure-customization` answers a
+ *    tenant administrator `403` (`refuseWalledCatalogPackageWrite`), in the
+ *    router's error envelope: the create is refused with the door's reason,
+ *    and nothing is written.
+ *  - An app whose package the server does not list: the person is asked, and
+ *    a cancelled ask writes nothing.
+ *  - `useRuntimeCreateApp` hands the routed app's package (by the draft
+ *    preview bar's rule) and the ask; it toasts nothing itself.
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
@@ -26,7 +27,7 @@ import { toast } from 'sonner';
 // collection, never inside a clocked case (`pnpm check:test-source-alias`).
 import '@objectstack/lint';
 import { MetadataClient } from '@object-ui/data-objectstack';
-import { createRuntimeMetadata, viewEnvelope } from './runtime-metadata-persistence';
+import { createRuntimeMetadata, isRuntimeCreateNotSaved, viewEnvelope } from './runtime-metadata-persistence';
 import { useRuntimeCreateApp } from './objectViewViewCrud';
 
 vi.mock('sonner', () => ({
@@ -92,46 +93,37 @@ afterEach(() => {
   vi.clearAllMocks();
 });
 
-describe('a create the app cannot take still saves, and says where it went (objectstack#35624)', () => {
-  it('the ensure door refused 403: saved naming no package, and the notice runs once, after the save', async () => {
+describe('a create the app cannot take is refused or asks, and never saves naming no package (objectstack#38149)', () => {
+  it('the ensure door refused 403: refused with the door\'s reason, nothing written, nothing asked', async () => {
     stubPageFetch(true);
-    const order: string[] = [];
-    const metadataClient = realClient();
-    const save = metadataClient.save.bind(metadataClient);
-    vi.spyOn(metadataClient, 'save').mockImplementation(async (...args: Parameters<typeof save>) => {
-      const answer = await save(...args);
-      order.push('saved');
-      return answer;
-    });
-    const onSavedOutsideApp = vi.fn(() => order.push('notice'));
+    const askPackage = vi.fn(async () => 'app.chosen');
 
-    const created = await createRuntimeMetadata('view', env.name, env, {
-      metadataClient,
-      app: { packageId: 'com.example.crm', onSavedOutsideApp },
-    });
-
-    expect(created).toBe('crm_account.walled_view');
-    expect(writes).toHaveLength(1);
-    expect(writes[0]!.searchParams.get('mode')).toBe('draft');
-    expect(writes[0]!.searchParams.has('package')).toBe(false);
-    expect(order).toEqual(['saved', 'notice']);
-  });
-
-  it('an app package the server does not list: the same fallback', async () => {
-    stubPageFetch(false);
-    const onSavedOutsideApp = vi.fn();
-
-    await createRuntimeMetadata('view', env.name, env, {
+    const err = await createRuntimeMetadata('view', env.name, env, {
       metadataClient: realClient(),
-      app: { packageId: 'com.example.crm', onSavedOutsideApp },
-    });
+      app: { packageId: 'com.example.crm', askPackage },
+    }).catch((e: unknown) => e);
 
-    expect(writes[0]!.searchParams.has('package')).toBe(false);
-    expect(onSavedOutsideApp).toHaveBeenCalledTimes(1);
+    expect(isRuntimeCreateNotSaved(err) && err.reason).toBe('caller-refused');
+    expect((err as Error).message).toContain(WALLED.error.message);
+    expect(askPackage).not.toHaveBeenCalled();
+    expect(writes).toEqual([]);
   });
 
-  it('useRuntimeCreateApp: the routed app, and an info toast naming where to publish', () => {
-    const t = ((_key: string, opts?: { defaultValue?: string }) => opts?.defaultValue ?? _key) as never;
+  it('an app package the server does not list: the person is asked, and a cancel writes nothing', async () => {
+    stubPageFetch(false);
+    const askPackage = vi.fn(async () => null);
+
+    const err = await createRuntimeMetadata('view', env.name, env, {
+      metadataClient: realClient(),
+      app: { packageId: 'com.example.crm', askPackage },
+    }).catch((e: unknown) => e);
+
+    expect(askPackage).toHaveBeenCalledTimes(1);
+    expect(isRuntimeCreateNotSaved(err) && err.reason).toBe('cancelled');
+    expect(writes).toEqual([]);
+  });
+
+  it('useRuntimeCreateApp: the routed app and the ask, and no toast of its own', () => {
     const wrapper = ({ children }: { children: ReactNode }) => (
       <MemoryRouter initialEntries={['/apps/com.example.crm/crm_account']}>
         <Routes>
@@ -139,13 +131,10 @@ describe('a create the app cannot take still saves, and says where it went (obje
         </Routes>
       </MemoryRouter>
     );
-    const { result } = renderHook(() => useRuntimeCreateApp(t), { wrapper });
+    const { result } = renderHook(() => useRuntimeCreateApp(), { wrapper });
 
     expect(result.current.packageId).toBe('com.example.crm');
-    result.current.onSavedOutsideApp?.();
-    expect(toast.info).toHaveBeenCalledTimes(1);
-    const [text] = vi.mocked(toast.info).mock.calls[0] as [string];
-    expect(text).toMatch(/^This view was saved as a draft outside this app/);
-    expect(text).toContain('publish it from Home');
+    expect(typeof result.current.askPackage).toBe('function');
+    expect(toast.info).not.toHaveBeenCalled();
   });
 });

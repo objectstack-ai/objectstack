@@ -11,9 +11,14 @@
  *  - Create, shared: saved and published in one act, never left as a draft; a
  *    refused save publishes nothing, and a name a pending draft holds is said
  *    (`shareNameTaken`).
+ *  - objectstack#38149: outside an app the create asks for its package and
+ *    saves there; a cancelled ask writes nothing and says nothing.
  */
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
+// The source under test reaches `celAuthoring`'s dynamic `@objectstack/lint`
+// import; its first load is paid here, at collection (`check:test-source-alias`).
+import '@objectstack/lint';
 import { renderHook, act } from '@testing-library/react';
 
 const toast = vi.hoisted(() => ({ success: vi.fn(), error: vi.fn(), warning: vi.fn(), info: vi.fn() }));
@@ -26,6 +31,9 @@ const t = ((key: string, options?: { defaultValue?: string; name?: string }) =>
 
 const OBJECT = 'crm_lead';
 const OBJECT_DEF = { name: OBJECT, fields: { name: { type: 'text' } } };
+
+/** The package the create ask answers (objectstack#38149): no app here, so it asks. */
+let askAnswer: string | null = 'app.chosen';
 
 function rig() {
     const metadataClient = {
@@ -40,7 +48,7 @@ function rig() {
         objectDef: OBJECT_DEF,
         metadataClient,
         dataSource: {},
-        app: { packageId: null },
+        app: { packageId: null, askPackage: async () => askAnswer },
         routeViewId: undefined,
         navigate,
         refresh,
@@ -50,6 +58,7 @@ function rig() {
 }
 
 beforeEach(() => {
+    askAnswer = 'app.chosen';
     for (const fn of Object.values(toast)) fn.mockClear();
 });
 
@@ -73,7 +82,7 @@ describe('objectstack#36409 — Create, shared', () => {
         expect(r.metadataClient.save).toHaveBeenCalledTimes(1);
         const [type, name, , options] = r.metadataClient.save.mock.calls[0] as unknown as [string, string, unknown, Record<string, unknown>];
         expect([type, name]).toEqual(['view', `${OBJECT}.hot_leads`]);
-        expect(options).toEqual({ mode: 'draft', ifNoneMatch: '*' });
+        expect(options).toEqual({ mode: 'draft', packageId: 'app.chosen', ifNoneMatch: '*' });
         expect(r.metadataClient.publish).toHaveBeenCalledWith('view', `${OBJECT}.hot_leads`);
         expect(r.navigate).toHaveBeenCalledWith(`view/${OBJECT}.hot_leads`);
     });
@@ -103,5 +112,19 @@ describe('objectstack#36409 — Create, shared', () => {
         expect(r.navigate).not.toHaveBeenCalled();
         const [, options] = toast.error.mock.calls[0] as unknown as [string, { description: string }];
         expect(options.description).toContain('An unpublished draft already uses this view’s name');
+    });
+
+    it('objectstack#38149: a cancelled package ask writes nothing, says nothing, and reports unsaved', async () => {
+        askAnswer = null;
+        const r = rig();
+        let created = true;
+        await act(async () => {
+            created = await r.result.current.createShared({ type: 'grid', label: 'Hot leads', name: 'hot_leads' });
+        });
+        expect(created).toBe(false);
+        expect(r.metadataClient.save).not.toHaveBeenCalled();
+        expect(r.metadataClient.publish).not.toHaveBeenCalled();
+        expect(toast.error).not.toHaveBeenCalled();
+        expect(r.navigate).not.toHaveBeenCalled();
     });
 });

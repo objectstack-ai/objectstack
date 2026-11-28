@@ -901,6 +901,7 @@ function ObjectViewInner({ dataSource, objects, onEdit, externalRefreshKey }: Co
         handleReorderViews,
         handleConfigView,
         handleAddView,
+        packageAskDialog,
     } = useObjectViewViewCrud({
         dataSource,
         objects,
@@ -1203,7 +1204,7 @@ function ObjectViewInner({ dataSource, objects, onEdit, externalRefreshKey }: Co
     // objectstack#36409 — only an administrator holding the shared view's write
     // capability (`canManageViews`, above) creates a shared view, and it is
     // published at once (`./objectViewViewSharing.ts`).
-    const sharingApp = useRuntimeCreateApp(t);
+    const sharingApp = useRuntimeCreateApp();
     const viewSharing = useViewSharing({
         objectName: objectDef.name,
         objectDef,
@@ -1751,6 +1752,9 @@ function ObjectViewInner({ dataSource, objects, onEdit, externalRefreshKey }: Co
     return (
         <ActionProvider {...actionRuntime.actionProviderProps}>
         <RelatedRecordActionsProvider value={listRecordActions}>
+        {/* objectstack#38149 — the package ask a view create opens. */}
+        {packageAskDialog}
+        {sharingApp.askDialog}
         {/* objectstack#25992 slice 10: the record pane moved to `./objectViewRecordOverlay.tsx`.
             On a phone no pane is mounted: a row opens the record's page
             (objectstack#27058). */}

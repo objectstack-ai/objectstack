@@ -16,9 +16,12 @@
  */
 
 import '@testing-library/jest-dom/vitest';
+// The source under test reaches a dynamic `@objectstack/lint` import; its first
+// load is paid here, at collection (`check:test-source-alias`).
+import '@objectstack/lint';
 import * as React from 'react';
 import { describe, it, expect, vi, afterEach } from 'vitest';
-import { render, screen, cleanup, waitFor, fireEvent } from '@testing-library/react';
+import { render, screen, cleanup, waitFor, fireEvent, within } from '@testing-library/react';
 import { MemoryRouter, Route, Routes, useLocation } from 'react-router-dom';
 
 const PROJECT = 'com.example.crm';
@@ -81,6 +84,11 @@ vi.mock('./packages-io.js', async (importOriginal) => ({
         [OTHER, { id: OTHER, name: 'HR', writable: true, manifest: {} }],
       ]),
   ),
+  /** The same list as the create ask reads it (objectstack#38149). */
+  fetchPackages: async () => [
+    { id: OTHER, name: 'HR', writable: true, namespace: 'hr' },
+    { id: PROJECT, name: 'CRM', writable: true, namespace: 'crm' },
+  ],
 }));
 
 import { StudioMetadataArea } from './StudioMetadataArea';
@@ -152,10 +160,15 @@ describe('the cross-package list stays open (objectstack#29566)', () => {
     expect(where()).toBe('/studio/~all/metadata/flow');
   });
 
-  it('create alone picks a package, and opens that package\'s create', async () => {
+  // Create on the cross-package leg asks which package, with nothing pre-selected
+  // (objectstack#38149), and opens the chosen package's create.
+  it('create asks for a package, and opens the chosen package\'s create', async () => {
     mount('/studio/~all/metadata/object');
     await waitFor(() => expect(row('crm_account')).not.toBeNull(), WAIT);
     fireEvent.click(screen.getAllByRole('button', { name: new RegExp(t('engine.list.create', 'en-US')) })[0]);
+    const dialog = await screen.findByTestId('package-create-ask', {}, WAIT);
+    fireEvent.click(await within(dialog).findByTestId(`package-create-ask-option-${PROJECT}`, {}, WAIT));
+    fireEvent.click(within(dialog).getByTestId('package-create-ask-continue'));
     await waitFor(() => expect(where()).toBe(`/studio/${PROJECT}/metadata/object/new?package=${PROJECT}`), WAIT);
   });
 });

@@ -86,9 +86,10 @@ describe('parseDeclaredLazyViews', () => {
     // marketplace pages (objectui#6681 measured three; objectui#12733 retired the
     // Installed Apps one), the app's report index (objectui#13020), the
     // object list (objectstack#33581), the new-report builder page
-    // (objectstack#36374) and the full-page inbox (objectstack#36741) =
-    // fifteen distinct files.
-    expect(declared).toHaveLength(15);
+    // (objectstack#36374), the full-page inbox (objectstack#36741) and the
+    // console's create-app route, which asks for the new app's package
+    // (objectstack#38149) = sixteen distinct files.
+    expect(declared).toHaveLength(16);
     for (const view of declared) {
       expect(fs.existsSync(path.join(REPO_ROOT, view)), view).toBe(true);
     }
@@ -98,6 +99,7 @@ describe('parseDeclaredLazyViews', () => {
     expect(declared).toContain('packages/app-shell/src/views/ObjectView.tsx');
     expect(declared).toContain('packages/app-shell/src/views/ReportNewPage.tsx');
     expect(declared).toContain('packages/app-shell/src/views/inbox/InboxPage.tsx');
+    expect(declared).toContain('packages/app-shell/src/console/ConsoleCreateAppPage.tsx');
     // The three surfaces objectui#6535 deliberately looked away from and
     // objectui#6681 measured. Named individually: a bare length assertion goes
     // on passing if the widened matcher swaps one surface for another.
