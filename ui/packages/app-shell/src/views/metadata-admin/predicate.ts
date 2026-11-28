@@ -19,6 +19,7 @@
  *   - `path`                    truthy check
  *   - `path && expr`            conjunction
  *   - `path || expr`            disjunction
+ *   - `(expr)`                  grouping, any depth: `a || (b && c)`, `!(a && b)`
  *
  * Paths support dot notation: `data.type`, `data.config.kind`.
  *
@@ -209,16 +210,39 @@
  * either a membership test this evaluator cannot run, or text that is not a valid
  * predicate at all.
  *
- * Two spellings are deliberately NOT detected, and both fail to SILENCE (the
- * status quo) rather than to a false claim: a tab-separated `in`, and a
- * parenthesised `('admin' in current_user.positions)` where the operator sits at
- * `depth > 0`. Widening the walk to reach them would mean teaching it about
- * whitespace classes and parentheses the evaluator itself does not support —
- * growing the parser to improve a warning, which is the trade this file does not
- * make.
+ * One spelling is deliberately NOT detected, and it fails to SILENCE (the
+ * status quo) rather than to a false claim: a tab-separated `in`. Widening the
+ * walk to reach it would mean teaching it about whitespace classes the evaluator
+ * itself does not support — growing the parser to improve a warning, which is
+ * the trade this file does not make. A parenthesised
+ * `('admin' in current_user.positions)` IS detected: the grouping branch strips
+ * the group before this tail runs, so the operator is back at depth 0 (see the
+ * next section).
  *
  * This diagnostic retires with the file at ROADMAP M9, same as #4049's and
  * #4266's.
+ *
+ * ## Parenthesised grouping is read, as CEL reads it (objectstack#38070)
+ *
+ * These predicates declare `dialect: 'cel'`, and CEL groups with parentheses, so
+ * an author has no reason to avoid them. This evaluator used to have no grouping
+ * at all: the `||` / `&&` splitters already skipped text inside parentheses, but
+ * nothing ever opened the group, so `data.type == 'percent' || (data.type ==
+ * 'formula' && data.returnType == 'percent')` handed `(data.type` to
+ * {@link resolveValue} as a path. Its root `(data` is not a scope name, so the
+ * whole predicate took objectstack#6936's fail-open `true` — on EVERY row, and
+ * the field form offered its percent and currency rows on every field type.
+ *
+ * The fix is one branch in `evalExpr`: when the whole text is one balanced group,
+ * evaluate its inside. It sits after the `||` / `&&` splits (which leave a group
+ * whole) and before negation (so `!(…)` negates the evaluated group). The group
+ * match is quote-aware by the same rule as {@link splitTopLevel}.
+ *
+ * What does NOT change: a predicate this evaluator still cannot read — an
+ * unbalanced `(`, a function call such as `size(data.x)` — still fails OPEN with
+ * objectstack#6936's warning, as that ruling and ADR-0137 D3 (a faulting
+ * `visibleWhen` shows the field) require. Grouping is base CEL, not a new
+ * operator, so this does not grow the file into a second evaluator.
  */
 
 /**
@@ -535,10 +559,12 @@ const IN_OPERATOR = ' in ';
  * and send the author to un-write a spelling that is in fact fine; see the
  * header section on why this stays a detection rather than becoming a parser.
  *
- * Returns false for the two spellings the reused walk cannot see — a
- * tab-separated `in`, and one nested at `depth > 0` inside parentheses. Both are
- * misses, i.e. silence, which is the pre-existing behaviour; neither is a false
- * statement about the author's code.
+ * Returns false for a tab-separated `in`, the one spelling the reused walk
+ * cannot see — a miss, i.e. silence, which is the pre-existing behaviour, never
+ * a false statement about the author's code. A membership wrapped in its own
+ * group reaches here with the group already stripped by `evalExpr`'s grouping
+ * branch, so it sits at depth 0 and is seen; an `in` still at `depth > 0` here
+ * belongs to text that is not one whole group, which stays a miss.
  */
 function carriesTopLevelIn(expr: string): boolean {
   return splitTopLevel(expr, IN_OPERATOR).length > 1;
@@ -586,6 +612,15 @@ function evalExpr(
   const andParts = splitTopLevel(expr, '&&');
   if (andParts.length > 1) {
     return andParts.every((p) => evalExpr(p.trim(), ctx, source));
+  }
+  // Handle grouping: one parenthesised group spanning the WHOLE text. It runs
+  // after the `||` / `&&` splits, which already skip anything inside a group
+  // (`splitTopLevel` tracks depth), so `a || (b && c)` reaches here as `a` and
+  // `(b && c)`, and `(a || b) && c` as `(a || b)` and `c`. It runs before
+  // negation, so `!(a && b)` negates the evaluated group. See the header section
+  // "Parenthesised grouping is read, as CEL reads it".
+  if (expr.startsWith('(') && matchingCloseParen(expr) === expr.length - 1) {
+    return evalExpr(expr.slice(1, -1).trim(), ctx, source);
   }
   // Handle negation
   if (expr.startsWith('!')) {
@@ -659,6 +694,38 @@ function splitTopLevel(expr: string, op: string): string[] {
   }
   if (buf) out.push(buf);
   return out;
+}
+
+/**
+ * The index of the `)` that closes the `(` at index 0, or -1 when it is never
+ * closed. Quote-aware by the same rule {@link splitTopLevel} uses (a quote
+ * opens a run that only the same unescaped quote closes), so a parenthesis
+ * inside a string literal (`data.label == 'a (b'`) is never counted.
+ *
+ * Only `(` / `)` count here, not `[` / `]`: the caller asks one question, "is
+ * the whole text one group?", and a bracketed `in` set inside the group is
+ * balanced on its own.
+ */
+function matchingCloseParen(expr: string): number {
+  let depth = 0;
+  let inStr: string | null = null;
+  for (let i = 0; i < expr.length; i++) {
+    const ch = expr[i];
+    if (inStr) {
+      if (ch === inStr && expr[i - 1] !== '\\') inStr = null;
+      continue;
+    }
+    if (ch === "'" || ch === '"') {
+      inStr = ch;
+      continue;
+    }
+    if (ch === '(') depth++;
+    else if (ch === ')') {
+      depth--;
+      if (depth === 0) return i;
+    }
+  }
+  return -1;
 }
 
 function resolveValue(

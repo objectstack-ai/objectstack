@@ -184,7 +184,9 @@ const noSubscription = () => () => {};
 /**
  * The expand button for a route whose page draws none of the shell's headers
  * (search results, a component page, the app editor): pinned at the content's
- * top-left corner while the sidebar is collapsed. It takes no room of its own.
+ * top start corner (top-left; top-right in a right-to-left language, the
+ * sidebar's side, objectstack#37914) while the sidebar is collapsed, opposite
+ * the assistant's fallback below. It takes no room of its own.
  */
 export function ShellSidebarExpandFallback() {
   const registry = React.useContext(ExpandHeaderRegistryContext);
@@ -197,7 +199,7 @@ export function ShellSidebarExpandFallback() {
   if (!registry || headers > 0 || isMobile || open) return null;
   return (
     <div className="sticky top-0 z-20 h-0" data-testid="shell-sidebar-expand-fallback">
-      <SidebarExpandTrigger className="absolute left-2 top-2 bg-background/80 backdrop-blur" />
+      <SidebarExpandTrigger className="absolute start-2 top-2 bg-background/80 backdrop-blur" />
     </div>
   );
 }

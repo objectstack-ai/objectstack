@@ -58,6 +58,8 @@ export {
 } from './local-crypto-provider.js';
 export {
   type SettingsActionHandler,
+  // What the running deployment declares for a key while nothing is stored (ADR-0007 rung 4).
+  type SettingsDeclaredDefault,
   type SettingsLiveStatus,
   type SettingsLiveStatusProvider,
   type SettingsLiveValue,

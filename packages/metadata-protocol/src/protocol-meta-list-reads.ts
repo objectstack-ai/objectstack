@@ -34,7 +34,7 @@ import {
 } from './protocol-authoring-refusals.js';
 import { shippingPackageIds } from './protocol-environment-rows.js';
 import type { ProtocolHost } from './protocol-host.js';
-import { readEffectiveFormList, type FormReadHost } from './protocol-form-reads.js';
+import { formRequestScope, inFormRequestScope, readEffectiveFormList, type FormReadHost } from './protocol-form-reads.js';
 import { canonicalizeMetaRequestType } from './protocol-meta-type-schema.js';
 import { mergePackageAwareOverlay, servedViewExpansion, withoutServedRowName } from './protocol-overlay-merge.js';
 import {
@@ -71,9 +71,11 @@ async function effectiveFormList(
     request: { type: string; packageId?: string; names?: readonly string[]; previewDrafts?: boolean },
     audience: 'served' | 'execution',
 ) {
-    const resolved = await readEffectiveFormList(host, request, audience);
+    // One request scope: the scoped list's envelope reads the stored rows the resolution read.
+    const scoped = formRequestScope(host);
+    const resolved = await readEffectiveFormList(scoped, request, audience);
     if (request.packageId === undefined) return resolved;
-    return { ...(await host.readFlattenedMetaItems(request, audience)), items: resolved.items };
+    return { ...(await scoped.readFlattenedMetaItems(request, audience)), items: resolved.items };
 }
 
 /** The body of `ObjectStackProtocolImplementation#getMetaItems`; the method's docblock there is its contract. */
@@ -92,7 +94,8 @@ export async function getMetaItems(host: FormReadHost, request: { type: string; 
     // [ADR-0159 D5] The `form` list is resolved over both types, in one
     // generic read where the list names no package (`readEffectiveFormList`).
     if (canonical.type === 'form') return effectiveFormList(host, canonical, 'served');
-    return host.readFlattenedMetaItems(canonical, 'served');
+    // Inside a form request's reading (`readInFormRequest`), through its scope.
+    return inFormRequestScope(host).readFlattenedMetaItems(canonical, 'served');
 }
 
 /** The body of `ObjectStackProtocolImplementation#getMetaItemsForExecution`; the method's docblock there is its contract. */
@@ -104,9 +107,10 @@ export async function getMetaItemsForExecution(host: FormReadHost, request: { ty
 }
 
 /** The body of `ObjectStackProtocolImplementation#getMetaItemsPerPackage`; the method's docblock there is its contract. */
-export async function getMetaItemsPerPackage(host: Pick<ProtocolHost, 'readFlattenedMetaItems'>, request: { type: string; packageId?: string; previewDrafts?: boolean }) {
+export async function getMetaItemsPerPackage(host: Pick<ProtocolHost, 'readActiveOverlayRows' | 'readFlattenedMetaItems'>, request: { type: string; packageId?: string; previewDrafts?: boolean }) {
     // The same #4432 fold {@link getMetaItems} applies, for the same reason.
-    return host.readFlattenedMetaItems(canonicalizeMetaRequestType(request), 'served', 'per-package');
+    // Inside a form request's reading (`readInFormRequest`), through its scope.
+    return inFormRequestScope(host).readFlattenedMetaItems(canonicalizeMetaRequestType(request), 'served', 'per-package');
 }
 
 /**
@@ -188,8 +192,11 @@ function disabledHolderListing(
 /** The body of `ObjectStackProtocolImplementation#readFlattenedMetaItems`; the method's docblock there is its contract. */
 export async function readFlattenedMetaItems(host: Pick<ProtocolHost, 'artifactLockLayerAt' | 'baseServesBundleMember' | 'convertStoredItem' | 'declinesStoredRow' | 'disabledActionsOf' | 'engine' | 'environmentId' | 'expandStoredViewContainers' | 'findEnvironmentRows' | 'flowRegistrationsOf' | 'foldObjectExtendersFromRegistry' | 'getServicesRegistry' | 'governServedObject' | 'hydrateOverlayIntoRegistry' | 'isStoredEntryOfDeclinedName' | 'isUnservedSealedOverlay' | 'isWritablePackage' | 'lookupArtifactItem' | 'namesWithOwnStoredRow' | 'readActiveOverlayRows' | 'readItemActiveRows' | 'rethrowUnlessMetadataStoreUnprovisioned' | 'shippedArtifactsOf' | 'shippingPackagesOf' | 'shipsBundleName' | 'storedOverlayEntries'>, request: { type: string; packageId?: string; names?: readonly string[]; previewDrafts?: boolean },
         audience: 'served' | 'execution',
-        layer: 'effective' | 'per-package' = 'effective',) {
+        layer: 'effective' | 'per-package' = 'effective',
+        /** [ADR-0159 D5] One request's stored-row reader (`formRequestScope`); omitted, the host's. */
+        rows?: (request: { type: string; packageId?: string }) => Promise<any[]>,) {
     const { packageId } = request;
+    const readRows = rows ?? ((r: { type: string; packageId?: string }) => host.readActiveOverlayRows(r));
     const servedOverride = layer === 'effective';
     // The registry's installed manifests: a package's declared override is
     // its App's pair's (`pairOf`, `isServedOverrideRowOf`).
@@ -299,8 +306,8 @@ export async function readFlattenedMetaItems(host: Pick<ProtocolHost, 'artifactL
         // the view containers it expands through the same two calls, so
         // the two doors cannot disagree about which containers are in
         // scope for one caller.
-        const records = await host.readActiveOverlayRows(request);
-        lockRows = packageId ? await host.readActiveOverlayRows({ type: request.type }) : records;
+        const records = await readRows(request);
+        lockRows = packageId ? await readRows({ type: request.type }) : records;
         const standInRows = packageId ? lockRows.filter((row) => (row?.package_id ?? null) === null) : [];
         // [#28409, ADR-0146 D8 item 2] …and a list scoped to a package
         // serves, in each slot the package seats, the package's declared

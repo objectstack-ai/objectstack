@@ -321,7 +321,8 @@ describe('objectstack#37833 — the ai:chat entry is hidden from a member who ca
       await waitFor(() => expect(apiFetch).toHaveBeenCalled());
       expect(screen.getByTestId('app-landing-pending')).toBeInTheDocument();
       await answer(AGENTS_URL, 200, SERVED);
-      expect(await screen.findByTestId('app-ask-home')).toBeInTheDocument();
+      // The page itself, whatever state it draws: this fixture's app carries no package stamp.
+      expect(await screen.findByTestId('app-ask-page')).toBeInTheDocument();
       expect(pathnames).toEqual(['/apps/policy', '/apps/policy/component/ai/chat']);
     });
 
@@ -458,7 +459,7 @@ describe('objectstack#37833 — the ai:chat entry is hidden from a member who ca
       pathnames = [];
       const unmount = mountOutsideAct('/apps/policy', apiFetch);
       try {
-        expect(await drawn('app-ask-home')).toBe(true);
+        expect(await drawn('app-ask-page')).toBe(true);
         expect(pathnames).toEqual(['/apps/policy', '/apps/policy/component/ai/chat']);
       } finally {
         unmount();

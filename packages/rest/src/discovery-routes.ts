@@ -514,7 +514,8 @@ export const RESTRICTION_PROFILE_PARAMS: readonly string[] = [];
  * `approval_revise`. It is NOT a statement of which plugins this kernel runs,
  * so `os validate --target` against a self-hosted runtime does not check
  * whether an approval flow has an executor there (ADR-0138 D2 note; the
- * spec-side reader rule is card #36081). `versions.skills` is `versions.spec`: `@objectstack/skills` and
+ * spec-side reader rule is `RestrictionProfileSchema.allowedFlowNodeTypes`,
+ * `@objectstack/spec/system`). `versions.skills` is `versions.spec`: `@objectstack/skills` and
  * `@objectstack/spec` are one `fixed` changeset group, as the MCP server's
  * skills install line also relies on.
  */
