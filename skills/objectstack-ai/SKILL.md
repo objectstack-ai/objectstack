@@ -365,7 +365,7 @@ live, but listing-only: carried onto the tool, never sent to the model).
 Sampling lives under an agent's `model` (`AIModelConfigSchema`), **never a
 top-level `temperature` / `maxTokens`** (`packages/spec/src/ai/agent.zod.ts:89-97`).
 The block names a model: the deployment's AI settings choose the provider and
-resolve the model name among the providers turned on. `provider` is retired
+resolve the model name among the ones turned on. `provider` is retired
 (protocol 19) and refused, except the `'openai'` an 18.x toolchain wrote out,
 which parses and is stripped. Delete it.
 
