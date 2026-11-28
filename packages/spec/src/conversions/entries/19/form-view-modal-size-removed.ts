@@ -8,15 +8,17 @@ import { type Dict, isDict, stripKeys } from '../shared.js';
 /**
  * `modalSize` leaves the form view (protocol 19, #36544 — ADR-0049
  * enforce-or-remove, seat ruling on the card: retire). Its one form-view
- * reader was the console's New / Edit record dialog, and that dialog stopped
- * loading a form view in 18 (#36425): it lays the record out by the object's
- * field groups and chooses its own size. A form opened by name, or shared by a
- * public link, gets a page of its own, never a dialog. So a stored
- * `modalSize: 'lg'` saved, served and changed nothing.
+ * reader was the console's New / Edit record dialog. Through 18.6.0 that
+ * dialog opened at the authored size; at 19.0.0 it stopped loading a form view
+ * (#36425): it lays the record out by the object's field groups and chooses
+ * its own size. A form opened by name, or shared by a public link, gets a page
+ * of its own, never a dialog. So from 19.0.0 a stored `modalSize: 'lg'` saves,
+ * is served and changes nothing, and an app that comes from 18.x finds that
+ * dialog at the size the dialog chooses (the D3 entry says so).
  *
  * Authoring refuses the key by its `retiredKey()` tombstone (`ui/view.zod.ts`).
- * Deleting is the whole edit, and it changes nothing a reader sees. The React
- * `ObjectForm` block keeps its own `modalSize` prop (`react-blocks.ts`
+ * Deleting is the whole edit, and it changes nothing a reader sees on 19. The
+ * React `ObjectForm` block keeps its own `modalSize` prop (`react-blocks.ts`
  * overlay) and the `object-form` PAGE BLOCK keeps it in
  * `ObjectFormPropsSchema`: its `formType: 'modal'` container reads it, so this
  * entry never walks page components.

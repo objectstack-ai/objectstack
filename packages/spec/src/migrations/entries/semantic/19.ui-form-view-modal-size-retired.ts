@@ -17,17 +17,21 @@ export const entry: SemanticMigration = {
     + '`formType=\'modal\'` and its own `modalSize`',
   reason:
     'ADR-0049: the one form-view reader of `modalSize` was the console\'s New / Edit record dialog, which '
-    + 'copied it from the object\'s internal form view. That dialog stopped loading a form view in 18 (the '
-    + 'semantic entry `internal-record-forms-not-loaded`), and neither the form page a name or a public '
-    + 'link opens nor any server surface reads the key — a stored value saved, served and changed nothing. '
-    + 'The D2 conversion `form-view-modal-size-removed` makes each stored or existing source parse by '
-    + 'deleting the key, which changes nothing a reader sees. What it cannot decide is whether a form that '
-    + 'carried `modalSize` was meant to make a record\'s create or edit dialog wider or narrower: no key '
-    + 'an author writes sets that dialog\'s size now. It follows the number of fields the dialog draws, and '
-    + 'the person filling it in can maximize it',
+    + 'copied it from the object\'s internal form view. Through 18.6.0 that dialog opened at the authored '
+    + 'size. At 19.0.0 it stopped loading a form view (the protocol-18 semantic entry '
+    + '`internal-record-forms-not-loaded` records that change), and neither the form page a name or a '
+    + 'public link opens nor any server surface reads the key, so from 19.0.0 a stored value saves, is '
+    + 'served and changes nothing. The D2 conversion `form-view-modal-size-removed` makes each stored or '
+    + 'existing source parse by deleting the key, which changes nothing a reader sees on 19. What it '
+    + 'cannot restore is the size: a form that carried `modalSize` on 18.x opens its record\'s create or '
+    + 'edit dialog at the size the dialog chooses after the upgrade, and no key an author writes sets '
+    + 'that dialog\'s size now. It follows the number of fields the dialog draws, and the person filling '
+    + 'it in can maximize it',
   acceptanceCriteria:
     'No form view and no `form` item declares `modalSize`; it is refused at parse with its prescription, '
     + 'and TypeScript rejects it at a `FormView` or `Form` position. The React `ObjectForm` block still '
-    + 'publishes the prop, and the `object-form` page block still accepts it with `formType: \'modal\'`.',
+    + 'publishes the prop, and the `object-form` page block still accepts it with `formType: \'modal\'`. '
+    + 'On an app that comes from 18.x, New and Edit on each object whose form carried the key open at a size '
+    + 'you accept.',
   conversionIds: ['form-view-modal-size-removed'],
 };
