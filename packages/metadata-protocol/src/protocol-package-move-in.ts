@@ -445,7 +445,7 @@ export class ProtocolPackageMoveInFacet {
      * and save doors already moved the in-memory registry: put each item back
      * at its package-less address, from its restored body.
      */
-    private static async restoreRegistry(host: MoveHost, items: readonly LooseItem[], target: string): Promise<void> {
+    static async restoreRegistry(host: MoveHost, items: readonly LooseItem[], target: string): Promise<void> {
         for (const item of items) {
             const body = bodyOf(item.active);
             if (!item.active || !body) continue;
@@ -476,7 +476,7 @@ export class ProtocolPackageMoveInFacet {
      * remove the row written into the target, put the loose row back as it was
      * stored, then put the registry back at the package-less address.
      */
-    private static async undoLanded(
+    static async undoLanded(
         host: MoveHost,
         landed: ReadonlyArray<{ item: LooseItem; state: 'active' | 'draft' }>,
         target: string,
@@ -511,7 +511,20 @@ export class ProtocolPackageMoveInFacet {
                     packageId: null,
                     ...(item.member ? { member: item.member } : {}),
                 } as never);
-                if (state === 'active') await ProtocolPackageMoveInFacet.restoreRegistry(host, [item], target);
+                // The registry is put back here, after the put, so the census
+                // (protocol.view-expansion-reconcile-call-sites.test.ts) reads
+                // the write and its write-through in one member.
+                if (state === 'active') {
+                    const [entry] = host.storedOverlayEntries({ type: item.type }, [row as never]);
+                    await host.applyRegistryWriteThrough({
+                        type: item.type,
+                        name: entry?.name ?? item.name,
+                        item: entry?.data ?? body,
+                        packageId: null,
+                        organizationId: null,
+                        reboundFrom: { packageId: target },
+                    });
+                }
             } catch (err: any) {
                 console.error(
                     `[Protocol] moveIntoPackage: the refused move of ${item.type}/${item.name} into '${target}' could `
