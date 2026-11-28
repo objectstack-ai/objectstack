@@ -18,6 +18,11 @@
  *   another organization is as inert as an id that does not exist, and is
  *   answered with the same sentence, so the door is no oracle for who exists
  *   in another tenant;
+ * - behind a wall with NO organization (a record whose organization does not
+ *   resolve, a new rule written by a platform operator with none active): no
+ *   recipient is judged, and the engine refuses that insert for every
+ *   recipient alike; a stored rule moved by such an operator is judged in the
+ *   stored row's organization;
  * - otherwise (`single`): an existing `sys_user`.
  *
  * Every refusal is asserted by its `code` — the `CODE:` prefix the REST share
@@ -325,5 +330,54 @@ describe('[#33912] defineRule refuses a user recipient that does not resolve, wh
     const refusal = await refusalOf(rules.defineRule(rule('r_moved', UNKNOWN), ORG_A_ADMIN));
     expect(refusal?.code).toBe('VALIDATION_FAILED');
     expect((await storedRules()).find((r) => r.name === 'r_moved')?.recipient_id).toBe(MEMBER_A);
+  });
+});
+
+describe('[#33912] a platform operator with no active organization who moves a stored rule is judged in the STORED rule\'s organization', () => {
+  // A non-system platform operator (`manage_platform_settings`) passes the
+  // admin-scope guard with no `tenantId`, so `defineRule` runs with no caller
+  // organization and finds the stored rule by name alone. The write is then
+  // the UPDATE half, which the engine's organization rule does not refuse
+  // (it is insert-only), so the recipient must be judged here — in the
+  // organization the stored row belongs to, which does resolve.
+  const PLATFORM_OPERATOR = {
+    userId: 'u_operator', positions: [], permissions: [], systemPermissions: ['manage_platform_settings'],
+  } as unknown as ExecutionContext;
+
+  const rule = (name: string, recipientId: string) => ({
+    name, label: name, object: OBJECT, criteria: WON, recipientType: 'user', recipientId, accessLevel: 'read',
+  }) as never;
+
+  async function bootWithStoredRule(): Promise<Booted> {
+    const booted = await boot('isolated');
+    await booted.driver.create('sys_sharing_rule', {
+      id: 'rule_op', organization_id: ORG_A, name: 'r_op', label: 'r_op', object_name: OBJECT,
+      criteria_json: JSON.stringify(WON), recipient_type: 'user', recipient_id: OWNER, access_level: 'read',
+      active: true, managed_by: 'admin',
+    } as never);
+    return booted;
+  }
+
+  it('moving it onto an id no user carries is refused VALIDATION_FAILED, and the stored recipient stands', async () => {
+    const { rules, storedRules } = await bootWithStoredRule();
+    const refusal = await refusalOf(rules.defineRule(rule('r_op', UNKNOWN), PLATFORM_OPERATOR));
+    expect(refusal, 'the operator moved the stored rule onto an unknown user').not.toBeNull();
+    expect(refusal!.code).toBe('VALIDATION_FAILED');
+    expect(refusal!.message).toBe(RULE_REFUSAL(UNKNOWN));
+    expect((await storedRules()).map((r) => [r.name, r.recipient_id])).toEqual([['r_op', OWNER]]);
+  });
+
+  it('moving it onto a user of another organization is answered exactly as an unknown id', async () => {
+    const { rules, storedRules } = await bootWithStoredRule();
+    const foreign = await refusalOf(rules.defineRule(rule('r_op', MEMBER_B), PLATFORM_OPERATOR));
+    expect(foreign?.code).toBe('VALIDATION_FAILED');
+    expect(foreign!.message).toBe(RULE_REFUSAL(MEMBER_B));
+    expect((await storedRules()).map((r) => [r.name, r.recipient_id])).toEqual([['r_op', OWNER]]);
+  });
+
+  it('control: moving it onto a member of the stored rule\'s organization is stored', async () => {
+    const { rules, storedRules } = await bootWithStoredRule();
+    await rules.defineRule(rule('r_op', MEMBER_A), PLATFORM_OPERATOR);
+    expect((await storedRules()).map((r) => [r.name, r.recipient_id])).toEqual([['r_op', MEMBER_A]]);
   });
 });
