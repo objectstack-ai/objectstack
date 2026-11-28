@@ -204,18 +204,6 @@ export default async function Page(props: {
   );
 }
 
-/**
- * Every docs page is prerendered from `generateStaticParams()` and nothing else
- * exists: a slug the loader does not know answers 404 either way. With the
- * default (`dynamicParams = true`) Vercel stores each page as a prerender WITH a
- * fallback function, and that function -- the route's whole server bundle -- is
- * uploaded on every deploy so that an unknown slug can be rendered into the same
- * 404 on demand. `false` makes the 404 static too, so the pages are plain files
- * and no function backs them; `scripts/measure-deploy-output.mjs` takes the
- * reading.
- */
-export const dynamicParams = false;
-
 export async function generateStaticParams() {
   return source.generateParams();
 }

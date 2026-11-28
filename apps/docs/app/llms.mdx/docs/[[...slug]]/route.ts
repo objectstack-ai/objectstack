@@ -18,13 +18,6 @@ export async function GET(
   });
 }
 
-/**
- * Only the prerendered markdown bodies, one per docs page, exist; an unknown slug is a static 404 instead of
- * a call into an on-demand fallback function uploaded with every deploy. The
- * reasoning is spelled out once, in `app/[lang]/docs/[[...slug]]/page.tsx`.
- */
-export const dynamicParams = false;
-
 export function generateStaticParams() {
   return source.generateParams();
 }
