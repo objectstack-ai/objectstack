@@ -27,8 +27,8 @@
  */
 
 import { KNOWLEDGE_SOURCE_ADMISSION_SERVICE, knowledgeServiceNotInScope } from '@objectstack/metadata-core';
-import type { DomainHandlerDeps } from '../domain-handler-registry.js';
-import type { HttpProtocolContext } from '../http-dispatcher.js';
+import type { DomainHandlerDeps } from './domain-handler-registry.js';
+import type { HttpProtocolContext } from './http-dispatcher.js';
 
 export async function resolveKnowledgeServiceForSave(
     deps: DomainHandlerDeps,

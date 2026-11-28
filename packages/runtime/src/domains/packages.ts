@@ -50,7 +50,7 @@ import { walledCatalogWriteVerdict } from '@objectstack/metadata-core';
 // [ADR-0161 K4, guard two] Source admission, asked for each knowledge source a
 // duplicate would copy (`refuseDuplicatedKnowledgeSources`).
 import { authoredKnowledgeSourceRefusal } from '@objectstack/metadata-core';
-import { resolveKnowledgeServiceForSave } from './knowledge-service-lookup.js';
+import { resolveKnowledgeServiceForSave } from '../knowledge-service-lookup.js';
 import { isMissingTableError } from '@objectstack/types';
 import { readEffectiveTenancyPosture } from './activation-gate.js';
 // [#21727] ADR-0087 D1's protocol handshake and the brand predicate for its

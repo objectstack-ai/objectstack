@@ -39,7 +39,7 @@ import {
     // alone: the walled refusal every environment-metadata write door asks.
     walledCatalogWriteVerdict,
 } from '@objectstack/metadata-core';
-import { resolveKnowledgeServiceForSave } from './knowledge-service-lookup.js';
+import { resolveKnowledgeServiceForSave } from '../knowledge-service-lookup.js';
 // [#15238] The DECLARED protocol contracts this domain's request literals are
 // compiled against. Imported, never restated: a second hand-written
 // `getMetaItem(…)` signature here would silently drift from the one the spec

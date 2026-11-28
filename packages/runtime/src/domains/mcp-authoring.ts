@@ -164,7 +164,7 @@ import {
     metaWriteCapabilityVerdict,
     walledCatalogWriteVerdict,
 } from '@objectstack/metadata-core';
-import { resolveKnowledgeServiceForSave } from './knowledge-service-lookup.js';
+import { resolveKnowledgeServiceForSave } from '../knowledge-service-lookup.js';
 import {
     createMetaItemReadGate,
     createMetaListReadGate,
