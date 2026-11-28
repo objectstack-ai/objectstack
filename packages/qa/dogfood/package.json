@@ -43,6 +43,7 @@
     "@objectstack/verify": "workspace:*"
   },
   "devDependencies": {
+    "@object-ui/data-objectstack": "workspace:*",
     "@objectstack/account": "workspace:*",
     "@objectstack/cli": "workspace:*",
     "@objectstack/cloud-connection": "workspace:*",
