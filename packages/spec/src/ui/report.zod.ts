@@ -63,19 +63,24 @@ export const ReportChartSchema = lazySchema(() => ChartConfigSchema.extend({
    * report renderer adds every DECLARED option of the `xAxis` dimension's
    * field that the answer left out, valued the way the analytics
    * executor values any empty group (`emptyGroupValueFor`: `0` for count and
-   * sum, empty for avg/min/max).
+   * sum, empty for avg/min/max). A derived measure states no aggregate, so an
+   * added group carries no value for it.
    *
    * Only a dimension whose field declares its options is filled (a select or
    * similar); a free-text or lookup dimension has no known set of values. Not
    * filled when the report's `order` reaches the chart: an added group has no
    * place in an authored order, and under a measure order it would compete for
-   * a place it did not earn. A date axis needs no
-   * switch: the executor already fills every bucket of the report's period.
-   * Omitted = off, and the chart draws exactly the groups the query returned.
+   * a place it did not earn. An answer with no rows at all still draws no
+   * chart: the options are filled around the groups an answer holds. An option
+   * the report's own filter excludes reads as empty like any other. A date axis
+   * needs no switch: the executor already fills every bucket of the report's
+   * period. Omitted = off, and the chart draws exactly the groups the query
+   * returned.
    */
   showEmptyGroups: z.boolean().optional().describe(
     'Show the declared options of the xAxis dimension field that have no records, valued 0 for a count or sum '
-    + '(left empty for avg/min/max). Only a field that declares its options is filled; omitted = off',
+    + '(left empty for avg/min/max). Only a field that declares its options is filled; nothing is added when the '
+    + "report's order reaches the chart, and an answer with no rows still draws no chart; omitted = off",
   ),
 }));
 
