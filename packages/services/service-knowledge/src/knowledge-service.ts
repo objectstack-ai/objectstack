@@ -9,6 +9,7 @@ import type {
   IDataEngine,
   IKnowledgeAdapter,
   IKnowledgeService,
+  IQueueService,
   KnowledgeReindexOptions,
   KnowledgeReindexResult,
   KnowledgeSearchOptions,
@@ -83,6 +84,17 @@ import {
   type KnowledgeReconcileRequest,
 } from './knowledge-build.js';
 import {
+  nextBuildId,
+  storedBuildMessage,
+  syncFailureText,
+  type KnowledgeStoredBuild,
+  type KnowledgeStoredBuildCounts,
+  type KnowledgeSyncFailures,
+  type KnowledgeSyncStateIdentity,
+  type KnowledgeSyncStateStore,
+} from './knowledge-sync-state.js';
+import {
+  KNOWLEDGE_RECORD_SYNC_QUEUE,
   readRecordSyncMessage,
   type KnowledgeRecordSyncMessage,
   type KnowledgeRecordSyncOutcome,
@@ -168,6 +180,15 @@ export interface KnowledgeServiceOptions {
    */
   resolveBuildLock?: () => KnowledgeBuildLock | undefined;
   /**
+   * Each source's durable sync state (`knowledge-sync-state.ts`,
+   * `sys_knowledge_sync_state`): the last build and the record syncs that
+   * failed, one row per source, the same on every node. `index_status`
+   * answers from it. `KnowledgeServicePlugin` wires it wherever the object is
+   * registered and a data engine is bound. Omitted, the service keeps only
+   * this node's last build in memory, and `index_status` answers that.
+   */
+  syncState?: KnowledgeSyncStateStore;
+  /**
    * Default top-K when callers don't specify. The adapter may cap
    * further; the service does not enforce an upper bound itself.
    * @default 10
@@ -227,6 +248,17 @@ export class KnowledgeService implements IKnowledgeService {
   private readonly freshnessRepairs = new Set<string>();
   /** The last build of each source on this node (`knowledge-build.ts`), by index key. */
   private readonly builds = new Map<string, KnowledgeBuildRecord>();
+  /** The durable id of the build each source runs on this node now ({@link rebuildOf}), by index key. */
+  private readonly runningBuildIds = new Map<string, string>();
+  /** Sources whose sync-state row this node has written once at least ({@link recordSources}), by index key. */
+  private readonly syncStateRecorded = new Set<string>();
+  /** Set once a sync-state write failed: said once, at `error` ({@link syncStateWriteFailed}). */
+  private syncStateWriteReported = false;
+  /**
+   * The record-sync queue's dead letters and pending count, while syncs run
+   * through it ({@link useRecordSyncQueue}); `undefined` while they run inline.
+   */
+  private recordSyncQueueView: KnowledgeRecordSyncQueueView | undefined;
   /** Set by {@link stopBuilds}: the boot pass and the reconcile start no further build. */
   private buildsStopped = false;
   /** Sources the reconcile has said, once, it cannot walk because their store lists no documents (by index key). */
@@ -478,6 +510,15 @@ export class KnowledgeService implements IKnowledgeService {
     // among the adapters registered now, as every other use places it.
     const adapterId = this.boundAdapterId(entry.handed);
     this.forget(entry);
+    // The source's sync-state row goes with it (whatever its index does).
+    const store = this.options.syncState;
+    if (store) {
+      try {
+        await store.remove(entry.key);
+      } catch (err) {
+        this.syncStateWriteFailed(`the sync-state row of removed source '${entry.face}' could not be removed`, err);
+      }
+    }
     const kept = (why: string): void => {
       this.options.logger?.warn?.(
         `[knowledge] source '${entry.face}' was removed, and its index was not dropped: ${why} ` +
@@ -510,6 +551,7 @@ export class KnowledgeService implements IKnowledgeService {
   private forget(entry: KnowledgeSourceEntry): void {
     this.registry.remove(entry.key);
     this.builds.delete(entry.key);
+    this.syncStateRecorded.delete(entry.key);
     this.whereUnenforceableReported.delete(entry.key);
     this.reconcileUnlistedReported.delete(entry.key);
     this.cancelPendingReconcile(entry.key);
@@ -1322,7 +1364,10 @@ export class KnowledgeService implements IKnowledgeService {
    * starts again. Never rejects for a registered source; throws for an
    * unknown one, as {@link reindexSource} does.
    */
-  async rebuildSource(sourceId: string, opts: { trigger: KnowledgeBuildTrigger }): Promise<KnowledgeBuildRecord> {
+  async rebuildSource(
+    sourceId: string,
+    opts: { trigger: KnowledgeBuildTrigger; onStarted?: (record: KnowledgeBuildRecord) => void },
+  ): Promise<KnowledgeBuildRecord> {
     return this.rebuildOf(this.requireEntry(sourceId), opts);
   }
 
@@ -1330,11 +1375,43 @@ export class KnowledgeService implements IKnowledgeService {
    * {@link rebuildSource} of one registered source. The record names the
    * source by its face; the build's lock and this node's record of it are
    * held under its index key, which no two sources share.
+   *
+   * The durable record (`knowledge-sync-state.ts`) is written once the build
+   * holds the lease and walks: its start, its counts at most every
+   * {@link BUILD_PROGRESS_LOG_INTERVAL_MS}, and its end, which lands before
+   * this resolves. A build that does not run (`not-run`) writes nothing: the
+   * row keeps the build that ran. `onStarted` is told once, with the record,
+   * when the walk began and its start is recorded, or when the build ended
+   * without walking.
    */
-  private async rebuildOf(entry: KnowledgeSourceEntry, opts: { trigger: KnowledgeBuildTrigger }): Promise<KnowledgeBuildRecord> {
-    const source = entry.handed;
+  private async rebuildOf(
+    entry: KnowledgeSourceEntry,
+    opts: { trigger: KnowledgeBuildTrigger; onStarted?: (record: KnowledgeBuildRecord) => void },
+  ): Promise<KnowledgeBuildRecord> {
     const running = this.builds.get(entry.key);
-    if (running?.status === 'running') return cloneBuildRecord(running);
+    if (running?.status === 'running') {
+      const copy = cloneBuildRecord(running);
+      opts.onStarted?.(copy);
+      return copy;
+    }
+    const durable: DurableBuild = { chain: Promise.resolve() };
+    try {
+      return await this.buildUnderLease(entry, opts, durable);
+    } finally {
+      await durable.chain;
+      if (durable.buildId !== undefined && this.runningBuildIds.get(entry.key) === durable.buildId) {
+        this.runningBuildIds.delete(entry.key);
+      }
+    }
+  }
+
+  /** The body of {@link rebuildOf}; queues its durable writes on `durable.chain`. */
+  private async buildUnderLease(
+    entry: KnowledgeSourceEntry,
+    opts: { trigger: KnowledgeBuildTrigger; onStarted?: (record: KnowledgeBuildRecord) => void },
+    durable: DurableBuild,
+  ): Promise<KnowledgeBuildRecord> {
+    const source = entry.handed;
     const record: KnowledgeBuildRecord = {
       sourceId: entry.face,
       trigger: opts.trigger,
@@ -1345,6 +1422,12 @@ export class KnowledgeService implements IKnowledgeService {
     this.builds.set(entry.key, record);
     const logger = this.options.logger;
     const label = `[knowledge] build of source '${entry.face}' (${opts.trigger})`;
+    let announced = false;
+    const announce = (): void => {
+      if (announced) return;
+      announced = true;
+      opts.onStarted?.(cloneBuildRecord(record));
+    };
     const finish = (
       status: Exclude<KnowledgeBuildRecord['status'], 'running'>,
       message: string | undefined,
@@ -1354,6 +1437,8 @@ export class KnowledgeService implements IKnowledgeService {
       record.finishedAt = new Date().toISOString();
       if (message !== undefined) record.message = message;
       if (result !== undefined) record.result = result;
+      if (status !== 'not-run') this.recordBuildEnd(entry, record, durable);
+      announce();
       return cloneBuildRecord(record);
     };
 
@@ -1394,6 +1479,9 @@ export class KnowledgeService implements IKnowledgeService {
       },
     });
     try {
+      // This node holds the source's lease (or is the only node): a build the
+      // record still reads `running` is one whose node stopped.
+      await this.closeStaleBuild(entry);
       if (opts.trigger === 'boot' || opts.trigger === 'reload') {
         const reading = await this.readIndexStateOf(entry);
         if (!reading.due) {
@@ -1402,6 +1490,8 @@ export class KnowledgeService implements IKnowledgeService {
           return finish('not-run', message);
         }
       }
+      await this.recordBuildStart(entry, record, durable);
+      announce();
       logger?.info?.(
         `${label} started: every row the source's where matches is read, and the content fields of each one the ` +
           'adapter does not already hold unchanged are sent to the embedding provider, which bills for them.',
@@ -1419,6 +1509,7 @@ export class KnowledgeService implements IKnowledgeService {
           `${label}: page ${step.pages}, ${step.discovered} row(s) read, ${step.indexed} written, ` +
             `${step.skipped} unchanged, ${step.failed} cannot be indexed.`,
         );
+        this.recordBuildProgress(entry, record, durable);
       }, fence);
       // Cancelled at the stall bound: the walk is no longer waited on (it
       // stops at its next page if the call it waits on ever answers).
@@ -1467,6 +1558,373 @@ export class KnowledgeService implements IKnowledgeService {
         }
       }
     }
+  }
+
+  // ── The durable sync state (`knowledge-sync-state.ts`) ────────────
+
+  /** The source as its sync-state row names it. */
+  private syncStateIdentity(entry: KnowledgeSourceEntry): KnowledgeSyncStateIdentity {
+    const adapter = this.boundAdapterId(entry.handed);
+    return {
+      key: entry.key,
+      source: entry.face,
+      ...(entry.packageId === undefined ? {} : { packageId: entry.packageId }),
+      ...(adapter === undefined ? {} : { adapter }),
+      object: entry.handed.source.object,
+    };
+  }
+
+  /**
+   * A sync-state write failed: the record no longer matches what happened,
+   * while everything else looks normal. Said once, at `error`, with what is
+   * lost and the fix; never thrown into the build or the sync it records.
+   */
+  private syncStateWriteFailed(what: string, err: unknown): void {
+    if (this.syncStateWriteReported) {
+      this.options.logger?.debug?.(`[knowledge] ${what} (${errorText(err)}).`);
+      return;
+    }
+    this.syncStateWriteReported = true;
+    const report =
+      `[knowledge] ${what} (${errorText(err)}): the source's sync state in sys_knowledge_sync_state (its last build ` +
+      'and its failed syncs, what index_status and Setup show on every node) no longer says what happened, and ' +
+      'nothing else looks wrong. Check that schema sync ran for sys_knowledge_sync_state on the default datasource; ' +
+      'the next build rewrites the row. Said once; later failures are logged at debug.';
+    if (this.options.logger?.error) this.options.logger.error(report);
+    else this.options.logger?.warn?.(report);
+  }
+
+  /** The record's counts of a build record. */
+  private storedCounts(record: KnowledgeBuildRecord): KnowledgeStoredBuildCounts {
+    return {
+      discovered: record.progress.discovered,
+      indexed: record.progress.indexed,
+      skipped: record.progress.skipped,
+      purged: record.result?.purged ?? null,
+      failed: record.progress.failed,
+    };
+  }
+
+  /** Record a build's start; the build waits for it, so every node reads `running` once the walk begins. */
+  private async recordBuildStart(entry: KnowledgeSourceEntry, record: KnowledgeBuildRecord, durable: DurableBuild): Promise<void> {
+    const store = this.options.syncState;
+    if (!store) return;
+    const buildId = nextBuildId();
+    durable.buildId = buildId;
+    this.runningBuildIds.set(entry.key, buildId);
+    try {
+      await store.startBuild(this.syncStateIdentity(entry), buildId, record.trigger, record.startedAt);
+      this.syncStateRecorded.add(entry.key);
+    } catch (err) {
+      this.syncStateWriteFailed(`the start of the build of source '${entry.face}' was not recorded`, err);
+    }
+  }
+
+  /** Queue a running build's counts (the walk does not wait for it). */
+  private recordBuildProgress(entry: KnowledgeSourceEntry, record: KnowledgeBuildRecord, durable: DurableBuild): void {
+    const store = this.options.syncState;
+    const buildId = durable.buildId;
+    if (!store || buildId === undefined) return;
+    const counts = this.storedCounts(record);
+    durable.chain = durable.chain.then(async () => {
+      try {
+        await store.progressBuild(entry.key, buildId, counts);
+      } catch (err) {
+        this.syncStateWriteFailed(`the progress of the build of source '${entry.face}' was not recorded`, err);
+      }
+    });
+  }
+
+  /** Queue a build's end; {@link rebuildOf} resolves once it landed. */
+  private recordBuildEnd(entry: KnowledgeSourceEntry, record: KnowledgeBuildRecord, durable: DurableBuild): void {
+    const store = this.options.syncState;
+    const buildId = durable.buildId;
+    if (!store || buildId === undefined || record.status === 'running' || record.status === 'not-run') return;
+    const status = record.status;
+    const counts = this.storedCounts(record);
+    const finishedAt = record.finishedAt ?? new Date().toISOString();
+    durable.chain = durable.chain.then(async () => {
+      try {
+        const landed = await store.finishBuild(entry.key, buildId, {
+          status,
+          finishedAt,
+          counts,
+          message: storedBuildMessage({ status, counts }),
+        });
+        if (!landed) {
+          this.options.logger?.info?.(
+            `[knowledge] the end of the build of source '${entry.face}' (${status}) was not recorded: another build ` +
+              'has taken the source over since, and the record keeps that one.',
+          );
+        }
+      } catch (err) {
+        this.syncStateWriteFailed(`the end of the build of source '${entry.face}' was not recorded`, err);
+      }
+    });
+  }
+
+  /**
+   * Close the build the record reads `running` for `entry` as `interrupted`,
+   * when it is not one this node runs. Called by a node that holds the
+   * source's lease (or the only node), so no live build can be the one the
+   * record names. Never throws.
+   */
+  private async closeStaleBuild(entry: KnowledgeSourceEntry): Promise<boolean> {
+    const store = this.options.syncState;
+    if (!store) return false;
+    try {
+      const state = await store.read(entry.key);
+      if (state?.build?.status !== 'running' || state.buildId === undefined) return false;
+      if (this.runningBuildIds.get(entry.key) === state.buildId) return false;
+      const closed = await store.closeInterrupted(entry.key, state.buildId, new Date().toISOString());
+      if (closed) {
+        this.options.logger?.info?.(
+          `[knowledge] source '${entry.face}': the ${state.build.trigger} build started ${state.build.startedAt} ` +
+            'by a node that stopped before it ended is closed as interrupted.',
+        );
+      }
+      return closed;
+    } catch (err) {
+      this.syncStateWriteFailed(`the interrupted build of source '${entry.face}' was not closed`, err);
+      return false;
+    }
+  }
+
+  /**
+   * Close every build a node that stopped left `running` in the record, as
+   * `interrupted`: the boot's half of "a build left running is closed by the
+   * next boot or the next lease holder". A source is closed only while its
+   * build lease is free (taken here with no wait, and released at once), so a
+   * build another node is running now is left alone; a composition with no
+   * cluster service is one node, and every such build is this node's
+   * previous process's. A row whose source is not registered here is closed
+   * too: no node builds it. Answers how many were closed; never throws.
+   */
+  async closeInterruptedBuilds(): Promise<number> {
+    const store = this.options.syncState;
+    if (!store) return 0;
+    let running: Awaited<ReturnType<KnowledgeSyncStateStore['runningBuilds']>>;
+    try {
+      running = await store.runningBuilds();
+    } catch (err) {
+      this.syncStateWriteFailed('the builds a stopped node left running could not be read at boot', err);
+      return 0;
+    }
+    let closed = 0;
+    for (const state of running) {
+      if (state.buildId === undefined) continue;
+      if (this.runningBuildIds.get(state.key) === state.buildId) continue;
+      let lock: KnowledgeBuildLock | undefined;
+      let handle: KnowledgeBuildLockHandle | null = null;
+      try {
+        lock = this.options.resolveBuildLock?.();
+        if (lock) {
+          handle = await lock.acquire(buildLockKey(state.key), { ttlMs: BUILD_LEASE_MS, waitMs: 0 });
+          if (!handle) continue; // A node is building it now.
+        }
+        if (await store.closeInterrupted(state.key, state.buildId, new Date().toISOString())) closed++;
+      } catch (err) {
+        this.syncStateWriteFailed(`the interrupted build of source '${state.source}' was not closed at boot`, err);
+      } finally {
+        if (handle) await handle.release().catch(() => undefined);
+      }
+    }
+    if (closed > 0) {
+      this.options.logger?.info?.(
+        `[knowledge] ${closed} build(s) a stopped node left running are closed as interrupted in sys_knowledge_sync_state.`,
+      );
+    }
+    return closed;
+  }
+
+  /**
+   * Write a sync-state row for each registered source that has none yet, so
+   * Setup lists every source, built or not. Rows this node has written are
+   * not asked again. Never throws.
+   */
+  async recordSources(): Promise<void> {
+    const store = this.options.syncState;
+    if (!store) return;
+    for (const entry of this.registry.entries()) {
+      if (this.syncStateRecorded.has(entry.key)) continue;
+      try {
+        await store.ensure(this.syncStateIdentity(entry));
+        this.syncStateRecorded.add(entry.key);
+      } catch (err) {
+        this.syncStateWriteFailed(`the sync-state row of source '${entry.face}' could not be written`, err);
+      }
+    }
+  }
+
+  /**
+   * One source's sync state: its last build and its failed syncs, from the
+   * durable record when one is wired, the same on every node. With none,
+   * the last build this node ran, and no failures. Throws when the record
+   * cannot be read, and for an unknown source.
+   */
+  async syncStateOf(sourceId: string): Promise<{ build: KnowledgeStoredBuild | null; failures: KnowledgeSyncFailures }> {
+    const entry = this.requireEntry(sourceId);
+    const store = this.options.syncState;
+    if (store) {
+      const state = await store.read(entry.key);
+      return { build: state?.build ?? null, failures: state?.failures ?? { count: 0 } };
+    }
+    const record = this.builds.get(entry.key);
+    if (!record || record.status === 'not-run') return { build: null, failures: { count: 0 } };
+    const counts = this.storedCounts(record);
+    return {
+      build: {
+        trigger: record.trigger,
+        status: record.status,
+        startedAt: record.startedAt,
+        ...(record.finishedAt === undefined ? {} : { finishedAt: record.finishedAt }),
+        counts,
+        ...(record.status === 'running' ? {} : { message: storedBuildMessage({ status: record.status, counts }) }),
+      },
+      failures: { count: 0 },
+    };
+  }
+
+  /**
+   * The record-sync messages waiting on the queue (`getQueueSize`): every
+   * source's together, read live. `undefined` while syncs run inline, or the
+   * queue cannot count. Throws what the queue throws.
+   */
+  async pendingRecordSyncs(): Promise<number | undefined> {
+    const view = this.recordSyncQueueView;
+    if (!view || typeof view.getQueueSize !== 'function') return undefined;
+    return view.getQueueSize(KNOWLEDGE_RECORD_SYNC_QUEUE);
+  }
+
+  /**
+   * Give the service the record-sync queue's dead letters and pending count
+   * (`KnowledgeServicePlugin`, where it routes syncs through the queue):
+   * {@link pendingRecordSyncs} reads it, and a completed reconcile removes the
+   * dead letters it repaired. `undefined` drops it.
+   */
+  useRecordSyncQueue(view: KnowledgeRecordSyncQueueView | undefined): void {
+    this.recordSyncQueueView = view;
+  }
+
+  /**
+   * Count one record sync that spent its last attempt and is now a dead
+   * letter (the worker calls it once per message, on its last attempt, never
+   * per attempt): the source's failure count rises by one, with the time and
+   * the platform's sentence for it ({@link syncFailureText}, never the
+   * error's own text). The first failure of a source that had none asks for a
+   * reconcile of it, through the request a predicate write makes, so an
+   * outage heals without waiting for the daily run; later ones ask nothing.
+   * A message whose source is gone counts nothing. Never rejects.
+   */
+  async recordSyncFailure(data: unknown, err: unknown, attempts: { attempt: number; maxAttempts: number }): Promise<void> {
+    const message = readRecordSyncMessage(data);
+    if (!message) return;
+    const entry = this.registry.byIndexKey(message.source);
+    const store = this.options.syncState;
+    if (!entry || !store) return;
+    let written: Awaited<ReturnType<KnowledgeSyncStateStore['addFailure']>>;
+    try {
+      written = await store.addFailure(
+        this.syncStateIdentity(entry),
+        new Date().toISOString(),
+        syncFailureText(message.recordId, attempts.attempt, attempts.maxAttempts, err),
+      );
+      this.syncStateRecorded.add(entry.key);
+    } catch (writeErr) {
+      this.syncStateWriteFailed(`a failed sync of source '${entry.face}' was not counted`, writeErr);
+      return;
+    }
+    if (written.first) this.requestSourceReconcile(entry);
+  }
+
+  /** Ask for a reconcile of one source, as a predicate write does ({@link requestReconcile}). */
+  private requestSourceReconcile(entry: KnowledgeSourceEntry): void {
+    if (this.buildsStopped || this.reconcileExclusion(entry) !== undefined) return;
+    this.armReconcile(entry.key, Date.now());
+    this.options.logger?.info?.(
+      `[knowledge] source '${entry.face}' has its first failed sync: a reconcile of it is asked for, and starts once ` +
+        'the quiet period passes.',
+    );
+  }
+
+  /**
+   * After a reconcile of `entry` that completed: clear the failures that
+   * failed before its walk began (`walkStartedAt`), and remove their dead
+   * letters from the queue. The walk re-read every row, so they are repaired
+   * or no longer apply. A dead letter that failed during the walk stays, and
+   * is still counted. Read from the queue's dead letters where syncs run
+   * through it; where they do not, the failures are cleared only when the
+   * newest of them came before the walk. Never throws.
+   */
+  private async clearRepairedFailures(entry: KnowledgeSourceEntry, walkStartedAt: string): Promise<void> {
+    const store = this.options.syncState;
+    if (!store) return;
+    const walkStart = Date.parse(walkStartedAt);
+    const view = this.recordSyncQueueView;
+    try {
+      for (let attempt = 0; attempt < 4; attempt++) {
+        const state = await store.read(entry.key);
+        if (!state) return;
+        let remaining: string[] | undefined;
+        if (view && typeof view.listFailed === 'function') {
+          const letters = await this.deadLettersOf(entry.key, view);
+          const repaired = letters.filter((l) => l.at < walkStart);
+          if (typeof view.purgeFailed === 'function') {
+            for (const letter of repaired) {
+              try {
+                await view.purgeFailed(letter.id);
+              } catch (err) {
+                this.options.logger?.warn?.(
+                  `[knowledge] source '${entry.face}': the repaired dead letter '${letter.id}' could not be removed ` +
+                    `from queue '${KNOWLEDGE_RECORD_SYNC_QUEUE}' (${errorText(err)}); it stays listed there.`,
+                );
+              }
+            }
+          }
+          remaining = letters.filter((l) => l.at >= walkStart).map((l) => new Date(l.at).toISOString()).sort();
+        } else {
+          const last = state.failures.lastFailedAt === undefined ? NaN : Date.parse(state.failures.lastFailedAt);
+          if (state.failures.count === 0 || !(last < walkStart)) return;
+          remaining = [];
+        }
+        if (remaining.length === 0 && state.failures.count === 0) return;
+        const landed = await store.setFailures(entry.key, state.failureCountStored, remaining.length === 0
+          ? { count: 0 }
+          : {
+            count: remaining.length,
+            firstFailedAt: remaining[0],
+            ...(state.failures.lastFailedAt === undefined ? {} : { lastFailedAt: state.failures.lastFailedAt }),
+            ...(state.failures.lastError === undefined ? {} : { lastError: state.failures.lastError }),
+          });
+        if (landed) {
+          this.options.logger?.info?.(
+            `[knowledge] source '${entry.face}': the reconcile repaired the syncs that failed before it began; ` +
+              `${remaining.length} failed during it and stay counted.`,
+          );
+          return;
+        }
+        // A failure was counted meanwhile: read again.
+      }
+    } catch (err) {
+      this.syncStateWriteFailed(`the failures the reconcile of source '${entry.face}' repaired were not cleared`, err);
+    }
+  }
+
+  /** Every dead letter on the record-sync queue that names the source under `key`, with when it failed. */
+  private async deadLettersOf(key: string, view: KnowledgeRecordSyncQueueView): Promise<Array<{ id: string; at: number }>> {
+    const out: Array<{ id: string; at: number }> = [];
+    const page = 500;
+    for (let offset = 0; offset < DEAD_LETTER_SCAN_MAX; offset += page) {
+      const letters = await view.listFailed!(KNOWLEDGE_RECORD_SYNC_QUEUE, { limit: page, offset });
+      for (const letter of letters) {
+        const named = readRecordSyncMessage(letter.data)?.source ?? (letter.metadata as { source?: unknown } | undefined)?.source;
+        if (named !== key) continue;
+        const at = Date.parse(String(letter.completedAt ?? letter.updatedAt ?? letter.createdAt));
+        out.push({ id: letter.id, at: Number.isNaN(at) ? 0 : at });
+      }
+      if (letters.length < page) break;
+    }
+    return out;
   }
 
   /**
@@ -1661,7 +2119,12 @@ export class KnowledgeService implements IKnowledgeService {
           ? `[knowledge] source '${entry.face}' is built by the reconcile now: ${reading.detail}`
           : `[knowledge] source '${entry.face}' is reconciled now (${reading.state}): ${reading.detail}`,
       );
-      return { sourceId: entry.face, record: await this.rebuildOf(entry, { trigger: 'reconcile' }) };
+      const record = await this.rebuildOf(entry, { trigger: 'reconcile' });
+      // [ADR-0161 K1] The reconcile is the failure count's reader: a walk that
+      // completed re-read every row, so the syncs that failed before it began
+      // are repaired or no longer apply.
+      if (record.status === 'done') await this.clearRepairedFailures(entry, record.startedAt);
+      return { sourceId: entry.face, record };
     } catch (err) {
       const message = `the reconcile failed for it (${operatorText(err)}).`;
       logger?.warn(`[knowledge] source '${entry.face}': ${message}`);
@@ -3726,6 +4189,22 @@ interface IndexPlan {
 }
 
 /** A copy of a build record, so a caller never holds the live one. */
+/** One build's durable writes ({@link KnowledgeService.rebuildOf}): its id once its start is recorded, and their chain. */
+interface DurableBuild {
+  buildId?: string;
+  chain: Promise<void>;
+}
+
+/**
+ * The part of the `queue` service the sync state reads while record syncs
+ * run through it: the pending count, and the dead letters a completed
+ * reconcile repairs (`IQueueService`).
+ */
+export type KnowledgeRecordSyncQueueView = Pick<IQueueService, 'getQueueSize' | 'listFailed' | 'purgeFailed'>;
+
+/** The most dead letters a reconcile reads when it clears a source's repaired failures. */
+const DEAD_LETTER_SCAN_MAX = 100_000;
+
 function cloneBuildRecord(record: KnowledgeBuildRecord): KnowledgeBuildRecord {
   return { ...record, progress: { ...record.progress } };
 }
