@@ -5,7 +5,7 @@
 fix(metadata-protocol): the served type schemas no longer offer the keys the platform stamps
 
 Clause-②: no (narrowing — a key leaves a served description; nothing a client could save before is refused)
-Metadata-protocol: narrowed
+Metadata-protocol: none
 
 `GET /meta/types` (and the MCP draft door's `contract: true` read of `list_metadata_items`, which answers from it) describes what an author may write for each metadata type. Every type spreads the ADR-0010 protection envelope, so the served JSON Schema listed `_lock`, `_lockReason`, `_lockSource`, `_provenance`, `_packageId`, `_packageVersion` and `_lockDocsUrl` among each type's properties, and again inside every schema embedded in one (an object's field entries, each arm of a view). Studio's panels and an MCP client told to write only the keys the contract shows read those as writable.
 
