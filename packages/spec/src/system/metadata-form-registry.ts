@@ -44,7 +44,7 @@ import {
 } from '../ui';
 import { positionForm } from '../identity';
 import { permissionForm } from '../security';
-import { agentForm, toolForm, skillForm, aiContextForm } from '../ai';
+import { agentForm, toolForm, skillForm, aiContextForm, knowledgeSourceForm } from '../ai';
 import { flowForm } from '../automation';
 import { emailTemplateForm } from './email-template.metadata-form';
 
@@ -85,6 +85,8 @@ export const METADATA_FORM_REGISTRY: Readonly<Record<string, FormView>> = Object
     tool: toolForm,
     skill: skillForm,
     ai_context: aiContextForm,
+    // [ADR-0161 K4, clause 2] a knowledge source is authored in Studio.
+    knowledge_source: knowledgeSourceForm,
     flow: flowForm,
     permission: permissionForm,
     email_template: emailTemplateForm,

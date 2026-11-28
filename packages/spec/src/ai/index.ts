@@ -36,6 +36,7 @@ export { toolForm } from './tool.metadata-form';
 export * from './skill.zod';
 export { skillForm } from './skill.metadata-form';
 export { aiContextForm } from './ai-context.metadata-form';
+export { knowledgeSourceForm } from './knowledge-source.metadata-form';
 export * from './conversation.zod';
 export * from './model-registry.zod';
 export * from './usage.zod';
