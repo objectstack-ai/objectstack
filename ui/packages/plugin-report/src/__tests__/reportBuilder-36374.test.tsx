@@ -491,7 +491,7 @@ describe('the show-groups-with-no-records switch (objectstack#36722)', () => {
     const funnel = setShowEmptyGroups({ ...EXISTING, chart: { type: 'funnel', xAxis: 'stage', yAxis: 'total_amount' } }, true);
     expect(showsEmptyGroups(pickMeasure(funnel, 'deal_count', MEMBERS))).toBe(true);
     expect(showsEmptyGroups(pickGrouping(funnel, 'owner', '', MEMBERS))).toBe(true);
-    expect(pickMeasure(funnel, 'deal_count', MEMBERS).chart?.type).toBe('funnel');
+    expect(pickMeasure(funnel, 'deal_count', MEMBERS).chart).toMatchObject({ type: 'funnel' });
     // A stored single-value type draws no category: an edit drops the key there.
     const gauge = { ...EXISTING, chart: { type: 'gauge', xAxis: 'stage', yAxis: 'total_amount', showEmptyGroups: true } };
     expect(pickMeasure(gauge, 'deal_count', MEMBERS).chart).not.toHaveProperty('showEmptyGroups');
