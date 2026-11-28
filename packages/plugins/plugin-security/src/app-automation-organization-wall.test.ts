@@ -333,6 +333,131 @@ describe('an app-authored elevation is judged by its caller’s organization wal
     });
   });
 
+  describe('a write is judged as it will be stored', () => {
+    const member = () => actionBody({ tenantId: 'org_a' });
+
+    it('a judging seam goes on every insert and update, and the caller’s own organization asks no verdict', async () => {
+      for (const operation of ['insert', 'update']) {
+        const deps = depsFor(ORG_A);
+        const opCtx: any = { object: 'task', operation, context: member(), data: { id: 't_1', name: 'x' }, ast: { object: 'task' } };
+        await applyAppAutomationOrganizationWall(opCtx, deps);
+        expect(typeof opCtx.postHookWriteImageCheck?.evaluate).toBe('function');
+        await opCtx.postHookWriteImageCheck.evaluate([{ id: 't_1', organization_id: 'org_a' }]);
+        expect(deps.callerLayer0).not.toHaveBeenCalled();
+      }
+    });
+
+    it('a stored row in an organization the wall does not admit is refused 403, and an update left in none', async () => {
+      const insert: any = { object: 'task', operation: 'insert', context: member(), data: { name: 'x' } };
+      await applyAppAutomationOrganizationWall(insert, depsFor(ORG_A));
+      const placed = await refusalOf(() => insert.postHookWriteImageCheck.evaluate([{ name: 'x', organization_id: 'org_b' }]));
+      expect([placed.code, placed.status]).toEqual(['PERMISSION_DENIED', 403]);
+      const update: any = { object: 'task', operation: 'update', context: member(), data: { id: 't_1', touched: 'x' } };
+      await applyAppAutomationOrganizationWall(update, depsFor(ORG_A));
+      const emptied = await refusalOf(() => update.postHookWriteImageCheck.evaluate([{ id: 't_1', organization_id: null }]));
+      expect([emptied.code, emptied.status]).toEqual(['PERMISSION_DENIED', 403]);
+    });
+
+    it('control: an organization the wall admits is stored, and a wall with no parts admits any', async () => {
+      const union: any = { object: 'task', operation: 'insert', context: member(), data: { name: 'x' } };
+      await applyAppAutomationOrganizationWall(union, depsFor(UNION));
+      await expect(union.postHookWriteImageCheck.evaluate([{ organization_id: 'org_b' }])).resolves.toBeUndefined();
+      const none: any = { object: 'catalog', operation: 'insert', context: member(), data: { name: 'x' } };
+      await applyAppAutomationOrganizationWall(none, depsFor(NONE));
+      await expect(none.postHookWriteImageCheck.evaluate([{ organization_id: 'org_b' }])).resolves.toBeUndefined();
+    });
+
+    it('a seam installed before it is kept: it runs first, and is told it ran', async () => {
+      const prior = { evaluate: vi.fn(), honoured: false };
+      const opCtx: any = { object: 'task', operation: 'insert', context: member(), data: { name: 'x' }, postHookWriteImageCheck: prior };
+      await applyAppAutomationOrganizationWall(opCtx, depsFor(ORG_A));
+      await opCtx.postHookWriteImageCheck.evaluate([{ name: 'x' }]);
+      expect(prior.evaluate).toHaveBeenCalledOnce();
+      expect(prior.honoured).toBe(true);
+    });
+
+    it('control: a platform writer’s own system write gets no seam', async () => {
+      const opCtx: any = { object: 'task', operation: 'insert', context: { isSystem: true, tenantId: 'org_a' }, data: { name: 'x' } };
+      await applyAppAutomationOrganizationWall(opCtx, depsFor(ORG_A));
+      expect(opCtx.postHookWriteImageCheck).toBeUndefined();
+    });
+  });
+
+  describe('the option bag never widens an elevation past its caller’s wall', () => {
+    const member = () => actionBody({ tenantId: 'org_a' });
+
+    it('a read whose bag names or clears an organization scope takes the caller’s wall on its predicate', async () => {
+      for (const options of [{ tenantId: 'org_b' }, { tenantIds: ['org_a', 'org_b'] }, { tenantId: null }, { tenantId: '' }]) {
+        const read: any = { object: 'task', operation: 'find', context: member(), options, ast: { object: 'task', where: { a: 1 } } };
+        await applyAppAutomationOrganizationWall(read, depsFor(ORG_A));
+        expect(read.ast.where).toEqual({ $and: [{ a: 1 }, { organization_id: 'org_a' }] });
+        expect(read.tenantLayer0Verdict).toEqual(ORG_A);
+      }
+    });
+
+    it('a write whose bag names an organization outside the wall, or clears the key, is refused 403', async () => {
+      for (const operation of ['update', 'delete', 'purge']) {
+        for (const options of [{ tenantId: 'org_b' }, { tenantIds: ['org_a', 'org_b'] }, { tenantId: null }]) {
+          const e = await refusalOf(() =>
+            applyAppAutomationOrganizationWall({ object: 'task', operation, context: member(), options, ast: {} }, depsFor(ORG_A)),
+          );
+          expect([e.code, e.status]).toEqual(['PERMISSION_DENIED', 403]);
+        }
+      }
+    });
+
+    it('a denied caller’s delete keeps the read rule: it matches nothing', async () => {
+      const opCtx: any = { object: 'task', operation: 'delete', context: actionBody(), options: { tenantId: 'org_b' }, ast: { object: 'task' } };
+      await applyAppAutomationOrganizationWall(opCtx, depsFor(DENY));
+      expect(opCtx.ast.where).toBe(RLS_DENY_FILTER);
+    });
+
+    it('a key a before-hook sets later is held as it is set', async () => {
+      const write: any = { object: 'task', operation: 'update', context: member(), options: {}, ast: { object: 'task' } };
+      await applyAppAutomationOrganizationWall(write, depsFor(ORG_A));
+      expect(() => {
+        write.options.tenantId = 'org_b';
+      }).toThrow(/organization/);
+      expect(() => {
+        write.options.tenantId = null;
+      }).toThrow(/organization/);
+      write.options.tenantId = 'org_a';
+      expect(write.options.tenantId).toBe('org_a');
+      const read: any = { object: 'task', operation: 'find', context: member(), options: {}, ast: { object: 'task' } };
+      await applyAppAutomationOrganizationWall(read, depsFor(ORG_A));
+      read.options.tenantId = 'org_b';
+      expect(read.options.tenantId).toBe(RLS_DENY_FILTER.id);
+      read.options.tenantIds = ['org_a', 'org_b'];
+      expect(read.options.tenantIds).toEqual(['org_a']);
+    });
+
+    it('a held key the bag does not carry stays out of its keys until set', async () => {
+      const opCtx: any = { object: 'task', operation: 'find', context: member(), options: { where: {} }, ast: { object: 'task' } };
+      await applyAppAutomationOrganizationWall(opCtx, depsFor(ORG_A));
+      expect(Object.keys(opCtx.options)).toEqual(['where']);
+      opCtx.options.tenantId = 'org_a';
+      expect(Object.keys(opCtx.options)).toEqual(['where', 'tenantId']);
+    });
+
+    it('control: a bag naming an organization the wall admits passes, and a wall with no parts admits any', async () => {
+      const own: any = { object: 'task', operation: 'update', context: member(), options: { tenantId: 'org_a' }, ast: { object: 'task' } };
+      await expect(applyAppAutomationOrganizationWall(own, depsFor(ORG_A))).resolves.toBeUndefined();
+      const union: any = { object: 'task', operation: 'update', context: member(), options: { tenantIds: ['org_a', 'org_b'] }, ast: { object: 'task' } };
+      await expect(applyAppAutomationOrganizationWall(union, depsFor(UNION))).resolves.toBeUndefined();
+      const none: any = { object: 'catalog', operation: 'delete', context: member(), options: { tenantId: 'org_b' }, ast: { object: 'catalog' } };
+      await expect(applyAppAutomationOrganizationWall(none, depsFor(NONE))).resolves.toBeUndefined();
+    });
+
+    it('control: a platform writer’s own system bag is untouched', async () => {
+      const options: Record<string, unknown> = { tenantId: 'org_b' };
+      const opCtx: any = { object: 'task', operation: 'update', context: { isSystem: true }, options, ast: { object: 'task' } };
+      const deps = depsFor(ORG_A);
+      await applyAppAutomationOrganizationWall(opCtx, deps);
+      expect(Object.getOwnPropertyDescriptor(options, 'tenantId')).toMatchObject({ value: 'org_b', writable: true });
+      expect(deps.callerLayer0).not.toHaveBeenCalled();
+    });
+  });
+
   describe('the by-id check is read where the write runs', () => {
     it('the write’s own context, transaction included, is handed to the check', async () => {
       const deps = depsFor(ORG_A, { inScope: true });

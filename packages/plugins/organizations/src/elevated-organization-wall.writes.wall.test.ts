@@ -11,7 +11,13 @@
  *   refused `403 PERMISSION_DENIED`;
  * - the row a by-id write names is judged where the write runs: inside the
  *   body's own transaction, a row the transaction wrote is the caller's to
- *   write again, as at the plain door.
+ *   write again, as at the plain door;
+ * - a write is judged as it will be stored: an organization the write's
+ *   before-hooks leave on the row is held to the same wall as one the write
+ *   sent;
+ * - an organization the operation's option bag names (`tenantId`,
+ *   `tenantIds`) is held to the caller's wall: a write naming one outside it
+ *   is refused `403`, and a read naming one is answered by the read rule.
  *
  * ## What is real
  *
@@ -35,6 +41,21 @@ const TASK = 'eoww_task';
 
 const BODY_LAND = "await ctx.api.object('eoww_task').insert({ name: input.name, organization_id: input.org }); return { landed: 1 };";
 const BODY_MOVE = "await ctx.api.object('eoww_task').update({ id: input.target, organization_id: input.org }); return { moved: 1 };";
+// Bodies that forward their caller's input into the option bag of each verb.
+const BODY_BAG_FIND =
+  "const rows = await ctx.api.object('eoww_task').find({ where: {}, tenantId: input.org }); return { seen: rows.map((r) => r.name).sort() };";
+const BODY_BAG_FIND_MANY =
+  "const rows = await ctx.api.object('eoww_task').find({ where: {}, tenantIds: input.orgs }); return { seen: rows.map((r) => r.name).sort() };";
+const BODY_BAG_UPDATE =
+  "await ctx.api.object('eoww_task').update({ touched: 'bag' }, { where: { name: input.name }, multi: true, tenantId: input.org }); return { wrote: 1 };";
+const BODY_BAG_UPDATE_BY_ID =
+  "await ctx.api.object('eoww_task').update({ id: input.target, touched: 'bag' }, { tenantId: input.org }); return { wrote: 1 };";
+const BODY_BAG_CLEAR_FIND =
+  "const rows = await ctx.api.object('eoww_task').find({ where: {}, tenantId: null }); return { seen: rows.map((r) => r.name).sort() };";
+const BODY_BAG_CLEAR_UPDATE =
+  "await ctx.api.object('eoww_task').update({ touched: 'bag' }, { where: { name: input.name }, multi: true, tenantId: '' }); return { wrote: 1 };";
+const BODY_BAG_DELETE =
+  "await ctx.api.object('eoww_task').delete({ where: { name: input.name }, multi: true, tenantId: input.org }); return { removed: 1 };";
 
 const APP = {
   manifest: { id: 'com.example.eoww', namespace: 'eoww', version: '0.0.1', type: 'app', name: 'Elevated Org Wall Writes Fixture' },
@@ -44,7 +65,11 @@ const APP = {
       name: TASK,
       label: 'Task',
       sharingModel: 'public_read_write',
-      fields: { name: { type: 'text', label: 'Name' }, touched: { type: 'text', label: 'Touched' } },
+      fields: {
+        name: { type: 'text', label: 'Name' },
+        touched: { type: 'text', label: 'Touched' },
+        hint: { type: 'text', label: 'Hint' },
+      },
     },
   ],
   actions: [
@@ -66,6 +91,28 @@ const APP = {
     },
     { name: 'eoww_tx_touch', label: 'Transaction touch', objectName: TASK, type: 'script', target: 'eowwTxTouch' },
     { name: 'eoww_touch', label: 'Touch', objectName: TASK, type: 'script', target: 'eowwTouch' },
+    { name: 'eoww_hooked_land', label: 'Hooked land', objectName: TASK, type: 'script', target: 'eowwHookedLand' },
+    { name: 'eoww_hooked_touch', label: 'Hooked touch', objectName: TASK, type: 'script', target: 'eowwHookedTouch' },
+    { name: 'eoww_hooked_sweep', label: 'Hooked sweep', objectName: TASK, type: 'script', target: 'eowwHookedSweep' },
+    { name: 'eoww_late_bag', label: 'Late bag', objectName: TASK, type: 'script', target: 'eowwLateBag' },
+    { name: 'eoww_late_read', label: 'Late read', objectName: TASK, type: 'script', target: 'eowwLateRead' },
+    ...(
+      [
+        ['eoww_bag_find', BODY_BAG_FIND],
+        ['eoww_bag_find_many', BODY_BAG_FIND_MANY],
+        ['eoww_bag_update', BODY_BAG_UPDATE],
+        ['eoww_bag_update_by_id', BODY_BAG_UPDATE_BY_ID],
+        ['eoww_bag_delete', BODY_BAG_DELETE],
+        ['eoww_bag_clear_find', BODY_BAG_CLEAR_FIND],
+        ['eoww_bag_clear_update', BODY_BAG_CLEAR_UPDATE],
+      ] as const
+    ).map(([name, source]) => ({
+      name,
+      label: name,
+      objectName: TASK,
+      type: 'script',
+      body: { language: 'js', source, capabilities: ['api.read', 'api.write'] },
+    })),
   ],
 };
 
@@ -117,6 +164,65 @@ describe('an app-authored elevation’s writes are judged by its caller’s orga
         return row.id;
       });
       return { id };
+    });
+    // A before-hook that names an organization on the row it is handed: the
+    // `hint` the write carries.
+    for (const event of ['beforeInsert', 'beforeUpdate']) {
+      ql.registerHook(
+        event,
+        async (ctx: any) => {
+          const data = ctx.input?.data;
+          if (data && typeof data.hint === 'string' && data.hint !== '') data.organization_id = data.hint;
+        },
+        { object: TASK },
+      );
+    }
+    // A before-hook that writes a tenant key into the option bag of a write it
+    // is handed, and one that writes it into the bag of a read.
+    ql.registerHook(
+      'beforeUpdate',
+      async (ctx: any) => {
+        const touched = ctx.input?.data?.touched;
+        if (typeof touched === 'string' && touched.startsWith('late:') && ctx.input.options) {
+          ctx.input.options.tenantId = touched.slice('late:'.length);
+        }
+      },
+      { object: TASK },
+    );
+    let lateReadOrg: string | undefined;
+    ql.registerHook(
+      'beforeFind',
+      async (ctx: any) => {
+        if (lateReadOrg !== undefined && ctx.input?.options) ctx.input.options.tenantId = lateReadOrg;
+      },
+      { object: TASK },
+    );
+    ql.registerAction(TASK, 'eowwHookedLand', async (ctx: any) => {
+      await ctx.engine.insert(TASK, { name: ctx.params?.name, hint: ctx.params?.org });
+      return { landed: 1 };
+    });
+    ql.registerAction(TASK, 'eowwHookedTouch', async (ctx: any) => {
+      await ctx.engine.update(TASK, String(ctx.params?.target), { touched: 'hooked', hint: ctx.params?.org });
+      return { wrote: 1 };
+    });
+    ql.registerAction(TASK, 'eowwHookedSweep', async (ctx: any) => {
+      await ctx.api.object(TASK).update({ touched: 'swept', hint: ctx.params?.org }, { where: { name: 'A1' }, multi: true });
+      return { wrote: 1 };
+    });
+    ql.registerAction(TASK, 'eowwLateBag', async (ctx: any) => {
+      await ctx.api
+        .object(TASK)
+        .update({ touched: `late:${String(ctx.params?.org)}` }, { where: { name: { $in: ['A1', ctx.params?.name] } }, multi: true });
+      return { wrote: 1 };
+    });
+    ql.registerAction(TASK, 'eowwLateRead', async (ctx: any) => {
+      lateReadOrg = String(ctx.params?.org);
+      try {
+        const rows = await ctx.api.object(TASK).find({ where: {} });
+        return { seen: rows.map((r: any) => r.name).sort() };
+      } finally {
+        lateReadOrg = undefined;
+      }
     });
     ql.registerAction(TASK, 'eowwTouch', async (ctx: any) => {
       await ctx.engine.update(TASK, String(ctx.params?.target), { touched: 'touch' });
@@ -211,6 +317,135 @@ describe('an app-authored elevation’s writes are judged by its caller’s orga
       const kept = await run(alice, 'eoww_move', { target: a1!.id, org: orgA });
       expect(kept.status, JSON.stringify(kept.body)).toBe(200);
       expect((await rowNamed('A1'))!.organization_id).toBe(orgA);
+    });
+  });
+
+  describe('a write is judged as it will be stored', () => {
+    it('an organization a before-hook places on an insert outside the caller’s wall is refused 403', async () => {
+      await reseed();
+      const r = await run(alice, 'eoww_hooked_land', { name: 'HOOKED-B', org: orgB });
+      expect(r.status, JSON.stringify(r.body)).toBe(403);
+      expect(r.body.error.code).toBe('PERMISSION_DENIED');
+      expect(await rowNamed('HOOKED-B')).toBeUndefined();
+    });
+
+    it('an organization a before-hook places on a by-id update outside the caller’s wall is refused 403', async () => {
+      await reseed();
+      const a1 = await rowNamed('A1');
+      const r = await run(alice, 'eoww_hooked_touch', { target: a1!.id, org: orgB });
+      expect(r.status, JSON.stringify(r.body)).toBe(403);
+      expect(r.body.error.code).toBe('PERMISSION_DENIED');
+      expect(await rowNamed('A1')).toMatchObject({ organization_id: orgA });
+      expect((await rowNamed('A1'))!.touched ?? null).toBeNull();
+    });
+
+    it('an organization a before-hook places on a predicate update outside the caller’s wall is refused 403', async () => {
+      await reseed();
+      const r = await run(alice, 'eoww_hooked_sweep', { org: orgB });
+      expect(r.status, JSON.stringify(r.body)).toBe(403);
+      expect(r.body.error.code).toBe('PERMISSION_DENIED');
+      expect(await rowNamed('A1')).toMatchObject({ organization_id: orgA });
+      expect((await rowNamed('A1'))!.touched ?? null).toBeNull();
+    });
+
+    it('control: a before-hook that places the row in the caller’s own organization lands it there', async () => {
+      await reseed();
+      const landed = await run(alice, 'eoww_hooked_land', { name: 'HOOKED-A', org: orgA });
+      expect(landed.status, JSON.stringify(landed.body)).toBe(200);
+      expect((await rowNamed('HOOKED-A'))!.organization_id).toBe(orgA);
+      const a1 = await rowNamed('A1');
+      const kept = await run(alice, 'eoww_hooked_touch', { target: a1!.id, org: orgA });
+      expect(kept.status, JSON.stringify(kept.body)).toBe(200);
+      expect(await rowNamed('A1')).toMatchObject({ organization_id: orgA, touched: 'hooked' });
+    });
+  });
+
+  describe('the option bag’s organization is held to the caller’s wall', () => {
+    it('a read whose bag names another organization is answered by the read rule', async () => {
+      await reseed();
+      const one = await run(alice, 'eoww_bag_find', { org: orgB });
+      expect(one.status, JSON.stringify(one.body)).toBe(200);
+      expect(one.body.data).toEqual({ seen: [] });
+      const many = await run(alice, 'eoww_bag_find_many', { orgs: [orgA, orgB] });
+      expect(many.status, JSON.stringify(many.body)).toBe(200);
+      expect(many.body.data).toEqual({ seen: ['A1'] });
+    });
+
+    it('a read whose bag clears the tenant key is answered by the read rule', async () => {
+      await reseed();
+      const r = await run(alice, 'eoww_bag_clear_find');
+      expect(r.status, JSON.stringify(r.body)).toBe(200);
+      expect(r.body.data).toEqual({ seen: ['A1'] });
+    });
+
+    it('a write whose bag clears the tenant key is refused 403', async () => {
+      await reseed();
+      const r = await run(alice, 'eoww_bag_clear_update', { name: 'B1' });
+      expect(r.status, JSON.stringify(r.body)).toBe(403);
+      expect(r.body.error.code).toBe('PERMISSION_DENIED');
+      expect((await rowNamed('B1'))!.touched ?? null).toBeNull();
+    });
+
+    it('a predicate update whose bag names another organization is refused 403', async () => {
+      await reseed();
+      const r = await run(alice, 'eoww_bag_update', { name: 'B1', org: orgB });
+      expect(r.status, JSON.stringify(r.body)).toBe(403);
+      expect(r.body.error.code).toBe('PERMISSION_DENIED');
+      expect((await rowNamed('B1'))!.touched ?? null).toBeNull();
+    });
+
+    it('a by-id update whose bag names another organization is refused 403', async () => {
+      await reseed();
+      const b1 = await rowNamed('B1');
+      const r = await run(alice, 'eoww_bag_update_by_id', { target: b1!.id, org: orgB });
+      expect(r.status, JSON.stringify(r.body)).toBe(403);
+      expect(r.body.error.code).toBe('PERMISSION_DENIED');
+      expect((await rowNamed('B1'))!.touched ?? null).toBeNull();
+    });
+
+    it('a delete whose bag names another organization is refused 403', async () => {
+      await reseed();
+      const r = await run(alice, 'eoww_bag_delete', { name: 'B1', org: orgB });
+      expect(r.status, JSON.stringify(r.body)).toBe(403);
+      expect(r.body.error.code).toBe('PERMISSION_DENIED');
+      expect(await rowNamed('B1')).toBeDefined();
+    });
+
+    it('a tenant key a before-hook writes into the bag of a write is held to the wall too', async () => {
+      await reseed();
+      const r = await run(alice, 'eoww_late_bag', { name: 'B1', org: orgB });
+      expect(r.status, JSON.stringify(r.body)).toBe(403);
+      expect(r.body.error.code).toBe('PERMISSION_DENIED');
+      expect((await rowNamed('B1'))!.touched ?? null).toBeNull();
+      expect((await rowNamed('A1'))!.touched ?? null).toBeNull();
+    });
+
+    it('a tenant key a before-hook writes into the bag of a read is answered by the read rule', async () => {
+      await reseed();
+      const r = await run(alice, 'eoww_late_read', { org: orgB });
+      expect(r.status, JSON.stringify(r.body)).toBe(200);
+      expect(r.body.data).toEqual({ seen: [] });
+      const own = await run(alice, 'eoww_late_read', { org: orgA });
+      expect(own.status, JSON.stringify(own.body)).toBe(200);
+      expect(own.body.data).toEqual({ seen: ['A1'] });
+    });
+
+    it('control: a bag naming the caller’s own organization reads and writes there', async () => {
+      await reseed();
+      const read = await run(alice, 'eoww_bag_find', { org: orgA });
+      expect(read.status, JSON.stringify(read.body)).toBe(200);
+      expect(read.body.data).toEqual({ seen: ['A1'] });
+      const wrote = await run(alice, 'eoww_bag_update', { name: 'A1', org: orgA });
+      expect(wrote.status, JSON.stringify(wrote.body)).toBe(200);
+      expect((await rowNamed('A1'))!.touched).toBe('bag');
+    });
+
+    it('control: platform system work that runs for no caller keeps the organization its bag names', async () => {
+      await reseed();
+      const seen = await ql.find(TASK, { where: {}, tenantId: orgB, context: { isSystem: true } });
+      expect(seen.map((r: any) => r.name).sort()).toEqual(['B1']);
+      await ql.update(TASK, { touched: 'platform' }, { where: { name: 'B1' }, multi: true, tenantId: orgB, context: { isSystem: true } });
+      expect((await rowNamed('B1'))!.touched).toBe('platform');
     });
   });
 
