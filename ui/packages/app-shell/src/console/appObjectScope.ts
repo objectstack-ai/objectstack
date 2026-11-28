@@ -88,7 +88,7 @@
  * permission read rather than after it, as the whole list used to.
  */
 
-import { useEffect } from 'react';
+import { useEffect, useRef } from 'react';
 import { matchRoutes, useLocation } from 'react-router-dom';
 import { isRecordPageOf, useAdapter, useMetadata, type AnsweredLoadFailure, type MetadataContextValue } from '@object-ui/react';
 import { defaultRecordPageObject } from '@objectstack/spec/ui';
@@ -926,6 +926,9 @@ function inRelatedOrder(scope: AppObjectScope, relatedNames: readonly string[]):
   return { ...scope, objects } as AppObjectScope;
 }
 
+/** An app as the app list answers it, read for the route lookup alone. */
+type ListedApp = { name?: unknown; _packageId?: unknown } & Record<string, unknown>;
+
 /** An adapter that loads app metadata bundles (`ObjectStackAdapter.loadAppBundle`). */
 type BundleHost = { loadAppBundle?: (appName: string) => unknown };
 
@@ -989,10 +992,55 @@ export function useAppObjectScopePrefetch(): void {
   useEffect(() => {
     if (recordRoute && ensureType) void ensureType('page');
   }, [recordRoute, ensureType]);
+  // objectstack#38170 — the bundle leaves the moment the app list lands, not
+  // one render later. The list is what names the app: the route carries a
+  // package id (ADR-0048) or a name, and only an app the list holds (an app
+  // this user may see) has its bundle asked at all, so the request is the one
+  // the effect below would make, from the same adapter, for the same app. On a
+  // cold load the list is still on the wire when this mounts, and waiting for
+  // the render that names the app put a re-render of the whole tree between
+  // the list's answer and the bundle request. `ensureType('app')` joins the
+  // provider's eager app-list read: it never asks the list again.
+  const routeSegment = segments[0] === 'apps' ? segments[1] : undefined;
+  const ensureTypeRef = useRef(ensureType);
+  useEffect(() => {
+    ensureTypeRef.current = ensureType;
+  });
+  const listEnteredRef = useRef<string | null>(null);
+  useEffect(
+    () => () => {
+      // The entry belongs to the visit it was made for: leaving the app, or an
+      // adapter swap, forgets it, so the next visit enters the app again.
+      listEnteredRef.current = null;
+    },
+    [dataSource, routeSegment],
+  );
+  useEffect(() => {
+    const ensure = ensureTypeRef.current;
+    const load = dataSource?.loadAppBundle;
+    // Named by the list in hand already: the effect below enters it now.
+    if (bundleAppName || !routeSegment || !dataSource || !ensure || typeof load !== 'function') return;
+    let live = true;
+    void ensure('app').then((list: unknown) => {
+      if (!live) return;
+      const listed = matchAppBySegment(Array.isArray(list) ? (list as ListedApp[]) : [], routeSegment);
+      const name = typeof listed?.name === 'string' && listed.name ? listed.name : undefined;
+      if (!name || rootEnteredApps.has(name)) return;
+      listEnteredRef.current = name;
+      void load.call(dataSource, name);
+    });
+    return () => {
+      live = false;
+    };
+  }, [dataSource, routeSegment, bundleAppName]);
   useEffect(() => {
     const load = dataSource?.loadAppBundle;
     if (!dataSource || !bundleAppName || typeof load !== 'function') return;
-    void load.call(dataSource, bundleAppName);
+    // Entered when the list landed, in this same visit: that request is the
+    // entry, and asking again would revalidate a bundle still on the wire.
+    const enteredByList = listEnteredRef.current === bundleAppName;
+    listEnteredRef.current = null;
+    if (!enteredByList) void load.call(dataSource, bundleAppName);
     rootEnteredApps.add(bundleAppName);
     return () => {
       rootEnteredApps.delete(bundleAppName);
