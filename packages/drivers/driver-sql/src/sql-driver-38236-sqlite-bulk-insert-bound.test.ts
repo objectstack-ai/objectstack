@@ -82,12 +82,17 @@ describe('[#38236] bulkCreate on SQLite past one INSERT statement\'s bounds', ()
   it('inserts every row of a 1200-row batch, in order, as statements within both bounds', async () => {
     const rows = ticketRows(1200);
     const result = await driver.bulkCreate(TICKET.name, rows);
+    const statements = [...sent];
 
     expect(result).toHaveLength(1200);
     expect(result.map((r) => r.id)).toEqual(rows.map((r) => r.id));
     expect(await rowCount(TICKET.name)).toBe(1200);
     // 500 + 500 + 200: the compound-SELECT bound is the one that binds here.
     expect(insertsInto(TICKET.name)).toHaveLength(3);
+    // All three inside ONE transaction: the reservations are all taken before
+    // it opens, so it holds the three INSERTs and nothing else.
+    const first = statements.findIndex((sql) => sql.startsWith(`insert into \`${TICKET.name}\``));
+    expect(statements.slice(first - 1)).toEqual(['begin;', ...insertsInto(TICKET.name), 'commit;']);
   });
 
   it('splits a wide batch by the parameter bound even under 500 rows', async () => {
@@ -161,7 +166,12 @@ describe('[#38236] bulkCreate on SQLite past one INSERT statement\'s bounds', ()
 
     expect(result).toHaveLength(500);
     expect(insertsInto(TICKET.name)).toHaveLength(1);
-    expect(sent.some((sql) => sql.startsWith('begin') || sql.startsWith('savepoint'))).toBe(false);
+    // Each row's reservation commits in its own transaction first; the INSERT
+    // follows the last of those COMMITs and is the last statement sent, so no
+    // transaction is opened around it.
+    const at = sent.findIndex((sql) => sql.startsWith(`insert into \`${TICKET.name}\``));
+    expect(sent[at - 1]).toBe('commit;');
+    expect(at).toBe(sent.length - 1);
   });
 
   it('one row past the bound is two statements', async () => {
