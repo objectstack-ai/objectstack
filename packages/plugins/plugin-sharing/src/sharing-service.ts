@@ -2459,23 +2459,27 @@ export class SharingService implements ISharingService {
       this.assertSharingEnforced(input.object);
       await this.assertCanManageShares(input.object, input.recordId, context);
       organizationId = await this.resolveDirectGrantOrganization(input, context);
-      // [#33912] The recipient must be a user the gates could ever match: the
-      // read and write gates look a share up by `recipient_id = context.userId`,
-      // so an id naming no user — or, behind a wall, a user who cannot enter
-      // the record's organization — is a row that looks granted and enforces
-      // nothing, the class #3865 closed for the access level and D7 for the
-      // recipient type. Asked after authorization (a refused caller learns
-      // nothing about the directory) and after the organization (membership is
-      // judged in it). The direct path only: rule-materialised grants are the
-      // platform's own writes, and their recipient is judged where the rule is
-      // authored (`SharingRuleService.defineRule`).
-      const unresolved = await this.userRecipientRefusal(input.recipientId, organizationId, 'record');
-      if (unresolved) throw new Error(`VALIDATION_FAILED: ${unresolved}`);
     }
     // [#25549] The recipient half, on both paths: after authorization, so a
     // refused caller never learns a recipient's population, and after the
     // organization, because the population is judged in it.
     await this.assertRecipientNotInert(input.object, input.recipientId, organizationId);
+    // [#33912] The recipient must be a user the gates could ever match: the
+    // read and write gates look a share up by `recipient_id = context.userId`,
+    // so an id naming no user — or, behind a wall, a user who cannot enter the
+    // record's organization — is a row that looks granted and enforces
+    // nothing, the class #3865 closed for the access level and D7 for the
+    // recipient type. Asked after authorization (a refused caller learns
+    // nothing about the directory), after the organization (membership is
+    // judged in it) and after both D7 halves, so the inertness verdict stays
+    // one answer per object and recipient population whoever calls (#8207).
+    // The direct path only: rule-materialised grants are the platform's own
+    // writes, and their recipient is judged where the rule is authored
+    // (`SharingRuleService.defineRule`).
+    if (!context?.isSystem) {
+      const unresolved = await this.userRecipientRefusal(input.recipientId, organizationId, 'record');
+      if (unresolved) throw new Error(`VALIDATION_FAILED: ${unresolved}`);
+    }
 
     // Upsert: if a row with same (object, record, recipient, source) exists,
     // update its access level / reason; otherwise insert a new one. `source`
