@@ -2315,6 +2315,8 @@ const es = {
         ctaUpgrade: "Mejore el plan para continuar",
         ctaTopUp: "Añada créditos para continuar",
         ariaLabel: "Uso de IA: {{status}}",
+        tierPersonal: "Cuota personal",
+        tierTeamPool: "Fondo del equipo",
       },
       openChats: "Abrir chats",
       chats: "Chats",

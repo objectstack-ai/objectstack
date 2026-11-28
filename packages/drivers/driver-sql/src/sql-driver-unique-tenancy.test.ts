@@ -373,7 +373,7 @@ describe('SqlDriver unique × tenancy (#3696)', () => {
       },
     ].map((o) => ({ ...o, fields: { organization_id: { type: 'string' }, ...o.fields } }));
 
-    const converted = () => NINE_KEY_CORPUS.map((o) => applyConversionsToStoredItem('object', o));
+    const converted = () => NINE_KEY_CORPUS.map((o) => applyConversionsToStoredItem('object', o)!);
 
     /** What the driver asks the database for, per table — serialized, so "identical" means bytes. */
     const expectedBytes = (objects: Array<{ name: string; fields: Record<string, any>; indexes: any[] }>) =>

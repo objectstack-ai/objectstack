@@ -139,6 +139,7 @@ import { flowDecisionModeInclusiveExplicit } from './entries/18/flow-decision-mo
 // Major 19: imported after every major-18 conversion, in `MAJOR_19_CONVERSIONS`'s
 // identifier order.
 import { actionLocationsActedOn } from './entries/19/action-locations-acted-on.js';
+import { actionTypeAskAiRemoved } from './entries/19/action-type-ask-ai-removed.js';
 import { agentModelProviderRemoved } from './entries/19/agent-model-provider-removed.js';
 import { formViewModalSizeRemoved } from './entries/19/form-view-modal-size-removed.js';
 import { knowledgeSourceContentFieldsToContent } from './entries/19/knowledge-source-content-fields-to-content.js';
@@ -322,12 +323,30 @@ const MAJOR_18_CONVERSIONS: readonly OrderedConversion[] = [
  * The knowledge source's three (ADR-0161 K6) apply in the order rename the
  * name, rename the content list, drop the inert keys; they touch no type the
  * permission conversion or the agent's touches, so the ties at `order: 1` and
- * `order: 2` are settled by `id`. The form view's `modalSize` delete touches
- * form payloads only, which no other entry of this major walks, and applies
- * last.
+ * `order: 2` are settled by `id`.
+ *
+ * The action's two are NOT independent: `action-type-ask-ai-removed` and
+ * `action-locations-acted-on` walk the same action rows and group / menu
+ * members, so their order is set, not left to `id`. The removal applies
+ * first (`order: 2.5`): an `action:group` at `record_header` whose only
+ * `record_more`-only member is an `ask_ai` member then has no folded member
+ * left and converts to `record_page`. In the other order the locations entry
+ * leaves the group at `record_header` as a TODO, the removal deletes the
+ * member, and the group is stranded at a word protocol 19 draws nowhere.
+ *
+ * The form view's `modalSize` delete writes form payloads only, which no
+ * other entry of this major writes, and applies last (`order: 4`). One entry
+ * READS them: over sources `action-type-ask-ai-removed` takes every string of
+ * the stack as a possible name of a declared `ask_ai` action, a `modalSize`
+ * value included. It applies before this delete, so such a value still counts
+ * there, and that is its conservative side: the action is kept for the author.
  */
 const MAJOR_19_CONVERSIONS: readonly OrderedConversion[] = [
   { conversion: actionLocationsActedOn, order: 3 },
+  // BEFORE `actionLocationsActedOn`: both walk the same action rows and
+  // `action:group` / `action:menu` members. An `ask_ai` member is deleted here
+  // first, so it cannot hold a `record_header` group back as a TODO there.
+  { conversion: actionTypeAskAiRemoved, order: 2.5 },
   { conversion: agentModelProviderRemoved, order: 2 },
   { conversion: formViewModalSizeRemoved, order: 4 },
   { conversion: knowledgeSourceContentFieldsToContent, order: 2 },

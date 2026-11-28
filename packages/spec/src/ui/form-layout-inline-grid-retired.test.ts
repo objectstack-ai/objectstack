@@ -186,7 +186,7 @@ describe(`D2 conversion \`${CONVERSION_ID}\``, () => {
   it("a stored form view row replays clean: 'grid' → 'vertical', `columns` kept, and the row parses", () => {
     const row = { object: 'crm_lead', form: { type: 'simple', layout: 'grid', columns: 3 } };
     expect(ViewSchema.safeParse(row).success).toBe(false);
-    const replayed = applyConversionsToStoredItem('view', structuredClone(row));
+    const replayed = applyConversionsToStoredItem('view', structuredClone(row))!;
     expect(replayed.form).toEqual({ type: 'simple', layout: 'vertical', columns: 3 });
     expect(ViewSchema.safeParse(replayed).success).toBe(true);
   });
@@ -194,7 +194,7 @@ describe(`D2 conversion \`${CONVERSION_ID}\``, () => {
   it("a stored flattened form overlay replays clean: 'inline' → 'vertical', and the overlay parses", () => {
     const row = { object: 'crm_lead', viewKind: 'form', type: 'simple', layout: 'inline' };
     expect(VIEW_METADATA_MEMBERS.formOverlay.safeParse(row).success).toBe(false);
-    const replayed = applyConversionsToStoredItem('view', structuredClone(row));
+    const replayed = applyConversionsToStoredItem('view', structuredClone(row))!;
     expect(replayed.layout).toBe('vertical');
     expect(VIEW_METADATA_MEMBERS.formOverlay.safeParse(replayed).success).toBe(true);
   });

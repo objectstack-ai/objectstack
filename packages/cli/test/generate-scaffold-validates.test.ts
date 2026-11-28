@@ -117,6 +117,18 @@ import { BUNDLE_REQUIRE_EXTERNALS } from '../src/utils/config.js';
  */
 const KNOWN_UNVALIDATED_SCAFFOLDS: Record<string, string> = {};
 
+/**
+ * [#35143] The advisory a generator's own output raises, carried rather than
+ * answered, with why — the same ledger `generate-scaffold-gates.e2e.test.ts`
+ * keeps. `os g dashboard` writes `widgets: []` under a comment naming the
+ * widget shape; which dataset and measures a dashboard shows is the author's
+ * to say, so the scaffold cannot fill it, and `dashboard-without-widgets` is
+ * that comment as a finding. Pinned to fire for this generator, nowhere else.
+ */
+const SCAFFOLD_ADVISORIES: Record<string, string> = { dashboard: 'dashboard-without-widgets' };
+const isScaffoldAdvisory = (type: string, line: string) =>
+  SCAFFOLD_ADVISORIES[type] !== undefined && line.includes(` warning ${SCAFFOLD_ADVISORIES[type]} at `);
+
 /** The namespace the host stack declares, so every object name is judged against a prefix. */
 const NS = 'scaffold';
 /** The name `os g <type> <name>` is invoked with for the item under test. */
@@ -226,6 +238,22 @@ async function projectWith(type: string): Promise<{ stack: Record<string, unknow
   return { stack: stackOf(project), artifact };
 }
 
+/**
+ * [#35143] Answer the app shell the way the starter app's header tells the
+ * author to: an object a navigation entry opens with no list view gets one
+ * from `os g view`. Only the prerequisite object can be opened by a scaffold
+ * here (`os g app` lists the object it binds), so that is the only answer.
+ * Returns whether a view was generated.
+ */
+async function answerAppShell(project: Project): Promise<boolean> {
+  const bound = target('object').itemName(PREREQUISITE_STEM.object, NS);
+  const lines = findings(stackOf(project)).filter((l) => l.includes(' warning object-without-view at '));
+  if (lines.length === 0) return false;
+  for (const l of lines) expect(l, 'only the prerequisite object can lack a view').toContain(`object "${bound}"`);
+  await generateInto(project, 'view', PREREQUISITE_STEM.object);
+  return true;
+}
+
 /** Everything the three commands would report for `stack`, every severity, one line each. */
 function findings(stack: Record<string, unknown>): string[] {
   const out: string[] = [];
@@ -288,8 +316,16 @@ describe('[#14087 / #21325] every `os generate` scaffold passes `os validate`, `
   const known = GENERATOR_SCAFFOLD_TARGETS.filter((t) => t.type in KNOWN_UNVALIDATED_SCAFFOLDS);
 
   it.each(clean)('`os g $type` adds no finding at any severity, beside what it binds', async (t) => {
-    const { stack } = await projectWith(t.type);
-    expect(findings(stack), `the gates report the ${t.type} scaffold`).toEqual([]);
+    const project: Project = { items: [] };
+    await generateInto(project, t.type, ITEM);
+    const answered = await answerAppShell(project);
+    // Only `os g app` opens an object from navigation; it opens the one it binds.
+    expect(answered, `\`os g ${t.type}\` left an object opened with no list view`).toBe(t.type === 'app');
+    const all = findings(stackOf(project));
+    expect(all.filter((l) => !isScaffoldAdvisory(t.type, l)), `the gates report the ${t.type} scaffold`).toEqual([]);
+    if (SCAFFOLD_ADVISORIES[t.type]) {
+      expect(all.map((l) => l.split(':')[0]), 'carried at every gate').toEqual(['validate', 'build', 'lint']);
+    }
   });
 
   it.each(known)(
@@ -426,6 +462,7 @@ describe('[#32153] the generators write the starter\'s style, and each new varia
     const app = await generateInto(project, 'app', 'main');
     // The printed line, pasted where the author is told to paste it.
     (app.navigation as unknown[]).push(await loadScaffold('app', `export default ${entry!.replace(/,$/, '')};\n`));
-    expect(findings(stackOf(project))).toEqual([]);
+    expect(await answerAppShell(project)).toBe(true);
+    expect(findings(stackOf(project)).filter((l) => !isScaffoldAdvisory('dashboard', l))).toEqual([]);
   });
 });

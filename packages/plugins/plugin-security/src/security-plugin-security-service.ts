@@ -115,6 +115,7 @@ export interface SecurityServiceHost {
   describePositionGrants: SecurityPlugin['describePositionGrants'];
   describeEffectiveAccess: SecurityPlugin['describeEffectiveAccess'];
   explainAccessForCaller: SecurityPlugin['explainAccessForCaller'];
+  getAuthoredRowWriteFilter: SecurityPlugin['getAuthoredRowWriteFilter'];
   getEffectiveObjectPermissions: SecurityPlugin['getEffectiveObjectPermissions'];
   getMetadataReadableFields: SecurityPlugin['getMetadataReadableFields'];
   getMetadataReadableWithheldFields: SecurityPlugin['getMetadataReadableWithheldFields'];
@@ -129,7 +130,7 @@ export interface SecurityServiceHost {
 
 /** The `security` service registration `SecurityPlugin#start` runs; the comment above its call there is its contract. */
 export function registerSecurityService(
-  this: Pick<SecurityServiceHost, 'acceptedDefaultPermissionSets' | 'baselinePermissionSets' | 'bootstrapPermissionSets' | 'canExport' | 'canReadObject' | 'canWriteObject' | 'checkAuthoredRowWrite' | 'checkControlledByParentWrite' | 'declareEveryone' | 'delegatedAdminGate' | 'describeEffectiveAccess' | 'describePositionGrants' | 'epoch' | 'explainAccessForCaller' | 'getEffectiveObjectPermissions' | 'getMetadataReadableFields' | 'getMetadataReadableWithheldFields' | 'getObjectSecurityMeta' | 'getQueryableFields' | 'getReadFilter' | 'getReadableFields' | 'getRecordFieldAccess' | 'getWritableFields' | 'logger' | 'ownershipFloorAlternates' | 'permissionEvaluator' | 'platformBaselineSets' | 'ql' | 'resolvePermissionSetsForContext' | 'tenancyPosture'>,
+  this: Pick<SecurityServiceHost, 'acceptedDefaultPermissionSets' | 'baselinePermissionSets' | 'bootstrapPermissionSets' | 'canExport' | 'canReadObject' | 'canWriteObject' | 'checkAuthoredRowWrite' | 'checkControlledByParentWrite' | 'declareEveryone' | 'delegatedAdminGate' | 'describeEffectiveAccess' | 'describePositionGrants' | 'epoch' | 'explainAccessForCaller' | 'getAuthoredRowWriteFilter' | 'getEffectiveObjectPermissions' | 'getMetadataReadableFields' | 'getMetadataReadableWithheldFields' | 'getObjectSecurityMeta' | 'getQueryableFields' | 'getReadFilter' | 'getReadableFields' | 'getRecordFieldAccess' | 'getWritableFields' | 'logger' | 'ownershipFloorAlternates' | 'permissionEvaluator' | 'platformBaselineSets' | 'ql' | 'resolvePermissionSetsForContext' | 'tenancyPosture'>,
   ctx: PluginContext,
   ql: IObjectQLEngine,
   metadata: IMetadataService,
@@ -304,6 +305,16 @@ export function registerSecurityService(
         operation: AuthoredRowWriteOperation,
         context?: any,
       ) => this.checkAuthoredRowWrite(object, recordId, operation, context),
+      // [#37535, ruling record 7190344023 (2a)] Its filter-shaped twin, for a
+      // predicate write that names no row: the authored policies' own scope,
+      // floor taken out, tenant wall kept, which the record sharing middleware
+      // ORs into its bulk write scope verb for verb. `undefined` (widens
+      // nothing) on every abstention the verdict takes and on any failure.
+      getAuthoredRowWriteFilter: (
+        object: string,
+        operation: AuthoredRowWriteOperation,
+        context?: any,
+      ) => this.getAuthoredRowWriteFilter(object, operation, context),
       // [ADR-0055] The master-detail write check's answer for a by-id update
       // of one record — the write path's own composition, served for a gate
       // outside it (the `sys_attachment` and `sys_comment` parent gates)

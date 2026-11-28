@@ -90,6 +90,9 @@ export function vectorTableDdl(schema: string, dimensions: number, vectorType: s
   PRIMARY KEY (source_id, generation, chunk_id)
 )`,
     `CREATE INDEX IF NOT EXISTS "${table}_document" ON ${qualified(schema, table)} (source_id, generation, document_id)`,
+    // A search narrowed to the records its caller may read (a `record` scope
+    // term) reads only those records' passages of the generation.
+    `CREATE INDEX IF NOT EXISTS "${table}_record" ON ${qualified(schema, table)} (source_id, generation, source_record_id)`,
     keywordIndexDdl(schema, dimensions),
   ];
 }

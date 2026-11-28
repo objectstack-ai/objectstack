@@ -6214,14 +6214,15 @@ export class RestServer {
      * [ADR-0161 K4, guard two] The request environment's `knowledge` service,
      * for the save door's source admission (`authoredKnowledgeSourceRefusal`):
      * `undefined` when none is registered (nothing loads a knowledge source
-     * there), a throw when one is registered and cannot be resolved (the door
-     * then refuses `503`, never proceeds). `unknown`, deliberately: the door
-     * reads the one member it asks structurally.
+     * there, so an author's save is refused `503`, naming the remedy), a
+     * throw when one is registered and cannot be resolved (the door then
+     * refuses `503`, never proceeds). `unknown`, deliberately: the door reads
+     * the one member it asks structurally.
      *
      * A server built with no `kernelServiceProvider` answers `undefined`,
      * quietly: `RestApiPlugin` always passes one, and a hand-built server
      * without it reaches no kernel service at all (its security and audit
-     * lookups read the same way), so there is no knowledge service to ask.
+     * lookups read the same way), so no knowledge service serves it either.
      */
     private async resolveKnowledgeService(
         environmentId?: string,

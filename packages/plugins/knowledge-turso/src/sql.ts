@@ -148,6 +148,9 @@ export function passageTableDdl(table: string, dimensions: number): string[] {
   embedding F32_BLOB(${dimensions}) NOT NULL
 )`,
     `CREATE INDEX ${quoted(`${table}_document`)} ON ${quoted(table)} (document_id)`,
+    // A search narrowed to the records its caller may read (a `record` scope
+    // term) reads only those records' passages, never the whole table.
+    `CREATE INDEX ${quoted(`${table}_record`)} ON ${quoted(table)} (source_record_id)`,
     ...keywordIndexDdl(table),
   ];
 }
@@ -250,6 +253,130 @@ export function keywordIndexShape(
   );
   if (!mapOk || !ftsOk || !triggersOk) return 'other';
   return found.length === 2 + triggers.length ? 'complete' : 'partial';
+}
+
+/**
+ * The names of a passage table's approximate vector index: a side table
+ * (`<table>-vec`: the chunk id and the passage's vector quantized to one bit
+ * a dimension), an index of the passage table's organization column
+ * (`<table>-org`), and the three triggers that keep the side table in step
+ * with every write to the passage table. Each name holds a hyphen, which no
+ * source id, generation table or object name can hold.
+ */
+export function vectorIndexNames(table: string): {
+  side: string;
+  org: string;
+  triggers: [string, string, string];
+} {
+  return {
+    side: `${table}-vec`,
+    org: `${table}-org`,
+    triggers: [`${table}-vec-insert`, `${table}-vec-delete`, `${table}-vec-update`],
+  };
+}
+
+/**
+ * The statements that make a passage table's approximate vector index
+ * ({@link vectorIndexNames}), empty: the side table of one-bit vectors
+ * (`F1BIT_BLOB`, `vector1bit`: 192 bytes at 1,536 dimensions, a 32nd of the
+ * float32 vector), the organization index of the passage table, and the
+ * triggers. The rows the passage table already holds are copied in
+ * afterwards, a batch at a time ({@link vectorBackfillSql}); the triggers,
+ * made first, keep every row written meanwhile in step, so the side table
+ * holds a subset of the passage table's chunks at every moment, and all of
+ * them once the copy ends. The organization index, when it is there alone
+ * (made for a table found to hold more than one organization), is kept.
+ */
+export function vectorIndexDdl(table: string, dimensions: number): string[] {
+  if (!Number.isInteger(dimensions) || dimensions < 1) {
+    throw new RangeError(`knowledge-turso: vector dimensions must be a positive integer, got ${String(dimensions)}`);
+  }
+  const { side, org, triggers } = vectorIndexNames(table);
+  const t = quoted(table);
+  const s = quoted(side);
+  return [
+    ...dropVectorIndexDdl(table).filter((statement) => !statement.includes(quoted(org))),
+    `CREATE TABLE ${s} (chunk_id TEXT NOT NULL PRIMARY KEY, embedding F1BIT_BLOB(${dimensions}) NOT NULL)`,
+    organizationIndexDdl(table),
+    `CREATE TRIGGER ${quoted(triggers[0])} AFTER INSERT ON ${t} BEGIN
+  INSERT INTO ${s} (chunk_id, embedding) VALUES (new.chunk_id, vector1bit(new.embedding))
+    ON CONFLICT (chunk_id) DO UPDATE SET embedding = excluded.embedding;
+END`,
+    `CREATE TRIGGER ${quoted(triggers[1])} AFTER DELETE ON ${t} BEGIN
+  DELETE FROM ${s} WHERE chunk_id = old.chunk_id;
+END`,
+    `CREATE TRIGGER ${quoted(triggers[2])} AFTER UPDATE OF chunk_id, embedding ON ${t}
+  WHEN old.chunk_id IS NOT new.chunk_id OR old.embedding IS NOT new.embedding BEGIN
+  UPDATE ${s} SET chunk_id = new.chunk_id, embedding = vector1bit(new.embedding) WHERE chunk_id = old.chunk_id;
+END`,
+  ];
+}
+
+/** The statement that makes the organization index of a passage table, the first part of its vector index to be made. */
+export function organizationIndexDdl(table: string): string {
+  return `CREATE INDEX IF NOT EXISTS ${quoted(vectorIndexNames(table).org)} ON ${quoted(table)} (organization_id)`;
+}
+
+/**
+ * One batch of the copy of a passage table's rows into its vector side table:
+ * `last` reads the greatest chunk id of the next `?2` rows after the cursor
+ * `?1` (null when none is left), and `copy` copies the rows after `?1` up to
+ * and including `?2` that the side table does not hold yet.
+ */
+export function vectorBackfillSql(table: string): { last: string; copy: string } {
+  const t = quoted(table);
+  return {
+    last: `SELECT max(chunk_id) AS last FROM (SELECT chunk_id FROM ${t} WHERE chunk_id > ?1 ORDER BY chunk_id LIMIT ?2)`,
+    copy:
+      `INSERT INTO ${quoted(vectorIndexNames(table).side)} (chunk_id, embedding) ` +
+      `SELECT chunk_id, vector1bit(embedding) FROM ${t} WHERE chunk_id > ?1 AND chunk_id <= ?2 ORDER BY chunk_id ` +
+      'ON CONFLICT (chunk_id) DO NOTHING',
+  };
+}
+
+/** The statements that drop a passage table's vector index. */
+export function dropVectorIndexDdl(table: string): string[] {
+  const { side, org, triggers } = vectorIndexNames(table);
+  return [
+    ...triggers.map((name) => `DROP TRIGGER IF EXISTS ${quoted(name)}`),
+    `DROP INDEX IF EXISTS ${quoted(org)}`,
+    `DROP TABLE IF EXISTS ${quoted(side)}`,
+  ];
+}
+
+/** What is found under a passage table's vector-index names, read from `sqlite_master` rows (`type`, `name`, `tbl_name`, `sql`). */
+export type VectorIndexShape = 'none' | 'complete' | 'partial' | 'other';
+
+/**
+ * Reads the shape of a passage table's vector index, as {@link
+ * keywordIndexShape} reads its keyword index: `complete` when the side table
+ * (exactly its two columns, a one-bit vector), the organization index and the
+ * three triggers are all there and are this module's; `none` when nothing
+ * is; `partial` when only some are; `other` when an object under one of those
+ * names is not this module's — never dropped or used. `complete` says the
+ * structure is there, not that every row was copied in.
+ */
+export function vectorIndexShape(
+  table: string,
+  rows: ReadonlyArray<Record<string, unknown>>,
+  sideColumns: ReadonlyArray<Record<string, unknown>>,
+): VectorIndexShape {
+  const { side, org, triggers } = vectorIndexNames(table);
+  const byName = new Map(rows.map((r) => [String(r.name), { type: String(r.type), on: String(r.tbl_name) }]));
+  const own = [side, org, ...triggers];
+  const found = own.filter((n) => byName.has(n));
+  if (found.length === 0) return 'none';
+  const is = (name: string, type: string, on: string) =>
+    !byName.has(name) || (byName.get(name)!.type === type && byName.get(name)!.on === on);
+  const columns = new Map(sideColumns.map((c) => [String(c.name), String(c.type).replace(/\s+/g, '')]));
+  const sideOk =
+    is(side, 'table', side) &&
+    (!byName.has(side) ||
+      (columns.size === 2 && columns.has('chunk_id') && /^F1BIT_BLOB\(\d+\)$/i.test(columns.get('embedding') ?? '')));
+  const orgOk = is(org, 'index', table);
+  const triggersOk = triggers.every((n) => is(n, 'trigger', table));
+  if (!sideOk || !orgOk || !triggersOk) return 'other';
+  return found.length === own.length ? 'complete' : 'partial';
 }
 
 /** The most terms of one query the keyword leg matches; the rest are left to the vector leg. */

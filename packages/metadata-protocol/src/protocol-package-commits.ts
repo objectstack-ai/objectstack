@@ -546,6 +546,9 @@ export class ProtocolPackageCommitsFacet {
             // set to `newName`, a permission set's field rules following the
             // renamed objects — or the collision that refuses the item, before
             // anything is written for it.
+            // The stored seam yields no item of this row (ADR-0160 D7: a stored
+            // action row of the retired type): the copy carries nothing for it.
+            if (item === undefined) continue;
             const outcome = rename.rewrite(row.type, row.name, item);
             if ('refusal' in outcome) {
                 failed.push({ type: row.type, name: row.name, error: outcome.refusal });
@@ -793,6 +796,9 @@ export class ProtocolPackageCommitsFacet {
                 unconvertible.push(`${planned.type} '${declaredName}': ${e?.message ?? String(e)}`);
                 continue;
             }
+            // The stored seam yields no item of this body (ADR-0160 D7: an
+            // action of the retired type): nothing is imported for it.
+            if (converted === undefined) continue;
             // [#30808] A seed item's records are data: the plan already named
             // its object as the copy names it, and the free-text rewrite below
             // would turn any record value spelled like an object name.

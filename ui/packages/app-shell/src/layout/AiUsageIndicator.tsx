@@ -26,6 +26,14 @@
  * whole indicator renders nothing — a missing endpoint degrades to no widget, never
  * a broken one.
  *
+ * cloud#5159 — a paid plan's answer may carry `tiers`: the caller's personal
+ * share and the team pool it overflows into. Then, and only then, the popover
+ * widens from one figure to two: one row per tier (its status word, its used
+ * share and its reset), in place of the pool's own figure, and the server's
+ * notice once turns draw on the team pool. The ring and the popover's status,
+ * reset line and CTA keep reading `pool` — the binding reading. With no `tiers`
+ * (Free, self-hosted, an older backend) nothing here changes.
+ *
  * objectui#11799 — and with AI off it asks nothing. AI is on for this viewer when
  * the access-filtered agent catalog at the same base (`GET {apiBase}/agents`)
  * lists an agent: the signal `useAiSurfaceEnabled` gates every AI entry point
@@ -38,7 +46,7 @@ import * as React from 'react';
 import { cn, Button, Popover, PopoverTrigger, PopoverContent } from '@object-ui/components';
 import { formatNumber, useObjectTranslation } from '@object-ui/i18n';
 import { useAgents } from '@object-ui/plugin-chatbot/core';
-import { useAiUsage, type AiMeterUsage } from '../hooks/useAiUsage.js';
+import { useAiUsage, type AiMeterUsage, type AiUsageTier, type AiUsageTierNotice } from '../hooks/useAiUsage.js';
 import { cloudConsoleUrl } from '../console/marketplace/marketplaceApi.js';
 import { getUpgradeUrl } from '../runtime-config.js';
 
@@ -124,6 +132,18 @@ function MeterGauge({ fraction, tone, size = 16 }: { fraction: number; tone: Ton
       />
     </svg>
   );
+}
+
+/**
+ * The notice in the console's language. The cloud endpoint writes four
+ * (en, zh, ja, es); every Chinese script reads `zh`, every other language `en`.
+ */
+function noticeForLanguage(notice: AiUsageTierNotice, language: string | undefined): string {
+  const lang = (language ?? '').toLowerCase();
+  if (lang.startsWith('zh')) return notice.zh;
+  if (lang.startsWith('ja')) return notice.ja;
+  if (lang.startsWith('es')) return notice.es;
+  return notice.en;
 }
 
 export interface AiUsageIndicatorProps {
@@ -222,6 +242,26 @@ export function AiUsageIndicator({ apiBase, enabled = true, className }: AiUsage
   const showCta = tone !== 'ok' && (pool.upgrade || pool.topUp) && !!ctaUrl;
   const reset = resetLabel(pool);
 
+  // cloud#5159 — the paid plan's two tiers. A tier carries no window kind, so
+  // its reset counts down from its own `resetsAt` (days, then hours inside the
+  // final day); null ⇒ no line, never guessed client-side.
+  const tiers = usage.tiers;
+  const tierRows: Array<{ id: 'personal' | 'team-pool'; label: string; tier: AiUsageTier }> = [];
+  if (tiers) {
+    if (tiers.personal)
+      tierRows.push({
+        id: 'personal',
+        label: t('console.ai.usage.tierPersonal', { defaultValue: 'Personal allowance' }),
+        tier: tiers.personal,
+      });
+    tierRows.push({
+      id: 'team-pool',
+      label: t('console.ai.usage.tierTeamPool', { defaultValue: 'Team pool' }),
+      tier: tiers.teamPool,
+    });
+  }
+  const notice = tiers?.notice ? noticeForLanguage(tiers.notice, language) : null;
+
   return (
     <Popover>
       <PopoverTrigger asChild>
@@ -251,9 +291,11 @@ export function AiUsageIndicator({ apiBase, enabled = true, className }: AiUsage
           <MeterGauge fraction={fraction} tone={tone} size={22} />
           <div className="min-w-0 flex-1">
             <div className={cn('text-sm font-medium', statusColorClass(tone))}>{statusLabel(tone)}</div>
-            <div className="text-xs tabular-nums text-foreground" data-testid="ai-usage-pool-used">
-              {t('console.ai.usage.poolUsed', { percent: usedPercent, defaultValue: '{{percent}} used' })}
-            </div>
+            {tiers ? null : (
+              <div className="text-xs tabular-nums text-foreground" data-testid="ai-usage-pool-used">
+                {t('console.ai.usage.poolUsed', { percent: usedPercent, defaultValue: '{{percent}} used' })}
+              </div>
+            )}
             {reset ? <div className="text-xs text-muted-foreground">{reset}</div> : null}
             {showCta ? (
               <Button
@@ -270,6 +312,42 @@ export function AiUsageIndicator({ apiBase, enabled = true, className }: AiUsage
             ) : null}
           </div>
         </div>
+        {tierRows.length > 0 ? (
+          <div className="mt-3 space-y-2 border-t pt-2" data-testid="ai-usage-tiers">
+            {tierRows.map(({ id, label, tier }) => {
+              const tierTone = toneFor(tier.fraction);
+              const tierReset = tier.resetsAt && now !== null ? weeklyResetLabel(tier.resetsAt, now) : null;
+              return (
+                <div key={id} className="min-w-0" data-testid={`ai-usage-tier-${id}`}>
+                  <div className="flex items-baseline justify-between gap-2">
+                    <span className="truncate text-xs font-medium text-foreground/80">{label}</span>
+                    <span className={cn('shrink-0 text-xs', statusColorClass(tierTone))}>{statusLabel(tierTone)}</span>
+                  </div>
+                  <div className="text-xs tabular-nums text-foreground" data-testid={`ai-usage-tier-${id}-used`}>
+                    {t('console.ai.usage.poolUsed', {
+                      percent: formatNumber(tier.fraction, {
+                        locale: language,
+                        style: 'percent',
+                        maximumFractionDigits: 0,
+                      }),
+                      defaultValue: '{{percent}} used',
+                    })}
+                  </div>
+                  {tierReset ? <div className="text-xs text-muted-foreground">{tierReset}</div> : null}
+                </div>
+              );
+            })}
+          </div>
+        ) : null}
+        {notice ? (
+          <div
+            className="mt-2 rounded-md bg-muted px-2 py-1.5 text-xs text-foreground"
+            role="status"
+            data-testid="ai-usage-tier-notice"
+          >
+            {notice}
+          </div>
+        ) : null}
       </PopoverContent>
     </Popover>
   );

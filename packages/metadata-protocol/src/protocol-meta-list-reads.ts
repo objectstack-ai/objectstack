@@ -706,7 +706,9 @@ export async function readFlattenedMetaItems(host: Pick<ProtocolHost, 'artifactL
                     ...draftRecords.map(placeDraft),
                     ...standInDraftRecords.map((record) => ({ ...placeDraft(record), standIn: true })),
                     ...overrideDraftRecords.map((record) => ({ ...placeDraft(record), standIn: true })),
-                ];
+                    // The stored seam yields no item of this row (ADR-0160 D7: a stored action
+                    // row of the retired type): nothing is registered or served for it.
+                ].filter((draft) => draft.data !== undefined);
                 // [#7774] Same bundle slot as the active merge above — a
                 // draft of one locale must preview over that locale, not
                 // over the whole bundle.

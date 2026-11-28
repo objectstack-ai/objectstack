@@ -1,0 +1,58 @@
+name: Link Check
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '**/*.md'
+      - '**/*.mdx'
+  pull_request:
+    paths:
+      - '**/*.md'
+      - '**/*.mdx'
+  schedule:
+    - cron: '0 6 * * 1' # Weekly on Monday at 6am UTC
+
+permissions:
+  contents: read
+
+jobs:
+  link-check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Check Markdown links
+        uses: gaurav-nelson/github-action-markdown-link-check@v1
+        with:
+          use-quiet-mode: 'yes'
+          config-file: '.github/markdown-link-check-config.json'
+          folder-path: '.'
+          # ⚠️ `.md` scans none of `content/docs` — that tree is 100% `.mdx` —
+          # and it stays `.md` deliberately. Measured before deciding (#867):
+          #
+          #  - the input takes ONE extension, so `.mdx` would TRADE coverage,
+          #    not add it. The action runs `find ${FOLDERS} -name "*${FILE_EXTENSION}"`,
+          #    and in modified-files mode compares `"${i##*.}" == "${FILE_EXTENSION#.}"`
+          #    — both exact — so `.md` never matches `.mdx` and vice versa. The
+          #    101 `.md` files here (README, AGENTS, CONTRIBUTING, docs/**,
+          #    .changeset/**) would leave the scan to let the 204 `.mdx` in.
+          #  - what it would let in is mostly noise. Run against a real page
+          #    (`content/docs/(product)/service/knowledge-base.mdx`) it saw 2 of that
+          #    page's links and called BOTH dead with `Status: 400`: it has no
+          #    base URL, so every site-absolute `/docs/…` link is a failure to
+          #    it, and there are 965 of those under `content/docs`.
+          #  - it would not have caught what this was wanted for. It parses as
+          #    markdown, so links nested inside a `<Callout>` are invisible to
+          #    it — which is exactly where the three dangling anchors of #867
+          #    sat — and it does not resolve fragments against the target
+          #    document's headings at all.
+          #
+          # The anchor half of `content/docs` is covered by
+          # `test/docs-anchor-links.test.ts`, which reads the ids out of
+          # fumadocs' own `remarkHeading`. This job keeps the job it can do:
+          # the external and relative links in the repo's `.md` files.
+          file-extension: '.md'
+          check-modified-files-only: ${{ github.event_name == 'pull_request' && 'yes' || 'no' }}
+          base-branch: 'main'

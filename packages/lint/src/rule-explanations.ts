@@ -1542,6 +1542,103 @@ const SEED_RECORD_UNKNOWN_FIELD_EXPLANATION: RuleExplanation = {
   ],
 };
 
+const LIST_VIEW_KANBAN_GROUP_FIELD_UNCATEGORICAL_EXPLANATION: RuleExplanation = {
+  rule: 'list-view-kanban-group-field-uncategorical',
+  covers: 'which fields a kanban board can draw its lanes from',
+  paragraphs: [
+    'A kanban board draws its lanes from the options of the field named by `groupByField`. A field with no ' +
+      'options gets lanes from the values on the cards the board has loaded instead: a lookup gets one lane ' +
+      'per record it names, a boolean gets two. For a text, number or date field that means one lane per ' +
+      'distinct value, often one per card, no lane for a value no loaded card holds (so no card can be ' +
+      'dragged there), and no lanes at all while the list is empty. A multi-valued field (`multiselect`, ' +
+      '`checkboxes`, `tags`, or a `multiple` select or reference) puts a card holding several values in one ' +
+      'lane named by all of them together.',
+    'A warning: every card still renders and a drag still writes the lane\'s value, so the board groups, but ' +
+      'not into lanes anyone chose. Judged on a list view whose `type` is `kanban`, against the group field\'s ' +
+      'declaration. Not judged: a dotted `groupByField`, one that names no field (`list-view-field-unknown`), ' +
+      'and a field whose type is not readable.',
+    'To fix it, group the board by a single-valued `select` field (one lane per option), a boolean or a ' +
+      'lookup; or show the field as a grid column or grouping instead of board lanes.',
+  ],
+};
+
+const LIST_VIEW_FILTER_FIELD_VIRTUAL_EXPLANATION: RuleExplanation = {
+  rule: 'list-view-filter-field-virtual',
+  covers: 'why a list view cannot filter on a formula field',
+  paragraphs: [
+    'A `formula` field is computed when a record is read and has no stored column. The engine therefore ' +
+      'refuses every query whose filter names one (`400 INVALID_FIELD`), rather than answering with no ' +
+      'records in both directions. A list view whose own `filter`, or a `userFilters.tabs[]` preset, keys on ' +
+      'a formula sends that query on every open: the view shows the error and no records.',
+    'An error, so the publish is refused and `os validate` and `os build` fail. Judged at an undotted filter ' +
+      'key that resolves on the bound object; a dotted key whose head is a formula is `list-view-field-dotted`. ' +
+      'The filter bar\'s field list (`userFilters.fields`) is not judged: it offers a field, it does not filter.',
+    'To fix it, filter on the stored fields the formula reads, or keep the value in a stored field written ' +
+      'when its sources change and filter on that; or remove the condition.',
+  ],
+};
+
+const DASHBOARD_WITHOUT_WIDGETS_EXPLANATION: RuleExplanation = {
+  rule: 'dashboard-without-widgets',
+  covers: 'why a dashboard needs a widget',
+  paragraphs: [
+    'A dashboard with `widgets: []` parses and publishes, and opens on its header over an empty canvas: the ' +
+      'renderer draws no empty state for it, so a user reaching it from navigation sees nothing and is told ' +
+      'nothing.',
+    'A warning at every door (`os validate`, `os lint`, `os build` and the runtime publish door): the shape ' +
+      'breaks no request, and the platform\'s own create steps write `widgets: []` and fill it afterwards ' +
+      '(Studio, the spec\'s dashboard create seed, and `os generate dashboard`).',
+    'To fix it, add a widget bound to a dataset, or remove the dashboard and any navigation entry that ' +
+      'opens it.',
+  ],
+};
+
+const APP_NAVIGATION_EMPTY_EXPLANATION: RuleExplanation = {
+  rule: 'app-navigation-empty',
+  covers: 'why an app needs a navigation entry',
+  paragraphs: [
+    'The console opens an app on its first navigation entry. An app with no entry, in `navigation` or in any ' +
+      '`areas[].navigation` (a `separator`, or a `group` with nothing under it, counts as nothing), opens on ' +
+      'the "no access" empty state, for every member and for its author.',
+    'A warning: Studio may save a new app before its first entry, and another package may contribute the ' +
+      'entries (`navigationContributions`). Contributions this stack makes into the app are counted. Runs on ' +
+      'the runtime `app` door as on `os validate`, `os lint` and `os build`.',
+    'To fix it, add an entry that opens an object, a page, a dashboard or a report, or remove the app.',
+  ],
+};
+
+const OBJECT_UNREACHABLE_FROM_NAVIGATION_EXPLANATION: RuleExplanation = {
+  rule: 'object-unreachable-from-navigation',
+  covers: 'when an object is reachable from the app shell',
+  paragraphs: [
+    'An object is reachable when some app\'s navigation, or navigation the stack contributes into another ' +
+      'package\'s app, names it in a `type: \'object\'` entry. The finding says only that no navigation ' +
+      'entry opens the object\'s list; it does not say no user can reach a record some other way.',
+    'A warning, on `os validate`, `os lint` and `os build` only: the verdict reads every app and object of ' +
+      'the stack, which the runtime door\'s per-write snapshot does not carry. Not judged: a stack with no ' +
+      'app and no contributed navigation; an object with a `master_detail` field, or one another object ' +
+      'names in `relatedLists` (it shows on its parent\'s record page); an object a page names when a ' +
+      '`type: \'page\'` entry opens that page; and an object whose `enable.apiEnabled` is `false`.',
+    'To fix it, add a `type: \'object\'` entry for it to an app\'s navigation, or name it in its parent ' +
+      'object\'s `relatedLists`.',
+  ],
+};
+
+const OBJECT_WITHOUT_VIEW_EXPLANATION: RuleExplanation = {
+  rule: 'object-without-view',
+  covers: 'what an object opened from navigation shows with no view',
+  paragraphs: [
+    'An object a navigation entry opens as a list (an entry with no `recordId`), with no `listViews` entry ' +
+      'and no `views` item bound to it, ' +
+      'opens on an "All records" tab the console builds itself: the name field followed by `highlightFields`, ' +
+      'or by the first five fields in declared order, with no filter, sort or grouping and no other tab.',
+    'A warning, on `os validate`, `os lint` and `os build` only, for the reason `object-unreachable-from-' +
+      'navigation` gives. Judged only for objects navigation opens, the one place that list is shown.',
+    'To fix it, declare the list users should see: a `listViews` entry on the object, or a `views` entry ' +
+      'bound to it.',
+  ],
+};
+
 /** Shared by the hook and job compile rules: the two bodies run in one wrapper. */
 const CTX_BODY_COMPILE: readonly string[] = [
   'The rule compiles the body inside the same expression the runtime builds, from the same function, ' +
@@ -6236,9 +6333,11 @@ const KNOWLEDGE_SOURCE_OBJECT_UNKNOWN_EXPLANATION: RuleExplanation = {
       'An object nothing defines has no records, so the source is built empty and every search over it ' +
       'answers nothing, with no error anywhere.',
     'Defined means an object of this stack, of a package in the same artifact (`packages[]`), or, at the ' +
-      'publish gate, an object the host serves. A platform object a known package registers (`sys_user`) is ' +
-      'not judged when the stack does not carry its definition. A name with a platform prefix that no known ' +
-      'package registers is a warning, because a third-party package may still provide it. When the publish ' +
+      'publish gate, an object the host serves. On the command line a platform object a known package ' +
+      'registers (`sys_user`) is not judged when the stack does not carry its definition, and a name with a ' +
+      'platform prefix that no known package registers is a warning, because a third-party package may still ' +
+      'provide it. At the publish gate with no package stated, the source is judged against every object the ' +
+      'host serves, so either one is an error there when the host does not serve it. When the publish ' +
       'gate states the package\'s closure (the package, the packages its manifest declares in ' +
       '`dependencies`, and platform objects), an object outside it is reported with the remedy to declare the ' +
       'dependency.',
@@ -7225,6 +7324,12 @@ export const RULE_EXPLANATIONS: Readonly<Record<string, RuleExplanation>> = Obje
   [ACTION_BODY_DOES_NOT_COMPILE_EXPLANATION.rule]: ACTION_BODY_DOES_NOT_COMPILE_EXPLANATION,
   [ACTION_BODY_WRITE_CAPABILITY_UNDECLARED_EXPLANATION.rule]: ACTION_BODY_WRITE_CAPABILITY_UNDECLARED_EXPLANATION,
   [SEED_RECORD_UNKNOWN_FIELD_EXPLANATION.rule]: SEED_RECORD_UNKNOWN_FIELD_EXPLANATION,
+  [LIST_VIEW_KANBAN_GROUP_FIELD_UNCATEGORICAL_EXPLANATION.rule]: LIST_VIEW_KANBAN_GROUP_FIELD_UNCATEGORICAL_EXPLANATION,
+  [LIST_VIEW_FILTER_FIELD_VIRTUAL_EXPLANATION.rule]: LIST_VIEW_FILTER_FIELD_VIRTUAL_EXPLANATION,
+  [DASHBOARD_WITHOUT_WIDGETS_EXPLANATION.rule]: DASHBOARD_WITHOUT_WIDGETS_EXPLANATION,
+  [APP_NAVIGATION_EMPTY_EXPLANATION.rule]: APP_NAVIGATION_EMPTY_EXPLANATION,
+  [OBJECT_UNREACHABLE_FROM_NAVIGATION_EXPLANATION.rule]: OBJECT_UNREACHABLE_FROM_NAVIGATION_EXPLANATION,
+  [OBJECT_WITHOUT_VIEW_EXPLANATION.rule]: OBJECT_WITHOUT_VIEW_EXPLANATION,
   [HOOK_BODY_DOES_NOT_COMPILE_EXPLANATION.rule]: HOOK_BODY_DOES_NOT_COMPILE_EXPLANATION,
   [JOB_BODY_DOES_NOT_COMPILE_EXPLANATION.rule]: JOB_BODY_DOES_NOT_COMPILE_EXPLANATION,
   [ACTION_BODY_WRITE_UNPROVISIONED_ANCHOR_EXPLANATION.rule]: ACTION_BODY_WRITE_UNPROVISIONED_ANCHOR_EXPLANATION,

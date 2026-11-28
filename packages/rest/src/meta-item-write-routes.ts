@@ -255,9 +255,12 @@ export function registerMetaItemWriteRoutes(this: MetaItemWriteRouteHost, scope:
                 // themselves search what it would index — the knowledge
                 // service's search-time gates, asked for the author before
                 // anything is written (`authoredKnowledgeSourceRefusal`).
-                // Every other type passes untouched. `403` keeps this door's
-                // `FORBIDDEN` spelling; a verdict that cannot be reached is
-                // the gate's own `503`.
+                // On a deployment with no knowledge service the author's save
+                // is refused `503 SERVICE_UNAVAILABLE`, naming the remedy:
+                // nothing would load it, and the author never sees the boot
+                // line. Every other type passes untouched. `403` keeps this
+                // door's `FORBIDDEN` spelling; a verdict that cannot be
+                // reached is the gate's own `503`.
                 {
                     const refused = await authoredKnowledgeSourceRefusal({
                         type: req.params.type,
