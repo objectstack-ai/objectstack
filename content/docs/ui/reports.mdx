@@ -210,6 +210,14 @@ export const HoursByStatusChartReport = defineReport({
 });
 ```
 
+**`showEmptyGroups: true`** shows the groups that hold no records. A grouped query returns only
+the values that have rows, so a status no task carries is missing from the chart rather than
+drawn at zero. With the switch on, every declared option of the `xAxis` field appears; an empty
+one reads `0` for a count or sum and stays empty for an average, minimum or maximum. Only a field
+that declares its options (a select) is filled, and nothing is added when the report's `order`
+reaches the chart. A date axis needs no switch: every bucket of the report's period already
+appears. The report builder offers the switch on bar, line and donut charts.
+
 ## Period and export
 
 A non-`joined` report can declare the period it covers and how its table is downloaded.
