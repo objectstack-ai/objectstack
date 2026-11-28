@@ -14,6 +14,8 @@ import {
   looksLikeInternalErrorLeak,
   INTERNAL_ERROR_MESSAGE,
   resolveThrownHttpError,
+  answerVariesByLanguage,
+  LOCALIZED_ANSWER_VARY,
 } from '@objectstack/types';
 
 /**
@@ -818,7 +820,13 @@ export function createHonoApp(options: ObjectStackHonoOptions): Hono {
     const tooLarge = requestBodyTooLargeAnswer(err);
     if (tooLarge) return c.json(tooLarge.body, tooLarge.status);
     const declared = declaredEnvelopeForThrow(err);
-    if (declared) return c.json(declared.body, declared.status);
+    if (declared) {
+      // [#37828] A declared `userMessage` is in the caller's language, so the
+      // answer varies by `Accept-Language` (`answerVariesByLanguage`,
+      // `@objectstack/types`). Appended, so CORS's `Vary: Origin` keeps its place.
+      if (answerVariesByLanguage(declared.body)) c.header('Vary', LOCALIZED_ANSWER_VARY, { append: true });
+      return c.json(declared.body, declared.status);
+    }
     const status = err.statusCode || 500;
     const message = err.message || 'Internal Server Error';
     return errorJson(

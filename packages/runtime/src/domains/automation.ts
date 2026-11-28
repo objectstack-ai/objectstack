@@ -3787,7 +3787,7 @@ async function respondToRecordUpdateStarts(
     }
     const { object, recordId, changes } = parsed.data;
     const svc = automationService as Pick<IAutomationService, 'listRecordUpdateStarts'>;
-    if (typeof svc.listRecordUpdateStarts !== 'function') return capabilityUnavailable(deps, 'automation');
+    if (typeof svc.listRecordUpdateStarts !== 'function') return capabilityUnavailable(deps, context, 'automation');
     let stored: Record<string, unknown>;
     try {
         const read = await callData(
@@ -4144,7 +4144,7 @@ export async function handleAutomationRequest(deps: DomainHandlerDeps, path: str
     // 501, not the `handled: false` this used to return: `/automation` IS
     // mounted, so the dispatcher's ROUTE_NOT_FOUND exit ("No handler matched
     // this request") described neither half truthfully. See ./unavailable.ts.
-    if (!isServiceServeable(automationService)) return capabilityUnavailable(deps, 'automation');
+    if (!isServiceServeable(automationService)) return capabilityUnavailable(deps, context, 'automation');
 
     // [ADR-0150 D5, epic child G1] THE ADDRESS, judged: an addressed path is
     // served when its qualifier names the one holder the bare name resolves

@@ -7,13 +7,15 @@
  * the engine runs as a predicate. The sharing write gate judges it by the bulk
  * write scope, as it judges every predicate write, and not by id.
  *
- * Two answers are pinned on the same row, side by side:
- *
- *  - the narrowed answer: a row the caller may write only because an
- *    application row-level policy widens the sharing scope for it is not
- *    written by that shape, and the write answers no error;
- *  - the remedy: the same row, addressed by id alone, is judged by id and
- *    written.
+ * Pinned on one row by both shapes: a row the caller may write only because
+ * an application row-level policy admits it is written by that shape and by id
+ * alone alike. [#37535] The bulk write scope is the sharing scope OR the
+ * authored policies' own scope (ruling record 7190344023, 2a). Before it, this
+ * file pinned the narrowed answer — the predicate shape left the row with no
+ * error and only the by-id write reached it — the divergence that ruling
+ * removed. Which branch the gate takes for each shape is pinned against the
+ * engine's own dispatch decision in plugin-sharing's
+ * `operator-id-write-gate-33928.test.ts`.
  *
  * Real stack: an `ObjectKernel` with `ObjectQLPlugin` over better-sqlite3, the
  * platform permission sets plus an application writer set with a row-level
@@ -155,31 +157,31 @@ describe('sharing write gate with plugin-security: a scalar id beside another ke
     expect(await ql.findOne(DEAL, { where: { id }, context: asCaller() } as never)).toMatchObject({ id });
   };
 
-  it('update: the two-key predicate answers no error and leaves the row; the same row by id alone is written', async () => {
+  it('update: the two-key predicate writes the row the policy admits, as the same row by id alone is written', async () => {
     await seedPolicyAdmittedRow('u_1');
 
-    const narrowed = await outcomeOf(
+    const byPredicate = await outcomeOf(
       ql.update(DEAL, { name: 'by_predicate' }, { where: { id: 'u_1', stage: 'open' }, multi: true, context: asCaller() } as never),
     );
-    expect(narrowed).toEqual({ kind: 'landed' });
-    expect(await stored('u_1')).toMatchObject({ name: 'seed' });
+    expect(byPredicate).toEqual({ kind: 'landed' });
+    expect(await stored('u_1')).toMatchObject({ name: 'by_predicate' });
 
     const byId = await outcomeOf(ql.update(DEAL, { name: 'by_id' }, { where: { id: 'u_1' }, context: asCaller() } as never));
     expect(byId).toEqual({ kind: 'landed' });
     expect(await stored('u_1')).toMatchObject({ name: 'by_id' });
   });
 
-  it('delete: the two-key predicate answers no error and leaves the row; the same row by id alone is deleted', async () => {
+  it('delete: the two-key predicate deletes the row the policy admits, as the same row by id alone is deleted', async () => {
     await seedPolicyAdmittedRow('d_1');
-
-    const narrowed = await outcomeOf(
+    const byPredicate = await outcomeOf(
       ql.delete(DEAL, { where: { id: 'd_1', stage: 'open' }, multi: true, context: asCaller() } as never),
     );
-    expect(narrowed).toEqual({ kind: 'landed' });
-    expect(await stored('d_1')).not.toBeNull();
-
-    const byId = await outcomeOf(ql.delete(DEAL, { where: { id: 'd_1' }, context: asCaller() } as never));
-    expect(byId).toEqual({ kind: 'landed' });
+    expect(byPredicate).toEqual({ kind: 'landed' });
     expect(await stored('d_1')).toBeNull();
+
+    await seedPolicyAdmittedRow('d_2');
+    const byId = await outcomeOf(ql.delete(DEAL, { where: { id: 'd_2' }, context: asCaller() } as never));
+    expect(byId).toEqual({ kind: 'landed' });
+    expect(await stored('d_2')).toBeNull();
   });
 });

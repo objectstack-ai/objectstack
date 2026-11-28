@@ -16,11 +16,13 @@
  */
 
 import { describe, it, expect, vi } from 'vitest';
+// [#37864] Paid at collection: the executor's reach loads `@objectstack/metadata` (check:test-source-alias).
+import '@objectstack/metadata';
 import { ApiEndpointSchema, ApiErrorSchema, BaseResponseSchema, DispatcherErrorCode, envelopeViolations, SERVICE_SELF_INFO_KEY } from '@objectstack/spec/api';
 import type { ApiEndpoint } from '@objectstack/spec/api';
 import type { ApiEndpointMatch } from '@objectstack/spec/contracts';
 import type { ExecutionContext } from '@objectstack/spec/kernel';
-import { serviceUnavailableMessage } from '@objectstack/spec/system';
+import { BUILTIN_OPERATION_MESSAGES, serviceUnavailableMessage } from '@objectstack/spec/system';
 import { INTERNAL_ERROR_MESSAGE } from '@objectstack/types';
 
 import {
@@ -664,5 +666,40 @@ describe('a delegated failure maps onto the EXISTING envelope, class by class', 
 
     it('endpointErrorAnswer is usable directly with a caller-chosen fallback status', async () => {
         expect(endpointErrorAnswer(new Error('nope'), 502).status).toBe(502);
+    });
+});
+
+// [#37864] The flow target's 501 is `/automation`'s `capabilityUnavailable`
+// sentence: in the request's top `Accept-Language` tag, with
+// `Vary: Accept-Language`, and byte-identical English with no header.
+describe('a flow endpoint with no automation service answers in the request\'s language', () => {
+    const FLOW = () => endpoint({ type: 'flow', target: 'purge_inquiries', method: 'POST', objectParams: undefined });
+    const sentence = (locale: string): string =>
+        BUILTIN_OPERATION_MESSAGES[locale].capability_unavailable_install.replace('{{package}}', '@objectstack/service-automation');
+
+    it('ja-JP and zh-CN read their catalog sentence; no header reads the discovery English; Vary on every one', async () => {
+        for (const [headers, expected] of [
+            [{ 'accept-language': 'ja-JP,ja;q=0.9' }, sentence('ja-JP')],
+            [{ 'accept-language': 'zh-CN' }, sentence('zh-CN')],
+            [{}, serviceUnavailableMessage('automation')],
+        ] as const) {
+            const answer = await executeEndpointTarget(contextFor(FLOW(), { method: 'POST', headers }), depsWith({ automationService: undefined }));
+            expect(answer.status).toBe(501);
+            const error = expectConformantError(answer);
+            expect(error.code).toBe(DispatcherErrorCode.enum.NOT_IMPLEMENTED);
+            expect(error.message).toBe(expected);
+            expect(answer.headers).toEqual({ Vary: 'Accept-Language' });
+        }
+        expect(sentence('en')).toBe(serviceUnavailableMessage('automation'));
+    });
+
+    it('a serveable occupant that cannot execute is the same answer', async () => {
+        const answer = await executeEndpointTarget(
+            contextFor(FLOW(), { method: 'POST', headers: { 'accept-language': 'ja-JP' } }),
+            depsWith({ automationService: { listFlows: async () => [] } }),
+        );
+        expect(answer.status).toBe(501);
+        expect(expectConformantError(answer).message).toBe(sentence('ja-JP'));
+        expect(answer.headers).toEqual({ Vary: 'Accept-Language' });
     });
 });

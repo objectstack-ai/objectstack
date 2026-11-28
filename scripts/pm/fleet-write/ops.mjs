@@ -249,11 +249,14 @@
  * minutes later. It spends the `actions: write` `workflow_dispatch` spends, so
  * it is fenced the same way. These are the seven fences:
  *
- *   - the WORKFLOW: the run's `path` is one of `RERUN_FAILED_WORKFLOWS`, a
- *     reviewed allowlist matched whole and joined only by a PR that adds the
- *     path here, each entry after `ci.yml` a READ-ONLY check workflow (the
- *     definition sits on the list) — never a request-time input, since the
- *     payload carries no key that names a workflow;
+ *   - the WORKFLOW: the run's `path` is one the stroke's REPOSITORY lists in
+ *     `RERUN_FAILED_WORKFLOWS_BY_REPO`, a reviewed allowlist keyed by
+ *     repository, matched whole and joined only by a PR that adds the path
+ *     here. A path one repository lists is refused on every other, and a
+ *     repository with no entry re-runs nothing. Each entry but objectstack's
+ *     `ci.yml` is a READ-ONLY check workflow (the definition sits on the
+ *     list) — never a request-time input, since the payload carries no key
+ *     that names a workflow;
  *   - the EVENT: the run's `event` is `pull_request` — a push, merge-group,
  *     schedule, release or `workflow_dispatch` run is refused;
  *   - ONCE: the run's `run_attempt` is 1. A second failure is real, and a
@@ -262,9 +265,10 @@
  *   - the HEAD: the run's `head_sha` is its pull request's CURRENT head. The
  *     pull is the run's `pull_requests[0].number`, and its head is read with
  *     the pull's own `GET /repos/{repo}/pulls/{n}`, never from the copy the
- *     run embeds. Each listed workflow's concurrency group is keyed by the
- *     pull number and cancels in progress on `pull_request`, so a stale
- *     head's re-run would cancel the current head's run. A run with no
+ *     run embeds. A stale head's re-run checks a head the pull no longer
+ *     has, and where the workflow's concurrency group is keyed by the pull
+ *     number and cancels in progress on `pull_request` (objectstack's
+ *     `ci.yml` and `check-links.yml`), it cancels the current head's run. A run with no
  *     `pull_requests` entry (a fork pull request's run, or the field empty)
  *     is refused by name;
  *   - ALONE: a stroke carrying it carries exactly that one action (`alone`),
@@ -1317,29 +1321,54 @@ export const WORKFLOW_DISPATCH_REF = 'main';
 export const WORKFLOW_DISPATCH_PATH_SHAPE = /\/actions\/workflows\/[^/]+\/dispatches$/;
 
 /**
- * The workflows a `run_rerun_failed` may re-run the failed jobs of — the run's
- * own `path`, as `GET /actions/runs/{id}` answers it, matched WHOLE (measured
- * on run 39713789453: `.github/workflows/ci.yml`, no ref suffix). Joined only
- * by a PR that adds the path here; ⛔ never a key of the payload.
+ * The workflows a `run_rerun_failed` may re-run the failed jobs of, keyed by
+ * the stroke's REPOSITORY — the run's own `path`, as `GET /actions/runs/{id}`
+ * answers it, matched WHOLE (measured on run 39713789453: `.github/workflows/ci.yml`,
+ * no ref suffix). A path is accepted only on the repository whose entry lists
+ * it: the same path on another repository is another file, read and admitted
+ * by nobody. A repository with no entry re-runs nothing. Joined only by a PR
+ * that adds the path here; ⛔ never a key of the payload.
  *
- * A reviewed allowlist. `ci.yml` is the entry the op was made for. Every other
- * entry is a READ-ONLY check workflow: it uses no `secrets.*` but
+ * A reviewed allowlist. objectstack's `ci.yml` is the entry the op was made
+ * for. Every other entry is a READ-ONLY check workflow: it uses no `secrets.*` but
  * `GITHUB_TOKEN`, deploys nothing (no `environment:`), and its token is read-only (a
  * `permissions:` block covering every job, no `write` scope). A re-run of such a run
  * can change nothing but its own check, so re-running it once costs only runner time.
  * Each entry, and the reading that admitted it:
  *
- *   - `.github/workflows/ci.yml` — the op's own workflow (the measured run above).
- *   - `.github/workflows/check-links.yml` — `Check Documentation Links`, advisory;
+ *   - objectstack `.github/workflows/ci.yml` — the op's own workflow (the measured run above).
+ *   - objectstack `.github/workflows/check-links.yml` — `Check Documentation Links`, advisory;
  *     `contents: read` on its one job, no secret, offline lychee. Its setup step
  *     can fail having checked ZERO links, and its log says so ("No links were
  *     checked"); that red is the one a seat re-runs once.
+ *   - hotcrm `.github/workflows/link-check.yml` — `Link Check`, the markdown
+ *     link checker (hotcrm run 45600157624, a `pull_request` attempt 1, was
+ *     refused at this fence before the entry existed). Read at blob
+ *     `f1e13112314af2d768ac9918915bf355a483704e` (hotcrm main 9b3a9ba9):
+ *     top-level `contents: read` covering its one job, no secret, no
+ *     environment, no write scope. Its links are external, so a red can be
+ *     the network's.
  *
- * `validate.mjs --self-test` pins the list exactly, every entry to a workflow on
- * disk that runs on `pull_request`, and every entry after `ci.yml` to the
- * read-only definition read from the file itself.
+ * `validate.mjs --self-test` pins the table exactly. Every objectstack entry
+ * is pinned to a workflow on THIS repository's disk that runs on
+ * `pull_request`, and every entry after `ci.yml` to the read-only definition
+ * read from the file itself. Another repository's file is not on this disk:
+ * its entry is pinned to a recorded copy of the file whose git blob id must
+ * equal the one named above, judged by the same definition. That proves the
+ * file AS ADMITTED; a later edit there is not seen here.
  */
-export const RERUN_FAILED_WORKFLOWS = Object.freeze(['.github/workflows/ci.yml', '.github/workflows/check-links.yml']);
+export const RERUN_FAILED_WORKFLOWS_BY_REPO = Object.freeze({
+  [RELAY_REPO]: Object.freeze(['.github/workflows/ci.yml', '.github/workflows/check-links.yml']),
+  [`${TARGET_OWNER}/hotcrm`]: Object.freeze(['.github/workflows/link-check.yml']),
+});
+/** The workflows one repository's runs may be re-run on: its entry, or `[]` for a repository with none. Pure. */
+export function rerunFailedWorkflows(repo) {
+  return typeof repo === 'string' && Object.hasOwn(RERUN_FAILED_WORKFLOWS_BY_REPO, repo) ? RERUN_FAILED_WORKFLOWS_BY_REPO[repo] : Object.freeze([]);
+}
+const rerunFailedWorkflowsText = () =>
+  Object.entries(RERUN_FAILED_WORKFLOWS_BY_REPO)
+    .map(([repo, paths]) => `${repo}: ${paths.join(', ')}`)
+    .join(' | ');
 /** The one event whose run a `run_rerun_failed` may re-run: a pull request's. */
 export const RERUN_FAILED_EVENT = 'pull_request';
 /** The one attempt it may re-run — once: a second failure is real. The read-back wants the attempt after it. */
@@ -1367,9 +1396,10 @@ const shortHead = (sha) => (typeof sha === 'string' ? sha.slice(0, 10) : null);
  * The five fences on the RUN and its pull (the header's `run_rerun_failed`
  * section): `fence` its name, `wants` what the relay re-runs, `reads` the
  * field(s) the failure sentence quotes, `holds` the predicate. Each takes
- * `(run, pull)`: `run` the run's own answer, `pull` the answer of
+ * `(run, pull, repo)`: `run` the run's own answer, `pull` the answer of
  * `GET /repos/{repo}/pulls/{n}` for the pull `rerunFailedPullNumber` names,
- * or `null` when the run names none. ⛔ The `head` fence never reads the copy
+ * or `null` when the run names none, and `repo` the repository both were read
+ * from (the stroke's), which only the workflow fence reads. ⛔ The `head` fence never reads the copy
  * of the pull the run embeds. The other two fences — alone in its stroke, the
  * stroke-scoped grant — are the validator's. The executor judges these on the
  * two reads taken immediately before the POST; the seat's wrapper judges them
@@ -1378,9 +1408,9 @@ const shortHead = (sha) => (typeof sha === 'string' ? sha.slice(0, 10) : null);
 export const RERUN_FAILED_FENCES = Object.freeze([
   Object.freeze({
     fence: 'workflow',
-    wants: `a run whose path is one of ${RERUN_FAILED_WORKFLOWS.join(', ')} — a closed list, matched whole`,
-    reads: (run) => run?.path,
-    holds: (run) => typeof run?.path === 'string' && RERUN_FAILED_WORKFLOWS.includes(run.path),
+    wants: `a run whose path is one its repository lists (${rerunFailedWorkflowsText()}) — a closed list per repository, matched whole`,
+    reads: (run, pull, repo) => `${run?.path ?? null} on ${repo ?? null}`,
+    holds: (run, pull, repo) => typeof run?.path === 'string' && rerunFailedWorkflows(repo).includes(run.path),
   }),
   Object.freeze({
     fence: 'event',
@@ -1404,7 +1434,8 @@ export const RERUN_FAILED_FENCES = Object.freeze([
     fence: 'head',
     wants:
       "a run whose head_sha is its pull request's CURRENT head (the pull named by pull_requests[0], read with its own GET, " +
-      "never the run's embedded copy), since each listed workflow's concurrency group is keyed by the pull number and a stale head's re-run cancels the current head's run",
+      "never the run's embedded copy), since a stale head's re-run checks a head the pull no longer has, and where the workflow's concurrency group is keyed by the pull number " +
+      "(objectstack's ci.yml and check-links.yml) it cancels the current head's run",
     reads: (run, pull) => {
       const n = rerunFailedPullNumber(run);
       if (n === null) return "no pull_requests entry — a fork pull request's run, or none";
@@ -1419,10 +1450,11 @@ export const RERUN_FAILED_FENCES = Object.freeze([
 
 /**
  * The fences a run's answer and its pull's fail: `[{ fence, wants, got }]`, in `RERUN_FAILED_FENCES` order; `[]`
- * when all five hold. `pull` is the pull's own answer, or `null` when the run names no pull. Pure.
+ * when all five hold. `pull` is the pull's own answer, or `null` when the run names no pull; `repo` is the
+ * repository both were read from — absent, the workflow fence fails, since no repository lists anything. Pure.
  */
-export function rerunFailedFenceFailures(run, pull = null) {
-  return RERUN_FAILED_FENCES.filter((f) => !f.holds(run, pull)).map((f) => ({ fence: f.fence, wants: f.wants, got: f.reads(run, pull) ?? null }));
+export function rerunFailedFenceFailures(run, pull = null, repo = null) {
+  return RERUN_FAILED_FENCES.filter((f) => !f.holds(run, pull, repo)).map((f) => ({ fence: f.fence, wants: f.wants, got: f.reads(run, pull, repo) ?? null }));
 }
 
 /** The sentence a fence refusal prints — every failing fence by name, what the run read and what the relay re-runs. Pure. */

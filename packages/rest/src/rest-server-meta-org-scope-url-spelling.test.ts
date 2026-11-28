@@ -117,6 +117,14 @@ function boot(execCtx: any) {
         { api: { requireAuth: false } } as any,
     );
     (rest as any).resolveExecCtx = async () => execCtx;
+    // [ADR-0161 K4] The deployment mounts a knowledge service that admits every source: on one with
+    // none, an author's `knowledge_source` save is refused (ruled D), and this suite is about something else.
+    (rest as any).kernelServiceProvider = async (name: string) => {
+        if (name === 'knowledge') return { admitAuthoredSource: async () => ({ admitted: true }) };
+        throw Object.assign(new Error(`Service '${name}' not found`), {
+            __objectstackServiceNotRegistered: true, code: 'SERVICE_NOT_REGISTERED', serviceName: name,
+        });
+    };
     rest.registerRoutes();
 
     const drive = async (

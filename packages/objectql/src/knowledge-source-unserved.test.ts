@@ -20,6 +20,8 @@ describe('describeUnservedKnowledgeSources — items with no knowledge service (
     expect(line).toContain('it is loaded, indexed or searched');
     expect(line).toContain('@objectstack/service-knowledge');
     expect(line).toContain('or remove the item.');
+    // The remedy an author's save on such a deployment is refused with: the token, then a restart.
+    expect(line).toContain("Declare requires: ['knowledge'] in the stack and restart");
   });
 
   it(`names at most ${UNSERVED_KNOWLEDGE_SOURCES_NAMED} items, counts the rest, and says a name two packages hold once`, () => {
