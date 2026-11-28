@@ -141,9 +141,10 @@ const VECTOR_MIN_POOL = 8;
  * rows in scope. Measured at 200,000 passages of 1,536 dimensions
  * (clustered, topK 10, 40 candidates a hit), 50 queries a share: under a
  * parent (metadata) scope keeping 10%, 15% and 20% of the passages, the
- * exact scan's p95 was 836, 853 and 790 ms and this pass's 326, 325 and
- * 299 ms, at the floor's recall; under a record scope the exact scan's was
- * 128, 207 and 265 ms, and this pass's 333, 313 and 407 ms.
+ * exact scan's p95 was 848, 907 and 908 ms and the search's with this pass
+ * 351, 328 and 337 ms, at the floor's recall; under a record scope the
+ * exact scan's was 128, 207 and 265 ms, and the search's with this pass
+ * 333, 313 and 407 ms.
  */
 const VECTOR_RETRY_POOL = 10;
 
