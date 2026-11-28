@@ -47,6 +47,7 @@ import { SchemaRendererContext } from '@object-ui/react';
 import type { ChatbotEnhancedMessage as ChatMessage, ToolDecisionState } from './ChatbotEnhanced';
 import type { ApproveOutcome, RejectOutcome } from './usePendingActions';
 import { hitlContinuationTag } from './hitlContinuation';
+import { isPendingActionLapsedConflict, PENDING_ACTION_LAPSED_REASON } from './pendingActionLapse';
 
 export type { ToolDecisionState };
 
@@ -243,6 +244,19 @@ export function useHitlInChat(options: UseHitlInChatOptions): UseHitlInChatRetur
         });
         const payload = (await parseJson(response)) ?? {};
         if (!response.ok) {
+          // The item lapsed before this decision reached it (objectstack#34255):
+          // nobody rejected it and nothing was written, so the card draws
+          // "Expired" in place of the conflict error. No continuation turn —
+          // there is no decision to report to the model.
+          if (isPendingActionLapsedConflict(response.status, payload)) {
+            setDecision(toolCallId, { state: 'expired', decision });
+            onDecided?.(toolCallId, {
+              id,
+              status: 'failed',
+              error: PENDING_ACTION_LAPSED_REASON,
+            } as ApproveOutcome);
+            return;
+          }
           const message =
             typeof payload.error === 'string'
               ? payload.error

@@ -10,7 +10,7 @@
  */
 
 import { describe, it, expect, vi } from 'vitest';
-import { authoredKnowledgeSourceRefusal, KNOWLEDGE_SOURCE_ADMISSION_SERVICE } from './knowledge-source-save-admission.js';
+import { authoredKnowledgeSourceRefusal, knowledgeServiceNotInScope, KNOWLEDGE_SOURCE_ADMISSION_SERVICE } from './knowledge-source-save-admission.js';
 
 const ITEM = { name: 'faq', label: 'FAQ', adapter: 'memory', source: { kind: 'object', object: 'article', content: ['body'] } };
 const AUTHOR = { userId: 'u_author', systemPermissions: ['manage_metadata', 'manage_knowledge_sources'] };
@@ -87,6 +87,60 @@ describe('authoredKnowledgeSourceRefusal — source admission at save', () => {
         });
         expect(thrown).toMatchObject({ status: 503, code: 'SERVICE_UNAVAILABLE' });
         expect(thrown?.message).toContain('registry unavailable');
+    });
+
+    /**
+     * A registration that serves no instance in the request's scope (a host's
+     * scoped factory): the deployment does run a knowledge service, so it is
+     * not told it runs none, nor sent to the stack's `requires`.
+     */
+    it('a knowledge service registered with no instance in this scope: refused SERVICE_UNAVAILABLE / 503 with its own sentence, not the no-service one', async () => {
+        const refusal = await authoredKnowledgeSourceRefusal({
+            type: 'knowledge_source', item: ITEM, executionContext: AUTHOR,
+            resolveKnowledgeService: async () => knowledgeServiceNotInScope('northwind'),
+        });
+        expect(refusal).toMatchObject({ status: 503, code: 'SERVICE_UNAVAILABLE' });
+        expect(refusal?.message).toMatch(
+            /^The knowledge source 'faq' was not saved: the knowledge service registered on this deployment serves no instance for environment 'northwind', so nothing would load, index or search it there\./,
+        );
+        expect(refusal?.message).not.toContain('runs no knowledge service');
+        expect(refusal?.message).not.toContain("requires: ['knowledge']");
+        expect(refusal?.message).toMatch(/save the source again\. Nothing was written\.$/);
+        // The engine's own write is not asked, scope miss or not.
+        const resolve = vi.fn(() => knowledgeServiceNotInScope('northwind'));
+        expect(await authoredKnowledgeSourceRefusal({ type: 'knowledge_source', item: ITEM, executionContext: { isSystem: true }, resolveKnowledgeService: resolve })).toBeUndefined();
+        expect(resolve).not.toHaveBeenCalled();
+    });
+
+    /**
+     * The package duplicate copies a package's sources: its caller is told to
+     * duplicate the package again, and the door's prefix says once that
+     * nothing was copied, so the sentence carries no "Nothing was written".
+     */
+    it('door: duplicate words each refusal the predicate composes for the duplicate\'s caller', async () => {
+        const ask = (resolveKnowledgeService: () => unknown, item: unknown = ITEM) =>
+            authoredKnowledgeSourceRefusal({ type: 'knowledge_source', item, executionContext: AUTHOR, resolveKnowledgeService, door: 'duplicate' });
+
+        const none = await ask(() => undefined);
+        expect(none).toMatchObject({ status: 503, code: 'SERVICE_UNAVAILABLE' });
+        expect(none?.message).toMatch(/^The knowledge source 'faq' cannot be copied: this deployment runs no knowledge service/);
+        expect(none?.message).toMatch(/requires: \['knowledge'\].*restart the server, then duplicate the package again: /);
+
+        const scoped = await ask(() => knowledgeServiceNotInScope('northwind'));
+        expect(scoped).toMatchObject({ status: 503, code: 'SERVICE_UNAVAILABLE' });
+        expect(scoped?.message).toMatch(/^The knowledge source 'faq' cannot be copied: the knowledge service registered on this deployment serves no instance for environment 'northwind'/);
+        expect(scoped?.message).toMatch(/duplicate the package again\.$/);
+
+        const unresolved = await ask(async () => { throw new Error('factory failed'); });
+        expect(unresolved).toMatchObject({ status: 503, code: 'SERVICE_UNAVAILABLE' });
+        expect(unresolved?.message).toMatch(/^The knowledge source cannot be copied: /);
+        expect(unresolved?.message).toMatch(/Duplicate the package again\.$/);
+
+        for (const refusal of [none, scoped, unresolved]) {
+            expect(refusal?.message).not.toMatch(/save the source|Nothing was written/);
+        }
+        // A verdict of the knowledge service is its own sentence, passed through as before.
+        expect(await ask(() => serviceAnswering(REFUSED))).toEqual({ status: 403, code: 'PERMISSION_DENIED', message: REFUSED.message });
     });
 
     it('`isSystem: false` is not a bypass', async () => {

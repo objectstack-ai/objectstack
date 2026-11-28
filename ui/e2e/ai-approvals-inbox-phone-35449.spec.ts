@@ -126,7 +126,7 @@ const INBOX = {
   card: grab('cards', /className="([^"]+)" data-testid=\{`ai-inbox-card-\$\{row\.id\}`\}/, ['border']),
   cardHead: grab('cards', /data-testid=\{`ai-inbox-card-\$\{row\.id\}`\}>\s*<div className="([^"]+)">/, ['flex']),
   action: grab('cards', /<div className="([^"]+)">\{row\.action_name\}<\/div>/, ['min-w-0']),
-  badgeBox: grab('cards', /<div className="([^"]+)"><StatusBadge status=\{row\.status\}/, ['shrink-0']),
+  badgeBox: grab('cards', /<div className="([^"]+)"><StatusBadge row=\{row\}/, ['shrink-0']),
   meta: grab('cards', /<div className="([^"]+)">\s*<span className="[^"]+">\{row\.object_name\}/, ['flex']),
   object: grab('cards', /<span className="([^"]+)">\{row\.object_name\}/, ['min-w-0']),
   tool: grab('cards', /<span className="([^"]+)">\{row\.tool_name\}/, ['font-mono']),

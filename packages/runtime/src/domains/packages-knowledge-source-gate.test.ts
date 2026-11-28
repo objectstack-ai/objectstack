@@ -25,6 +25,7 @@
 // Pays `@objectstack/metadata`'s first load at collection, never inside a clocked case.
 import '@objectstack/metadata';
 import { describe, it, expect, vi } from 'vitest';
+import { ObjectKernel, ServiceLifecycle } from '@objectstack/core';
 import { HttpDispatcher } from '../http-dispatcher.js';
 
 const ctx = (executionContext: any): any => ({ request: {}, environmentId: 'platform', executionContext });
@@ -97,7 +98,7 @@ function make(holding: Holding = {}, knowledge?: unknown) {
                                 : null,
         },
     };
-    return { dispatcher: new HttpDispatcher(kernel), protocol, metadata, registry };
+    return { dispatcher: new HttpDispatcher(kernel), protocol, metadata, registry, kernelServices: { objectql, protocol, metadata } };
 }
 
 type Stack = ReturnType<typeof make>;
@@ -294,9 +295,14 @@ describe('/packages — duplicate admits each knowledge source it copies for the
         const r = await call(noService, DUPLICATE, authed(BOTH));
         expect(r.response?.status).toBe(503);
         expect(r.response?.body?.error?.code).toBe('SERVICE_UNAVAILABLE');
-        expect(r.response?.body?.error?.message).toContain('nothing was copied');
-        expect(r.response?.body?.error?.message).toContain('this deployment runs no knowledge service');
-        expect(r.response?.body?.error?.message).toContain("requires: ['knowledge']");
+        const message: string = r.response?.body?.error?.message;
+        expect(message).toMatch(
+            /^Duplicating package "pkg-a" is refused, and nothing was copied\. The knowledge source 'faq' cannot be copied: this deployment runs no knowledge service/,
+        );
+        expect(message).toMatch(/requires: \['knowledge'\].*restart the server, then duplicate the package again: /);
+        // The caller duplicates a package: never told to save a source, and told once that nothing was copied.
+        expect(message).not.toMatch(/save the source|Nothing was written/);
+        expect(message.match(/nothing was copied/gi)).toHaveLength(1);
         expect(noService.protocol.duplicatePackage).not.toHaveBeenCalled();
 
         // A package with no source, and the engine's own call, copy as before.
@@ -306,6 +312,42 @@ describe('/packages — duplicate admits each knowledge source it copies for the
         const engine = make({ items: [SOURCE_ITEM] });
         expect((await call(engine, DUPLICATE, system())).response?.status).not.toBe(503);
         expect(engine.protocol.duplicatePackage).toHaveBeenCalled();
+    });
+
+    /**
+     * A host that registers `knowledge` per environment and serves no instance
+     * for this request's: the deployment runs a knowledge service, so the
+     * caller is told what is true and the stack's `requires` is not named.
+     */
+    it('a knowledge service registered with no instance in the request\'s environment refuses 503 with its own sentence; the plain instance is the control', async () => {
+        const scoped = make({ items: [SOURCE_ITEM] });
+        const kernel = new ObjectKernel({ gracefulShutdown: false, skipSystemValidation: true });
+        for (const name of ['objectql', 'protocol', 'metadata'] as const) {
+            kernel.registerService(name, scoped.kernelServices[name]);
+        }
+        kernel.registerServiceFactory('knowledge', () => undefined, ServiceLifecycle.SCOPED);
+        const r = await new HttpDispatcher(kernel as any).handlePackages('/pkg-a/duplicate', 'POST', { targetPackageId: 'pkg-b' }, {}, authed(BOTH));
+        expect(r.response?.status).toBe(503);
+        expect(r.response?.body?.error?.code).toBe('SERVICE_UNAVAILABLE');
+        const message: string = r.response?.body?.error?.message;
+        expect(message).toMatch(
+            /^Duplicating package "pkg-a" is refused, and nothing was copied\. The knowledge source 'faq' cannot be copied: the knowledge service registered on this deployment serves no instance for environment 'platform'/,
+        );
+        expect(message).not.toMatch(/runs no knowledge service|requires: \['knowledge'\]|save the source|Nothing was written/);
+        expect(scoped.protocol.duplicatePackage).not.toHaveBeenCalled();
+
+        // CONTROL: a plain instance, as the platform's plugin registers it, is asked and admits.
+        const plain = make({ items: [SOURCE_ITEM] });
+        const plainKernel = new ObjectKernel({ gracefulShutdown: false, skipSystemValidation: true });
+        for (const name of ['objectql', 'protocol', 'metadata'] as const) {
+            plainKernel.registerService(name, plain.kernelServices[name]);
+        }
+        const admitAuthoredSource = vi.fn(async () => ({ admitted: true }));
+        plainKernel.registerService('knowledge', { admitAuthoredSource });
+        const ok = await new HttpDispatcher(plainKernel as any).handlePackages('/pkg-a/duplicate', 'POST', { targetPackageId: 'pkg-b' }, {}, authed(BOTH));
+        expect(ok.response?.status).not.toBe(503);
+        expect(admitAuthoredSource).toHaveBeenCalledTimes(1);
+        expect(plain.protocol.duplicatePackage).toHaveBeenCalled();
     });
 
     it('the engine\'s own call is not asked', async () => {

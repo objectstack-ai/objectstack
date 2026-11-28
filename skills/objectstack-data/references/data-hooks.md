@@ -805,10 +805,10 @@ export default defineHook({
 - For several reasons throw `reasons: [{ reason: 'on_loan', params: { due } }, …]`, not
   `reason`: one translated line each, filled from its own `params`. `userMessage` joins
   them by newlines and ends with the entry's `message`, filled from the throw's
-  top-level `params` (else its holes are empty). `/data` cuts `userMessage` (a single
-  sentence's too) at 500 characters, so a long list loses its closing line there.
-  `/data` and `/actions` answer `details.refusals: [{ reason, message }]` uncut
-  (MCP tools relay the lines as text), absent for a single `reason`.
+  `params` (else holes are empty). `@objectstack/rest`'s `/data` routes cut
+  `userMessage` (a single sentence's too) at 500 characters, so a long list loses its
+  closing line. They and `/actions` answer `details.refusals: [{ reason, message }]`
+  uncut (MCP tools relay them as text), absent for a single `reason`.
 - Translated via `hooks.<hook>.refusals.<CODE>.message` (or
   `….<CODE>.reasons.<REASON>.message`); the thrown text and `status` are unused.
 - An undeclared code (or none), or a reason missing from a code's `reasons` (a listed

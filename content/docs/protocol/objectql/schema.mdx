@@ -236,7 +236,7 @@ The `enable` object controls which features are active:
 ```yaml
 enable:
   # Data Management
-  trackHistory: true         # Track field history (who changed what, when)
+  trackHistory: true         # Show the audit ledger's field changes (who changed what, when)
   searchable: true           # Index for global search
   # API & Integration
   apiEnabled: true           # Generate REST endpoints
@@ -251,11 +251,11 @@ enable:
 ```
 
 **Performance Impact:**
-- `trackHistory: true` adds write overhead (additional inserts to audit table)
+- `trackHistory: true` adds no write overhead: the audit ledger records every write either way, and the flag only shows its field changes on the record page
 - `searchable: true` adds search indexes (storage overhead)
 
 **When to enable:**
-- **trackHistory:** Regulated industries, compliance requirements
+- **trackHistory:** Users must read who changed which field, and when, on the record page (regulated industries, compliance reviews)
 - **searchable:** User-facing search features
 
 ## Field Definition
