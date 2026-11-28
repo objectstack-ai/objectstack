@@ -252,7 +252,9 @@ export const KnowledgeSourceSchema = lazySchema(() => strictObject(
     id: retiredKey(
       '`knowledge_source.id` was removed in @objectstack/spec 19.0.0 (ADR-0161 K6) — '
       + 'a knowledge source is a metadata item, and an item is identified by `name`; use `name`. '
-      + 'Rename the key; the value is unchanged, so the source\'s index is found again and is not rebuilt. '
+      + 'Rename the key; the value is unchanged, so the source\'s index is found again and is not rebuilt, except for a source whose id began with an underscore: `name` refuses the underscore, so '
+      + 'that source takes a new name, is built again under it, and its old index is dropped with `dropSource`; '
+      + 'the upgrade entry `knowledge-source-registration-governed` says how, and its notices still apply after the conversion. '
       + CODE_DOOR_18
       + MIGRATE_18,
     ),

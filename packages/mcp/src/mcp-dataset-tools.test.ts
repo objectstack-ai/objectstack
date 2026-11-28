@@ -368,9 +368,10 @@ describe('[ADR-0149 D2] dataset tools on MCP — the spec refusal is kept whole'
     const json = await callTool(runtime, bridge, LIST_DATASETS_TOOL_NAME, { terms: ['营收'], zzUndeclaredProbeKey: 'x' });
     const text = json.error?.message ?? json.result?.content[0]?.text ?? '';
     expect(Boolean(json.error) || json.result?.isError === true).toBe(true);
-    expect(text).toContain('-32602');
-    expect(text).toContain('`zzUndeclaredProbeKey`');
-    expect(text).toContain(RETIRED_KEY_UPGRADE_GUIDE_SENTENCE);
+    const { error } = JSON.parse(text);
+    expect(error.code).toBe('VALIDATION_ERROR');
+    expect(error.message).toContain('`zzUndeclaredProbeKey`');
+    expect(error.message).toContain(RETIRED_KEY_UPGRADE_GUIDE_SENTENCE);
     expect(bridge.calls.filter((c) => c[0] === 'listDatasets')).toEqual([]);
   });
 });

@@ -15,6 +15,7 @@ import { stampSearchPinyinEnabled } from '@objectstack/types';
 import { isDeclaredByHost } from '@objectstack/types/node';
 import { describeAiAutoInjectRefusal, mountsAiServicePlugin, resolveAiServiceLoad } from './ai-service-auto-inject.js';
 import { isAppPluginLike } from './graft-runtime-hooks.js';
+import { mergeBootConfig } from './merge-boot-config.js';
 import { isHostConfig } from './plugin-detection.js';
 import {
   resolveStackCollection,
@@ -1563,7 +1564,11 @@ export async function buildSchemaMigrationPlugins(opts: {
    * mounts (the stack's `requires` and the always-on slate), and the REST API
    * plugin — each for its declarations only. See {@link composeServedPlatform}.
    * `artifactRequires` is the compiled artifact's `requires` as the standalone
-   * stack surfaced it.
+   * stack surfaced it. `artifactStack` is the standalone stack's result itself,
+   * which `serve` lays over the config (`mergeBootConfig`) before it reads the
+   * tokens the stack's items mount (`stackItemCapabilities`): on an
+   * artifact-only stack the config is empty, and the shipped items
+   * (`knowledgeSources`) are on this result alone.
    *
    * Set by `os migrate plan` and `os migrate apply`, whose subject is the
    * deployment's whole object set, and by `os migrate unmapped-columns`, which
@@ -1572,7 +1577,7 @@ export async function buildSchemaMigrationPlugins(opts: {
    * a provider is composed only when a composed plugin hard-depends on it
    * (#21732), as before.
    */
-  servedPlatform?: { artifactRequires?: readonly string[] };
+  servedPlatform?: { artifactRequires?: readonly string[]; artifactStack?: object };
 }): Promise<SchemaMigrationComposition> {
   const cwd = opts.cwd ?? process.cwd();
   const hostConfigPath = findHostConfig(cwd);
@@ -1747,6 +1752,9 @@ export async function buildSchemaMigrationPlugins(opts: {
         basePlugins: opts.basePlugins,
         composed: [...opts.basePlugins, ...plugins],
         artifactRequires: opts.servedPlatform.artifactRequires,
+        ...(opts.servedPlatform.artifactStack !== undefined
+          ? { artifactStack: opts.servedPlatform.artifactStack }
+          : {}),
         packageRoot: hostConfigPath ? path.dirname(hostConfigPath) : cwd,
         ...(opts.serveFlags ? { serveFlags: opts.serveFlags } : {}),
       });
@@ -1955,6 +1963,8 @@ async function composeServedPlatform(input: {
   /** Everything composed so far — what a provider counts as already held against. */
   composed: readonly unknown[];
   artifactRequires?: readonly string[];
+  /** The standalone stack's result, which `serve` lays over a non-host config before it reads the items. */
+  artifactStack?: object;
   packageRoot: string;
   /**
    * `serve`'s flags as the command was given them: `--dev` is a development
@@ -2041,7 +2051,14 @@ async function composeServedPlatform(input: {
   // [ADR-0161 K8 item 12] The tokens the stack's items mount (a shipped
   // `knowledge_source` mounts `knowledge`), read off the same config `serve`
   // reads them from (`stackItemCapabilities`), so both boots compose one set.
-  for (const token of resolveServedCapabilities(requires, { itemTokens: stackItemCapabilities(config) }).tokens) {
+  // That config is `serve`'s merge: on the standalone path the stack's result
+  // laid over the authored config (`mergeBootConfig`), the rule `requires`
+  // follows above — so an artifact-only stack, whose loaded config is empty,
+  // mounts what its shipped items mount here as it does when served.
+  const servedConfig = !isHostConfig(config) && input.artifactStack !== undefined
+    ? mergeBootConfig(config as object, input.artifactStack)
+    : config;
+  for (const token of resolveServedCapabilities(requires, { itemTokens: stackItemCapabilities(servedConfig) }).tokens) {
     const spec = CAPABILITY_PROVIDERS[token];
     // A tier token (`auth`, `ui`, `i18n`, `ai`) or one no open package
     // provides mounts nothing in `serve`'s resolver either.

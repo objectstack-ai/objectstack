@@ -479,7 +479,9 @@ describe('an approver\'s agent lists the approvals waiting on them over MCP (#32
     });
     expect(withMember.isError, withMember.text).toBe(true);
     expect(withMember.text).toContain(`\`${AI_ACTION_CONFIRMATION_MEMBER}\``);
-    expect(withMember.payload?.error?.code, withMember.text).toBeUndefined();
+    // [#37411] The closed input's schema refusal is coded VALIDATION_ERROR, the code any undeclared key
+    // gets; the member mints none of its own, and never the confirmation gate's.
+    expect(withMember.payload?.error?.code, withMember.text).toBe('VALIDATION_ERROR');
     expect((await requestRow(first.requestId)).status).toBe('pending');
 
     expect((await pendingIds({ bearer: approver })).sort()).toEqual([first.requestId, second.requestId].sort());

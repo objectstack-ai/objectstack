@@ -220,7 +220,7 @@ describe('the dataset cards name the kind of every question they ask, and ask ev
     business_term: [2, 2],
     ambiguous: [2, 2],
     forbidden: [1, 2],
-    unanswerable: [1, 1],
+    unanswerable: [2, 1],
   };
 
   it('each card asks each kind as many times as the README table states', () => {
