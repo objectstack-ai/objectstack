@@ -51,7 +51,7 @@ import { catalogNotImplemented, requestLocaleOf } from './own-door-bridge.js';
  *
  * [#37864] The 501 answers in the request's top `Accept-Language` tag, with
  * the `Vary: Accept-Language` such a body owes (`catalogNotImplemented`), as
- * every other domain 501 does. Discovery does not follow it: it is a
+ * the other catalog 501s do. Discovery does not follow it: it is a
  * machine-read surface (SDKs, codegen, AI clients), and a host-level
  * `/discovery` is served with no request to read a language from. So the
  * sentence lives twice: once in `serviceUnavailableMessage` for discovery,
@@ -60,6 +60,13 @@ import { catalogNotImplemented, requestLocaleOf } from './own-door-bridge.js';
  * English of every `CoreServiceName` slot equal to `serviceUnavailableMessage`.
  * A slot whose `serviceUnavailableMessage` has a sentence of its own needs a
  * key in {@link SLOT_SENTENCE_KEY}; that pin fails until it has one.
+ *
+ * The operator's fault log stays English too. A declared capability absence
+ * is logged once per route per process (`logServerFault`,
+ * `@objectstack/types`), so a line in the caller's language would carry the
+ * language of whichever request reached the route first for the life of the
+ * process. The answer names the English as its `faultLogMessage`, which the
+ * dispatcher plugin's writer prints in place of the body's message.
  *
  * There is deliberately no per-call message override. One briefly existed for
  * `ai`, whose provider ships outside this workspace, and it hid the real bug:
@@ -76,7 +83,12 @@ import { catalogNotImplemented, requestLocaleOf } from './own-door-bridge.js';
  */
 export function capabilityUnavailable(deps: DomainHandlerDeps, context: HttpProtocolContext, slot: string): HttpDispatcherResult {
     const { key, params } = capabilityUnavailableSentence(slot);
-    return catalogNotImplemented(deps, context, key, params);
+    const answer = catalogNotImplemented(deps, context, key, params);
+    // The operator's fault log keeps the English (`faultLogMessage`): its one
+    // line per route per process is not the first caller's language.
+    return answer.response
+        ? { ...answer, response: { ...answer.response, faultLogMessage: capabilityUnavailableMessage(slot) } }
+        : answer;
 }
 
 /**

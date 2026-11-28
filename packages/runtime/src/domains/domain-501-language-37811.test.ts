@@ -159,6 +159,12 @@ describe('#37811 · 1 · the doors with no 501 fixture of their own', () => {
  * message or a comment is not a status, and a parenthesis inside a string
  * cannot unbalance anything. Template literals are blanked too, their `${…}`
  * holes kept as code.
+ *
+ * Two limits, by design: regex literals are not lexed (a quote, `//` or
+ * backtick inside one would blank code after it; no domain module has such a
+ * regex today, and the exactly-one-site exemption tests would trip if one
+ * hid a site), and only `src/domains/` is walked, so a `501` reached through
+ * a helper outside it is not seen.
  */
 function codeOnly(source: string): string {
     const out = source.split('');

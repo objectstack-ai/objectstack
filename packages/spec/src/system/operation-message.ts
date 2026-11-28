@@ -411,6 +411,9 @@ export function operationMessageTranslationKey(messageKey: string): string {
  * carry the slots with a sentence of their own; every other slot reads
  * `_install` (`{{package}}`, the slot's provider package) or `_unshipped`
  * (`{{slot}}`); package, slot, plugin and route names are never translated.
+ * The operator's fault log does not follow the request: the line a declared
+ * capability absence earns once per route per process prints the English
+ * (the answer's `faultLogMessage`), never the first caller's language.
  */
 export const BUILTIN_OPERATION_MESSAGES: Record<string, Record<string, string>> = {
   en: {
@@ -676,7 +679,7 @@ export const BUILTIN_OPERATION_MESSAGES: Record<string, Record<string, string>> 
     capability_unavailable_install: '安装 {{package}} 即可启用。',
     capability_unavailable_unshipped: "'{{slot}}' 槽位没有随附的实现：在该槽位下注册一个服务即可启用。",
     capability_unavailable_ui: '由协议服务提供：注册 MetadataPlugin（@objectstack/metadata-protocol）即可启用。',
-    capability_unavailable_ai: '由 ObjectOS Cloud/Enterprise 中的 @objectstack/service-ai 提供，开源框架不附带实现。',
+    capability_unavailable_ai: '由 ObjectOS Cloud/Enterprise 中的 @objectstack/service-ai 提供，开源框架没有随附的实现。',
     capability_unavailable_search:
       "'search' 槽位没有随附的实现：它对应专用搜索引擎（Elasticsearch/Meilisearch），在该槽位下注册一个服务即可启用。跨对象搜索不依赖它：GET {basePath}/search 由协议本身提供，本主机是否提供它由 capabilities.search 报告，而不是由这个槽位报告。",
   },

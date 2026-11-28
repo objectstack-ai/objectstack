@@ -349,3 +349,33 @@ describe('#14656 — the wire does not move', () => {
         );
     });
 });
+
+// [#37864] The wire answers in the caller's language; the operator's one line
+// does not. Under the once-per-route dedupe, the FIRST request decides what the
+// log holds for the life of the process, so the line is the English whatever
+// that request asked for: `serviceUnavailableMessage('notification')`, which is
+// also the sentence discovery publishes for the slot.
+describe('#37864 — a localized 501 still logs its English', () => {
+    it('a ja-JP first request answers Japanese and leaves the English line', async () => {
+        const { route, logger } = await boot({ auth: SIGNED_IN_AUTH });
+
+        const ja = makeRes();
+        await route('GET /notifications')({ ...REQ, headers: { 'accept-language': 'ja-JP,ja;q=0.9' } }, ja);
+        const en = makeRes();
+        await route('GET /notifications')({ ...REQ }, en);
+
+        expect(ja.statusCode).toBe(501);
+        expect(ja.body.error.code).toBe('NOT_IMPLEMENTED');
+        expect(ja.body.error.message).not.toBe(en.body.error.message);
+        expect(ja.body.error.message).toContain('@objectstack/service-messaging');
+        expect(en.body.error.message).toBe('Install @objectstack/service-messaging to enable');
+        // `faultLogMessage` is the log's, never the wire's.
+        expect(JSON.stringify(ja.body)).not.toContain('faultLogMessage');
+
+        const warned = lines(logger.warn);
+        expect(warned, 'two requests, one line').toHaveLength(1);
+        expect(String(warned[0][0])).toContain('Install @objectstack/service-messaging to enable');
+        expect(String(warned[0][0])).not.toContain(ja.body.error.message);
+        expect(lines(logger.error)).toHaveLength(0);
+    });
+});

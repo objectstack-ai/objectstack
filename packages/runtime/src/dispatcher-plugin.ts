@@ -457,11 +457,17 @@ function sendResultBase(
     // exit's, one function up.
     if (result.handled && result.response) {
         const body = result.response.body as { error?: { code?: unknown; message?: unknown } } | undefined;
+        // [#37864] An answer whose body is in the caller's language names the
+        // English its log line prints (`faultLogMessage`): the operator's line
+        // keeps one language whoever asked first.
+        const logMessage = typeof result.response.faultLogMessage === 'string'
+            ? result.response.faultLogMessage
+            : body?.error?.message;
         logServerFault(
             {
                 status: result.response.status,
                 ...(typeof body?.error?.code === 'string' ? { code: body.error.code } : {}),
-                ...(typeof body?.error?.message === 'string' ? { message: body.error.message } : {}),
+                ...(typeof logMessage === 'string' ? { message: logMessage } : {}),
                 request: describeFaultRequest(fault?.req ?? (res as any)?.__obsRequest),
             },
             fault?.logger,
