@@ -233,8 +233,9 @@ export const CLAUDE_EFFORT_ENV = 'CLAUDE_CODE_EFFORT_LEVEL';
  * container sets them so its own sessions read and write the project's memory
  * store, and a child spawned with them reads that store too. A skill-eval turn
  * that inherits them answers from the host's notes in both arms, so the
- * no-skill arm can score as if it had the skill. Every skill-eval turn is
- * spawned without them (`turnEnv` in `src/skill-evals/run.ts`).
+ * no-skill arm can score as if it had the skill, and a scenario turn builds
+ * or answers from them. Every turn either runner spawns goes without them
+ * (`ClaudeCodeDriver.turnEnv` here, `turnEnv` in `src/skill-evals/run.ts`).
  */
 export const CLAUDE_MEMORY_ENV = ['CLAUDE_COWORK_MEMORY_PATH_OVERRIDE', 'CLAUDE_MEMORY_STORES'] as const;
 
@@ -461,10 +462,14 @@ export class ClaudeCodeDriver implements AgentDriver {
     return raw === undefined || raw === '' || raw === 'unset' || raw === 'auto' ? undefined : raw;
   }
 
-  /** A turn's environment: no API-billing variable, and no {@link CLAUDE_EFFORT_ENV} to override the `--effort` the turn passes. */
+  /**
+   * A turn's environment: no API-billing variable, no {@link CLAUDE_EFFORT_ENV} to override the `--effort` the turn
+   * passes, and no {@link CLAUDE_MEMORY_ENV} variable pointing the turn at the host's memory store.
+   */
   private turnEnv(): NodeJS.ProcessEnv {
     const env = subscriptionOnlyEnv();
     delete env[CLAUDE_EFFORT_ENV];
+    for (const k of CLAUDE_MEMORY_ENV) delete env[k];
     return env;
   }
 
