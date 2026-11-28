@@ -52,7 +52,7 @@ import { AlertTriangle, ChevronDown, ChevronsUpDown, ChevronUp, Eye, EyeOff, Plu
 import { iconNames } from 'lucide-react/dynamic.mjs';
 import { toast } from 'sonner';
 import { useObjectTranslation } from '@object-ui/i18n';
-import { createAuthenticatedFetch } from '@object-ui/auth';
+import type { MetadataClient } from '@object-ui/data-objectstack';
 import { useMetadataLocale, t, tFormat } from './i18n.js';
 import type { SupportedLocale } from './i18n.js';
 import { fieldHistoryChoiceOf, fieldHistoryOptions, fieldHistoryValueOf } from './fieldHistoryChoice.js';
@@ -82,6 +82,8 @@ import {
   offeredOptions,
   usePickerLoad,
 } from './loadState.js';
+import { useMetadataClient } from './useMetadata.js';
+import { readFields } from './previews/object-fields-io.js';
 
 /* -------------------------------------------------------------------------- */
 /* The option catalogs a picker reads off {@link WidgetContext}                */
@@ -1303,7 +1305,7 @@ function ObjectSelectorWidget({
 /* field-selector — smart field picker (depends on selected object)          */
 /* -------------------------------------------------------------------------- */
 
-/** One entry of the `field-selector` catalog, as the REST endpoint spells it. */
+/** One entry of the `field-selector` catalog, read off the served object document. */
 interface FieldSelectorOption {
   name: string;
   label: string;
@@ -1314,59 +1316,43 @@ interface FieldSelectorOption {
 const EMPTY_FIELD_SELECTOR_OPTIONS: FieldSelectorOption[] = [];
 
 /**
- * Fetch the bound object's field catalog for {@link FieldSelectorWidget}
- * (objectui#5227).
+ * Fetch the bound object's field catalog for {@link FieldSelectorWidget}.
  *
- * This is the one loader in this family that does NOT go through
- * `MetadataClient` — it is a raw `fetch` to a REST path no other widget here
- * uses — which is why objectui#5170 missed it and why the option catalogs on
- * {@link WidgetContext} do not reach it. It had TWO ways to render
- * a fault as a measurement, and a union that guarded only the first would have
- * left the second wide open:
+ * The catalog is read off the object document the server mounts at
+ * `GET /api/v1/meta/object/:name`, through the console's {@link MetadataClient}
+ * and {@link readFields} — the read `useObjectFields` makes for the other
+ * field pickers in this directory. One route serves an object's fields; this
+ * widget asks it rather than a path of its own that no server mounts.
  *
- *   1. the `catch` wrote `setFields([])` — byte-identical to a successful
- *      response with no fields — and cleared the loading flag, so a dropped
- *      connection rendered as a completed, empty picker;
- *   2. it never checked `res.ok`, so a 4xx/5xx whose body happens to parse as
- *      JSON landed in the SUCCESS branch with `data.fields` undefined, and the
- *      old `|| []` rendered that refusal as "no fields" — worse than (1),
- *      because no error was ever raised for the `catch` to swallow.
+ * It reads the draft-overlaid object (`?preview=draft`) for the reason
+ * `useObjectFields` does: every host of this widget is an authoring surface,
+ * and an object's fields are picked before its first publish.
  *
- * Both now leave through the same door: a throw, which {@link usePickerLoad}
- * can only turn into the `error` arm. The message follows the convention the
- * other raw-`fetch` callers in this package already use (`useRecordApprovals`,
- * `suggestedBindingsApi`, `studio-design/packages-io`): the server's own
- * message when it sent one, otherwise the status.
+ * Three answers, kept apart:
+ *  - a refused or failed read THROWS (the client's own error, carrying the
+ *    server's message), which {@link usePickerLoad} turns into the `error` arm;
+ *  - no object of that name (the client's `null` on 404) answers `null`, which
+ *    the widget renders as a failure naming the missing object — never as a
+ *    list with no fields;
+ *  - a served object answers its fields, possibly none.
  *
- * The read goes through the console's authenticated fetch, built per call, with
- * `credentials: 'include'`: a bare `fetch` with no init sends the session cookie
- * alone (the default `same-origin` credentials), so a session held by its bearer
- * token alone was answered as anonymous and a `401` never reached the console's
- * session-ended check. The object name is encoded into the path: the request
- * now carries the bearer, so it names exactly the object it was given.
+ * The client carries the stored bearer token beside the session cookie
+ * (`metadataClientFactory.ts`), so a session held by its token alone is read
+ * as itself.
  */
-async function fetchFieldSelectorOptions(objectName: string): Promise<FieldSelectorOption[]> {
-  const res = await createAuthenticatedFetch()(`/api/v1/objects/${encodeURIComponent(objectName)}/fields`, {
-    credentials: 'include',
-  });
-  // Read the body BEFORE branching on `ok`: a refusal usually carries the more
-  // useful sentence, and a non-JSON body must not be mistaken for a refusal
-  // that said nothing (it still throws below — it just cannot add a cause).
-  let payload: any = null;
-  try {
-    payload = await res.json();
-  } catch {
-    /* empty or non-JSON body */
-  }
-  if (!res.ok) {
-    const detail = payload?.error?.message ?? payload?.error ?? payload?.message;
-    throw new Error(
-      typeof detail === 'string' && detail ? detail : `HTTP ${res.status}`,
-    );
-  }
-  // `payload.fields` narrows to the list; anything else is an answer we cannot
-  // read, and the completed-load arm is the only one that reaches here.
-  return Array.isArray(payload?.fields) ? (payload.fields as FieldSelectorOption[]) : [];
+async function fetchFieldSelectorOptions(
+  client: MetadataClient,
+  objectName: string,
+): Promise<FieldSelectorOption[] | null> {
+  const obj = await client
+    .withPreviewDrafts(true)
+    .get<Record<string, unknown>>('object', objectName);
+  if (!obj) return null;
+  return readFields(obj.fields).entries.map((e) => ({
+    name: e.name,
+    label: typeof e.def.label === 'string' && e.def.label ? e.def.label : e.name,
+    type: typeof e.def.type === 'string' ? e.def.type : 'text',
+  }));
 }
 
 function FieldSelectorWidget({
@@ -1390,13 +1376,22 @@ function FieldSelectorWidget({
   // directory landed for the other pickers (objectui#5170) and for the
   // References panel before them (objectui#5110). `null` while no object is
   // bound is the `idle` arm: a question never asked is not a failure.
+  //
+  // The client is read through a ref so the load keys on the object name
+  // alone: a re-minted client is the same transport, not a new question.
+  const client = useMetadataClient();
+  const clientRef = React.useRef(client);
+  clientRef.current = client;
   const loadFields = React.useMemo(
-    () => (objectName ? () => fetchFieldSelectorOptions(objectName) : null),
+    () => (objectName ? () => fetchFieldSelectorOptions(clientRef.current, objectName) : null),
     [objectName],
   );
-  const fieldsState = usePickerLoad<FieldSelectorOption[]>(loadFields);
-  const fields = loadedData(fieldsState, EMPTY_FIELD_SELECTOR_OPTIONS);
-  const loadError = loadErrorOf(fieldsState);
+  const fieldsState = usePickerLoad<FieldSelectorOption[] | null>(loadFields);
+  const fields = loadedData(fieldsState, EMPTY_FIELD_SELECTOR_OPTIONS) ?? EMPTY_FIELD_SELECTOR_OPTIONS;
+  // A completed read that found no such object is a failure to show, in the
+  // designer's language, not an empty catalog.
+  const objectMissing = fieldsState.status === 'loaded' && fieldsState.data === null;
+  const loadError = objectMissing ? t('engine.form.objectNotFound', locale) : loadErrorOf(fieldsState);
 
   const multiple = fieldSpec?.multiple ?? false;
 
