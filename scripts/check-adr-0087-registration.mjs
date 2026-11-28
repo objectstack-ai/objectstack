@@ -8076,7 +8076,10 @@ function selfTest() {
   // start read the alias body as a VALUE: its annotated `f: () => void` read as
   // UNANNOTATED (erased: the permissive direction for predicate 4).
   // `headerStatement` finds the last statement start inside the header first. U48 is
-  // the lit control (the same alias after a `;`), U49 the value-direction control.
+  // the lit control (the same alias after a `;`). U49 is the value-direction control,
+  // and the same mechanism's mirror: a ONE-LINE alias with no `;` (`type S = A`) put
+  // `type` at the start of the NEXT literal's header, so the value `f: () => null`
+  // read as a function TYPE returning `null` (a value called concrete).
   {
     const SIDEBAR_HEAD = 'import * as React from "react"\nimport {\n  Tooltip,\n  TooltipContent,\n} from "./tooltip"\n\n' +
       'const SIDEBAR_COOKIE_NAME = "sidebar_state"\nconst SIDEBAR_COOKIE_MAX_AGE = 60 * 60 * 24 * 7\nconst SIDEBAR_KEYBOARD_SHORTCUT = "b"\n\n';
