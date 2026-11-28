@@ -25,7 +25,8 @@ export const entry: SemanticMigration = {
     'Set the trigger\'s `objectName`; compare the option value, not its label; drop the record `triggerType` or the '
     + '`timeRelative` block, whichever the flow does not mean; move `filter` / `maxRecords` inside `timeRelative`; point '
     + '`dateField` at a `date` or `datetime` field; write an option value the field lists; write a date as a CEL value '
-    + 'envelope (`{ dialect: \'cel\', source: \'isoDate(today())\' }`) instead of the helper call as text',
+    + 'envelope (`{ dialect: \'cel\', source: \'isoDate(today())\' }`) instead of the helper call as text; '
+    + 'point a `subflow` / `map` step\'s `config.flowName` at a flow the deployment holds, or save the called flow first',
   reason:
     'Each flow parses and publishes, then misbehaves on every run: a record trigger with no object fires on writes to '
     + 'every object; a label comparison is never true, because the row stores the value; a record trigger shadows the '
@@ -34,7 +35,10 @@ export const entry: SemanticMigration = {
     + '`invalid_option` and a write of helper text is refused `invalid_date`, so the node fails on every run. Stored '
     + 'flows are not rewritten or refused at boot. The next publish of a flow that carries one of the seven errors is '
     + 'refused with the fix named. Three warnings join them (`flow-schedule-timezone-missing`, `flow-subflow-unknown`, '
-    + '`flow-create-update-pair`), which refuse nothing and make `os validate --strict` exit 1 as any warning does.',
+    + '`flow-create-update-pair`), which refuse nothing on the CLI and make `os validate --strict` exit 1 as any warning '
+    + 'does. At the runtime publish gate `flow-subflow-unknown` is an error: a `subflow` / `map` step whose '
+    + '`config.flowName` names no flow the deployment holds (an installed package\'s, a stored flow in any state, a flow '
+    + 'of the same publish batch, or one the automation engine holds) fails on every run, so its publish is refused.',
   acceptanceCriteria:
     'os validate reports none of the seven errors; a publish of every flow the package carries succeeds.',
 };

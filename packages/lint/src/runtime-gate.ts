@@ -1467,6 +1467,15 @@ export function runRuntimeAuthoringRules(args: {
    * same value in every pass. Omitted, a flow node's type is not judged.
    */
   flowNodeTypeVocabulary?: readonly string[];
+  /**
+   * On a `flow` write: the names of every flow the deployment holds, as the
+   * host read them (every installed package's flows, the stored flow rows in
+   * every state, the batch's own flow drafts, the automation engine's flows).
+   * Handed to the rules as `AuthoringRuleContext.deploymentFlowNames`, the
+   * same value in every pass, so it moves no baseline. Omitted, or empty, a
+   * `subflow` / `map` call to another flow is not judged at this door.
+   */
+  deploymentFlowNames?: readonly string[];
 }): RuntimeGateResult {
   const rules = runtimeAuthoringRulesFor(args.type);
   const empty: RuntimeGateResult = { errors: [], advisories: [], rulesRun: [] };
@@ -1538,6 +1547,11 @@ export function runRuntimeAuthoringRules(args: {
     // so it moves no baseline.
     ...(args.flowNodeTypeVocabulary !== undefined && args.flowNodeTypeVocabulary.length > 0
       ? { flowNodeTypeVocabulary: new Set(args.flowNodeTypeVocabulary) }
+      : {}),
+    // The deployment's flow names, stated by the host on a flow write; the
+    // same value in every pass, so it moves no baseline.
+    ...(args.deploymentFlowNames !== undefined && args.deploymentFlowNames.length > 0
+      ? { deploymentFlowNames: new Set(args.deploymentFlowNames) }
       : {}),
   };
   const added = addedFindings(rules, snapshots, ctx, args.type, args.item);

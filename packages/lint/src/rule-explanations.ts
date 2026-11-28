@@ -7175,9 +7175,11 @@ const FLOW_SUBFLOW_UNKNOWN_EXPLANATION: RuleExplanation = {
   paragraphs: [
     'A `subflow` or `map` step runs another flow by the name in `config.flowName`. When no flow has that ' +
       'name, the step fails on every run, and every run of the calling flow fails with it.',
-    'A warning, and on the CLI only. Another installed package may ship the called flow, which this stack ' +
-      'cannot see. And the runtime publish gate judges one flow per write, so a call to another stored flow ' +
-      'could not be told from a call to a missing one there.',
+    'On the CLI it is a warning: another installed package may ship the called flow, which this stack ' +
+      'cannot see. At publish it is an error, judged against every flow the deployment holds: every ' +
+      'installed package\'s flows, the stored flows in every state (a draft counts), the flows published in ' +
+      'the same batch, and the flows the automation engine holds. Save the called flow first, then publish ' +
+      'the one that calls it.',
   ],
 };
 

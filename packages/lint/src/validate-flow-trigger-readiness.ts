@@ -1920,21 +1920,52 @@ function signatureUnusableFinding(
  * the engine to run that flow by name, and the engine finds none, so the step
  * fails every run (`subflow 'X' failed`).
  *
- * Its OWN exported rule, run on the CLI only, for the reason
- * `flow-trigger-unknown-object` carries a hedge plus one more: the runtime
- * publish gate judges a flow write over a snapshot whose `flows` holds only
- * the written item, so a call to any other stored flow would read as unknown
- * there. On the CLI the stack is one app; a flow another installed package
- * ships is a legitimate target, so the finding is advisory, as that sibling's
- * is without a stated closure.
+ * Its OWN exported rule, with one verdict per door, decided by #5762's
+ * question (is what this rule reads enough to know?):
+ *
+ *  - On the CLI the stack is one app. A flow another installed package ships
+ *    is a legitimate target the stack cannot see, so the finding is a
+ *    `warning`, as `flow-trigger-unknown-object`'s is without a stated closure.
+ *  - At the runtime publish gate the snapshot's `flows` holds only the written
+ *    item, so that snapshot alone cannot judge a call. The host states the
+ *    names of every flow the deployment holds instead
+ *    (`deploymentFlowNames`: every installed package's flows, the stored rows
+ *    in every state, drafts included, this publish batch's own drafts, and
+ *    every flow the automation engine holds). A name in none of those is a
+ *    flow the engine cannot find, so every run of the step fails: `error`.
+ *    The set is the whole deployment, never narrowed to the written package's
+ *    closure, so a call this rule lets through may still be one the engine's
+ *    package-scoped name resolution refuses (ADR-0150 D3); this rule does not
+ *    judge that. A draft counts as held, so two new flows that call each
+ *    other can be published one at a time.
+ *  - At the runtime gate with no stated names, or an empty set, it judges
+ *    nothing: no deployment state was handed over, and the written flow
+ *    alone is no universe (the #24668 reading of an empty set with no
+ *    closure).
  */
 export const FLOW_SUBFLOW_UNKNOWN = 'flow-subflow-unknown';
 
-export function validateFlowSubflowTargets(stack: AnyRec): FlowTriggerReadinessFinding[] {
+export interface FlowSubflowTargetOptions {
+  /**
+   * The names of every flow the deployment holds, as the runtime publish
+   * gate's host states them (`AuthoringRuleContext.deploymentFlowNames`).
+   * Present and non-empty, a call that names none of them, nor a flow of
+   * this stack, is an `error`. Absent, the CLI's `warning` verdict applies.
+   */
+  readonly deploymentFlowNames?: ReadonlySet<string>;
+}
+
+export function validateFlowSubflowTargets(
+  stack: AnyRec,
+  options: FlowSubflowTargetOptions = {},
+): FlowTriggerReadinessFinding[] {
   const findings: FlowTriggerReadinessFinding[] = [];
   const flows = recordsOf(stack.flows);
   if (flows.length === 0) return findings;
-  const known = new Set<string>();
+  const deployment = options.deploymentFlowNames !== undefined && options.deploymentFlowNames.size > 0
+    ? options.deploymentFlowNames
+    : undefined;
+  const known = new Set<string>(deployment);
   for (const flow of flows) {
     const name = nonEmptyString(flow.name);
     if (name) known.add(name);
@@ -1954,6 +1985,23 @@ export function validateFlowSubflowTargets(stack: AnyRec): FlowTriggerReadinessF
       if (!called || known.has(called)) continue;
       const nodeId = nonEmptyString(node.id) ?? String(node.type);
       const nodeWhere = regionTrail ? `${regionTrail} › node "${nodeId}"` : `node "${nodeId}"`;
+      if (deployment) {
+        findings.push({
+          severity: 'error',
+          rule: FLOW_SUBFLOW_UNKNOWN,
+          where: `flow "${flowName}" › ${nodeWhere}`,
+          path: `${path}.config.flowName`,
+          message:
+            `${String(node.type)} node '${nodeId}' calls flow '${called}', but no flow of this deployment (an ` +
+            `installed package's, a stored flow or a draft) has that name, so the engine finds none and the ` +
+            `step fails on every run` +
+            suggestName(called, known),
+          hint:
+            `Set config.flowName to the exact name of a flow this deployment holds, or save the called flow ` +
+            `first (a draft is enough) and publish this one after it`,
+        });
+        continue;
+      }
       findings.push({
         severity: 'warning',
         rule: FLOW_SUBFLOW_UNKNOWN,

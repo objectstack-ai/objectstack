@@ -188,6 +188,7 @@ export {
 } from './validate-flow-trigger-readiness.js';
 export type {
   FlowTriggerReadinessFinding,
+  FlowSubflowTargetOptions,
   FlowTriggerReadinessSeverity,
 } from './validate-flow-trigger-readiness.js';
 
