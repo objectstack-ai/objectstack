@@ -16,6 +16,8 @@
 import { describe, it, expect } from 'vitest';
 import { filterCreateModeFields, filterSystemFields } from '../autoLayout';
 import { sanitizeFormData } from '../sanitize';
+import { fromObjectSchema, type SectionFieldsContext } from '../sectionFields';
+import { deriveColumns, hydrateColumns } from '../deriveMasterDetail';
 import type { FormField } from '@object-ui/types';
 
 const objectSchema = {
@@ -40,5 +42,49 @@ describe('dialog hand lock (#36806)', () => {
   it('a uiReadonly field never rides in the submitted payload', () => {
     const out = sanitizeFormData({ title: 'A', status: 'approved', note: 'n' }, objectSchema);
     expect(out).toEqual({ title: 'A', note: 'n' });
+  });
+});
+
+/**
+ * #37402 — the object level: the edit dialog's form fields and the line-item
+ * grid's columns carry the EFFECTIVE hand-lock predicate, so the form renderer
+ * and the line-item cell (which judge only what a field carries) fold the
+ * object's whole-record `uiReadonlyWhen` without reading the object.
+ */
+describe('the dialog and line-item fields carry the object-level hand lock (#37402)', () => {
+  const LOCK = "record.status in ['confirmed', 'done']";
+  const order = {
+    name: 'order',
+    uiReadonlyWhen: LOCK,
+    fields: {
+      status: { type: 'select' },
+      amount: { type: 'number' },
+      notes: { type: 'text', uiReadonlyWhen: 'false' },
+      parent: { type: 'master_detail', reference: 'head' },
+    },
+  };
+  const ctx = (objectSchema: unknown) => ({
+    objectSchema,
+    objectName: 'order',
+    mode: 'edit',
+    fieldLabel: (_o: string, _f: string, fallback: string) => fallback,
+  }) as unknown as SectionFieldsContext;
+
+  it('a field that declares no hand lock carries the object predicate; one that does keeps its own', () => {
+    expect((fromObjectSchema('amount', ctx(order)) as any)?.uiReadonlyWhen).toBe(LOCK);
+    expect((fromObjectSchema('status', ctx(order)) as any)?.uiReadonlyWhen).toBe(LOCK);
+    expect((fromObjectSchema('notes', ctx(order)) as any)?.uiReadonlyWhen).toBe('false');
+    // The control: the same field of an object without the lock carries none.
+    const { uiReadonlyWhen: _drop, ...plain } = order;
+    expect((fromObjectSchema('amount', ctx(plain)) as any)?.uiReadonlyWhen).toBeUndefined();
+  });
+
+  it('a line-item column carries the CHILD object\'s predicate, derived or authored', () => {
+    const derived = deriveColumns(order, { booleanLabel: (v: boolean) => String(v), relationshipField: 'parent' } as never);
+    const byName = (cols: any[], n: string) => cols.find((c) => c.name === n);
+    expect(byName(derived, 'amount')?.uiReadonlyWhen).toBe(LOCK);
+    expect(byName(derived, 'notes')?.uiReadonlyWhen).toBe('false');
+    const authored = hydrateColumns([{ name: 'amount', type: 'number' } as never], order, { booleanLabel: (v: boolean) => String(v) } as never);
+    expect((authored[0] as any).uiReadonlyWhen).toBe(LOCK);
   });
 });
