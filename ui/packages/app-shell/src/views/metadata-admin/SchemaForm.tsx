@@ -1369,7 +1369,7 @@ function SchemaFormBody({
           fieldSpec={(props[key] as any)?.widget ? { field: key, widget: (props[key] as any).widget } : undefined}
           formData={v as Record<string, unknown>}
           inactiveRetained={
-            rowGate(readVisibility(props[key] as any), predicateData, hostScope, predicateData[key]) === 'retained'
+            rowGate(readVisibility(props[key] as { visibleWhen?: VisibilityPredicate }), predicateData, hostScope, predicateData[key]) === 'retained'
           }
           onChange={(val) => setField(key, val)}
         />
@@ -3771,7 +3771,7 @@ function flatFormRowKeys(
 ): string[] {
   return orderKeys(Object.keys(props), fieldOrder)
     .filter((k) => !hiddenFields.includes(k))
-    .filter((k) => rowGate(readVisibility(props[k] as any), predicateData, hostScope, predicateData[k]) !== 'hidden');
+    .filter((k) => rowGate(readVisibility(props[k] as { visibleWhen?: VisibilityPredicate }), predicateData, hostScope, predicateData[k]) !== 'hidden');
 }
 
 /**
