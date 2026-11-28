@@ -737,3 +737,48 @@ describe('[#33952] a zh-CN read of a patched field label, echoed back, is stored
         expect(stored.fields.name.label).toBe('Account Name');
     });
 });
+
+/**
+ * [#35707] The object save reads the registered i18n service's whole catalog
+ * to tell a translated echo from typed text. A service whose `getLocales` or
+ * `getTranslations` throws leaves it unable to tell, so the save is refused
+ * 503 `SERVICE_UNAVAILABLE` and nothing is stored — never a body whose
+ * translated labels became the authored ones. The control saves the same body
+ * over a service that reads.
+ */
+describe('[#35707] an object save over translations that cannot be read is refused, and stores nothing', () => {
+    const body = () => ({
+        name: 'crm_note', label: 'Note', sharingModel: 'private',
+        fields: { title: { name: 'title', type: 'text', label: 'Title' } },
+    });
+    const i18nOf = (failing?: 'getLocales' | 'getTranslations') => ({
+        getLocales: () => {
+            if (failing === 'getLocales') throw new Error('bundle offline');
+            return ['en', 'zh-CN'];
+        },
+        getTranslations: (locale: string) => {
+            if (failing === 'getTranslations') throw new Error('bundle offline');
+            return locale === 'zh-CN' ? { objects: { crm_note: { label: '笔记' } } } : {};
+        },
+    });
+    const saveOver = async (i18n: unknown) => {
+        const host = makeHost(false);
+        const protocol: any = new ObjectStackProtocolImplementation(host.engine, () => new Map<string, any>([['i18n', i18n]]));
+        const outcome = await protocol.saveMetaItem({ type: 'object', name: 'crm_note', item: body(), mode: 'publish' } as any)
+            .then(() => null, (e: unknown) => e);
+        return { outcome, stored: Array.from(host.rows.values()).some((r) => r.name === 'crm_note') };
+    };
+
+    it('control: the translations reading, the save stores the body', async () => {
+        expect(await saveOver(i18nOf())).toEqual({ outcome: null, stored: true });
+    });
+
+    for (const failing of ['getLocales', 'getTranslations'] as const) {
+        it(`${failing} throwing: 503 SERVICE_UNAVAILABLE naming the reason, and no row`, async () => {
+            const { outcome, stored } = await saveOver(i18nOf(failing));
+            expect(outcome).toMatchObject({ code: 'SERVICE_UNAVAILABLE', status: 503 });
+            expect((outcome as Error).message).toContain('bundle offline');
+            expect(stored).toBe(false);
+        });
+    }
+});

@@ -198,9 +198,43 @@ describe('[#34872] stdio list_objects and describe_object serve labels and descr
         expect(described.json).toMatchObject({ label: 'Deal', description: OBJECT_TEXT });
         const listed = (await session.call('list_objects', {})).json;
         expect(listed.objects.find((o: any) => o.name === OBJ)).toMatchObject({ label: 'Deal', description: OBJECT_TEXT });
+        // [#35707] No service is no fault: nothing failed to read, so nothing is said.
+        expect(described.json).not.toHaveProperty('translationWarning');
+        expect(listed).not.toHaveProperty('translationWarning');
       } finally {
         await session.close();
       }
+    }
+  });
+
+  // [#35707] A service that resolves but whose reads throw is a translation
+  // fault: both tools answer the authored text and say why, as
+  // `translationWarning`; a healthy answer carries no such member.
+  it.each(['getLocales', 'getTranslations'] as const)('[#35707] %s throwing: describe_object and list_objects answer the authored text with translationWarning', async (failing) => {
+    const faulting = () => ({ ...i18nService('zh-CN'), [failing]: () => { throw new Error('bundle offline'); } });
+    const session = await connect({ i18n: faulting });
+    try {
+      const described = await session.call('describe_object', { objectName: OBJ });
+      expect(described.isError).toBe(false);
+      expect(described.json).toMatchObject({ name: OBJ, label: 'Deal', translationWarning: expect.stringContaining('bundle offline') });
+      const listed = (await session.call('list_objects', {})).json;
+      expect(listed.objects.find((o: any) => o.name === OBJ)).toMatchObject({ label: 'Deal' });
+      expect(listed).toMatchObject({ totalCount: 2, translationWarning: expect.stringContaining('bundle offline') });
+    } finally {
+      await session.close();
+    }
+  });
+
+  it('[#35707] CONTROL — the reads answering under a zh-CN default: translated, and no translationWarning on either tool', async () => {
+    const session = await connect({ i18n: () => i18nService('zh-CN') });
+    try {
+      const described = (await session.call('describe_object', { objectName: OBJ })).json;
+      expect(described.label).toBe('交易');
+      expect(described).not.toHaveProperty('translationWarning');
+      const listed = (await session.call('list_objects', {})).json;
+      expect(Object.keys(listed).sort()).toEqual(['objects', 'totalCount']);
+    } finally {
+      await session.close();
     }
   });
 });

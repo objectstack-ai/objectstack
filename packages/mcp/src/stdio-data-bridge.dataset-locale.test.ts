@@ -252,6 +252,16 @@ describe('[ADR-0149 D2] stdio dataset tools when the i18n service resolves but i
     const answer = await bridge.queryDataset!({ datasetName: 'opp_metrics', selection: { measures: ['total_amount'] } }, { maxRows: 10 });
     expect(answer.rowCount).toBe(1);
     expect(answer.provenance.dataset).toEqual({ name: 'opp_metrics', label: 'Opportunity Metrics' });
+    // [#35707] …and says why the labels are untranslated; `warning` stays the narrowing's alone.
+    expect(answer.translationWarning).toEqual(expect.stringContaining(message));
+    expect(answer).not.toHaveProperty('warning');
+  });
+
+  it('[#35707] control: query_dataset over reads that answer carries no translationWarning', async () => {
+    const bridge = await bridgeOverRealExecutor(() => i18nService('zh-CN'));
+    const answer = await bridge.queryDataset!({ datasetName: 'opp_metrics', selection: { measures: ['total_amount'] } }, { maxRows: 10 });
+    expect(answer.provenance.dataset).toEqual({ name: 'opp_metrics', label: '商机指标' });
+    expect(answer).not.toHaveProperty('translationWarning');
   });
 
   it.each(CASES)('$read throwing: the object tools serve the authored labels', async ({ read, message }) => {

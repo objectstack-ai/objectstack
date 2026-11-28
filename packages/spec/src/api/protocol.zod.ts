@@ -358,6 +358,18 @@ export const FlowRegistrationSchema = lazySchema(() => z.discriminatedUnion('sta
 ]));
 
 /**
+ * [#35707] The one description of the `translationWarning` slot a `/meta`
+ * answer carries, shared by the list and the by-name read so the two say it in
+ * the same words.
+ */
+const META_TRANSLATION_WARNING_DESCRIPTION =
+  'Present only when this answer\'s translations could not be read (the deployment\'s i18n service failed '
+  + 'while they were read): the labels and descriptions are then served as authored, untranslated, and this '
+  + 'is the server\'s sentence saying why. Absent on every answer whose translations were read, including one '
+  + 'that found no translation for the caller\'s locale, so its absence never means "translated". A '
+  + 'non-empty string, never an empty one. Beside the served documents, never inside one.';
+
+/**
  * Get Metadata Items Response
  *
  * `registrations` is the list's position for the automation engine's verdict
@@ -415,6 +427,7 @@ export const GetMetaItemsResponseSchema = lazySchema(() => z.object({
     + 'row of its own name and has no entry. Absent when no listed item is served from a stored row. '
     + 'Beside the items, never inside one: an item\'s body is served as stored.',
   ),
+  translationWarning: z.string().min(1).optional().describe(META_TRANSLATION_WARNING_DESCRIPTION),
 }));
 
 /**
@@ -795,6 +808,7 @@ export const GetMetaItemResponseSchema = lazySchema(() => z.object({
   type: z.string().describe('Metadata type name'),
   name: z.string().describe('Item name'),
   item: z.unknown().describe('Metadata item definition'),
+  translationWarning: z.string().min(1).optional().describe(META_TRANSLATION_WARNING_DESCRIPTION),
   sortability: ObjectSortabilitySchema.optional().describe(
     'Per-column sortability projection — present exactly when `type` '
     + 'is `object`, on every serving branch. Computed at serve time from the '

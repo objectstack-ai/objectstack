@@ -1239,6 +1239,17 @@ export class ProtocolDiscoveryAndBasesFacet {
      * (`locale -> data`), or `undefined` when no service or no locale is
      * registered — the bundle the `/meta` read exits translate with
      * (`translationBundleOf` in `@objectstack/rest`, built the same way).
+     *
+     * [#35707] Its one reader is the object SAVE (the echo restore above and
+     * {@link restoreInjectedColumnEchoes}), so a service whose `getLocales` or
+     * `getTranslations` throws refuses the save as a 503
+     * ({@link translationsUnreadableForSaveError}) instead of answering
+     * `undefined` the way the read doors do: without the bundle the save
+     * cannot tell a label a translated read served back from one the author
+     * typed, and storing the echo would make the translation the authored
+     * text — the "storing a body this door could not judge" the stored-row
+     * read refuses for the same reason. The refusal is handed to the caller,
+     * never logged here.
      */
     static registeredTranslationBundle(host: Pick<ProtocolHost, 'getServicesRegistry'>): TranslationBundle | undefined {
         const service: any = host.getServicesRegistry?.().get('i18n');
@@ -1246,9 +1257,13 @@ export class ProtocolDiscoveryAndBasesFacet {
             return undefined;
         }
         const bundle: Record<string, any> = {};
-        for (const locale of service.getLocales() as string[]) {
-            const data = service.getTranslations(locale);
-            if (data && typeof data === 'object') bundle[locale] = data;
+        try {
+            for (const locale of service.getLocales() as string[]) {
+                const data = service.getTranslations(locale);
+                if (data && typeof data === 'object') bundle[locale] = data;
+            }
+        } catch (error) {
+            throw translationsUnreadableForSaveError(error);
         }
         return Object.keys(bundle).length > 0 ? (bundle as TranslationBundle) : undefined;
     }
@@ -1297,4 +1312,24 @@ export class ProtocolDiscoveryAndBasesFacet {
         if (fromService.degraded) host.throwMetadataServiceUnavailable(fromService.errors);
         return undefined;
     }
+}
+
+/**
+ * [#35707] The refusal an object save answers when the registered i18n
+ * service cannot read its translations
+ * ({@link ProtocolDiscoveryAndBasesFacet.registeredTranslationBundle}): 503
+ * `SERVICE_UNAVAILABLE`, the code the metadata store's own unavailable read
+ * answers, with the service's reason kept as `cause`. Retrying once the
+ * translations read again saves the same body.
+ */
+function translationsUnreadableForSaveError(cause: unknown): Error {
+    const reason = cause instanceof Error ? cause.message : String(cause);
+    const err = new Error(
+        `The translations could not be read (${reason}), so this save cannot tell a translated label served back `
+        + 'from one written by hand; nothing was saved. Retry once the translations can be read.',
+    ) as Error & { code?: string; status?: number; cause?: unknown };
+    err.code = 'SERVICE_UNAVAILABLE';
+    err.status = 503;
+    err.cause = cause;
+    return err;
 }

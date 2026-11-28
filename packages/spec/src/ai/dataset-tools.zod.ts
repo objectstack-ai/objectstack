@@ -462,6 +462,13 @@ export const QueryDatasetOutputSchema = lazySchema(() => AnalyticsResultResponse
       + 'dataset\'s object; `warning` states the narrowing (ADR-0090 D10)',
     ),
     warning: z.string().optional().describe('The narrowing statement; present exactly when `delegationNarrowed` is'),
+    translationWarning: z.string().min(1).optional().describe(
+      'Present only when the translations this answer is labelled with could not be read (the deployment\'s '
+      + 'i18n service failed while they were read): the dataset, member and option labels are then served as '
+      + 'authored, untranslated, and this is the server\'s sentence saying why. Absent on every answer whose '
+      + 'translations were read, including one that found no translation for the caller\'s locale. Independent '
+      + 'of `warning`, which states a delegation narrowing only',
+    ),
   }));
 
 // ==========================================

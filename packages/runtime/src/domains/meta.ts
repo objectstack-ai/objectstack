@@ -745,8 +745,14 @@ async function answerMetaList(
         // which cache posture the page owes.
         resolveObjectMasker: () => resolveObjectMasker(deps, context, 'object'),
         requestLocale,
-        translateList: (metaType, items) => translateMetaList(
-            metaTranslationSources(deps, context, protocol, requestLocale), metaType, items,
+        // [#35707] The fault's sentence is handed back, so the chain serves it as `translationWarning`.
+        translateList: (metaType, items, reportTranslationFault) => translateMetaList(
+            {
+                ...metaTranslationSources(deps, context, protocol, requestLocale),
+                ...(reportTranslationFault ? { reportTranslationFault } : {}),
+            },
+            metaType,
+            items,
         ),
     };
     try {

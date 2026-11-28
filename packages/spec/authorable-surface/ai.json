@@ -443,6 +443,7 @@
     "ai/QueryDatasetOutput:sourceLine",
     "ai/QueryDatasetOutput:totalGroups",
     "ai/QueryDatasetOutput:totals",
+    "ai/QueryDatasetOutput:translationWarning",
     "ai/QueryDatasetOutput:truncated",
     "ai/QueryDatasetOutput:warning",
     "ai/RecordCitation:anchor",

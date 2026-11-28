@@ -177,10 +177,19 @@ export function getDatasetToolDefinitions(): readonly AIToolDefinition[] {
  * [#34993] A `warning` without `partial` is a whole read the host says
  * something about (a translation fault: every row, its text untranslated):
  * `list_datasets` says it, and `query_dataset` still answers.
+ * [#35707] `translationWarning` is that translation fault named as one: the
+ * rows are whole, their text untranslated. `list_datasets` says it as it says
+ * `warning`, and `query_dataset` serves it as its answer's
+ * `translationWarning`.
  */
 export type DatasetToolSource =
   | readonly unknown[]
-  | { readonly items: readonly unknown[]; readonly partial?: true; readonly warning?: string };
+  | {
+    readonly items: readonly unknown[];
+    readonly partial?: true;
+    readonly warning?: string;
+    readonly translationWarning?: string;
+  };
 
 /** The ADR-0090 D10 narrowing probe, in `McpDataBridge.diagnoseDelegation`'s shape. */
 export type DatasetToolDelegationProbe = (
@@ -315,6 +324,8 @@ interface LoadedDatasets {
   readonly holdings: ReadonlyArray<{ readonly packageId: string | null; readonly name: unknown; readonly dataset?: Dataset }>;
   readonly partial: boolean;
   readonly warning?: string;
+  /** [#35707] The host's translation-fault sentence ({@link DatasetToolSource}). */
+  readonly translationWarning?: string;
 }
 
 /**
@@ -419,6 +430,7 @@ export function createDatasetTools(deps: DatasetToolsDeps): DatasetTools {
     const items = Array.isArray(source) ? source : (source as { items?: readonly unknown[] }).items ?? [];
     const degraded = !Array.isArray(source) && (source as { partial?: unknown }).partial === true;
     const said = Array.isArray(source) ? undefined : (source as { warning?: unknown }).warning;
+    const untranslated = Array.isArray(source) ? undefined : (source as { translationWarning?: unknown }).translationWarning;
     const datasets: Dataset[] = [];
     const holdings: Array<LoadedDatasets['holdings'][number]> = [];
     for (const item of items) {
@@ -437,6 +449,7 @@ export function createDatasetTools(deps: DatasetToolsDeps): DatasetTools {
       holdings,
       partial: degraded,
       ...(degraded ? { warning: String(said ?? 'The dataset read was degraded.') } : typeof said === 'string' ? { warning: said } : {}),
+      ...(typeof untranslated === 'string' && untranslated.length > 0 ? { translationWarning: untranslated } : {}),
     };
   }
 
@@ -507,6 +520,7 @@ export function createDatasetTools(deps: DatasetToolsDeps): DatasetTools {
 
     const warnings: string[] = [];
     if (loaded.warning) warnings.push(loaded.warning);
+    if (loaded.translationWarning) warnings.push(loaded.translationWarning);
     if (unresolved) {
       warnings.push('Some datasets or members could not be checked against this caller\'s permissions and are left out.');
     }
@@ -638,6 +652,8 @@ export function createDatasetTools(deps: DatasetToolsDeps): DatasetTools {
       ...(narrowing?.narrowed && narrowing.statement
         ? { delegationNarrowed: true as const, warning: narrowing.statement }
         : {}),
+      // [#35707] The labels above were read through translations that failed: say so.
+      ...(loaded.translationWarning ? { translationWarning: loaded.translationWarning } : {}),
     } as QueryDatasetOutput;
   }
 

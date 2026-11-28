@@ -223,6 +223,22 @@ describe('[ADR-0149 D2] the HTTP dataset tools when the i18n service resolves bu
         const answer = await bridge.queryDataset!({ datasetName: 'sales_analysis', selection: { measures: ['revenue'] } }, { maxRows: 10 });
         expect(answer.rowCount).toBe(1);
         expect(answer.provenance.dataset).toEqual({ name: 'sales_analysis', label: 'Sales analysis' });
+        // [#35707] …and says why the labels are untranslated; `warning` stays the
+        // narrowing's alone (this harness's security double narrows every object).
+        expect(answer.translationWarning).toEqual(expect.stringContaining(message));
+        expect(answer).toMatchObject({ delegationNarrowed: true, warning: 'narrowed on crm_opportunity' });
+    });
+
+    it('[#35707] control: query_dataset over reads that answer carries no translationWarning', async () => {
+        const answering = {
+            getLocales: () => ['zh-CN', 'en'],
+            getTranslations: (locale: string) => (locale === 'zh-CN' ? ZH_CN : {}),
+            getDefaultLocale: () => 'zh-CN',
+        };
+        const bridge = await bridgeOverRealExecutor(answering);
+        const answer = await bridge.queryDataset!({ datasetName: 'sales_analysis', selection: { measures: ['revenue'] } }, { maxRows: 10 });
+        expect(answer.provenance.dataset).toEqual({ name: 'sales_analysis', label: '销售分析' });
+        expect(answer).not.toHaveProperty('translationWarning');
     });
 
     /**

@@ -4232,11 +4232,47 @@ export async function translateMetaEnvelope(
         && runtimeDocument && typeof runtimeDocument === 'object' && !Array.isArray(runtimeDocument)
         ? { sortability: resolveObjectSortability(runtimeDocument) }
         : {};
+    let translationWarning: string | undefined;
+    const item = await translateMetaDocument(
+        {
+            ...sources,
+            reportTranslationFault: (warning) => {
+                translationWarning = warning;
+                sources.reportTranslationFault?.(warning);
+            },
+        },
+        metaType,
+        document,
+    );
     return {
         ...envelope,
         ...sortability,
-        item: await translateMetaDocument(sources, metaType, document),
+        item,
+        ...withTranslationWarningOf(translationWarning),
     };
+}
+
+/**
+ * [#35707] The `translationWarning` member of a `/meta` answer
+ * (`GetMetaItemsResponseSchema`, `GetMetaItemResponseSchema`): the sentence
+ * {@link translationBundleOf} reported for this answer's translation, or
+ * nothing. Only a fault reports one, so a healthy answer is the body it was.
+ */
+function withTranslationWarningOf(warning: string | undefined): { translationWarning?: string } {
+    return typeof warning === 'string' && warning.length > 0 ? { translationWarning: warning } : {};
+}
+
+/**
+ * [#35707] A list answer with its `translationWarning` beside the items: on
+ * the `{ type, items }` envelope the spec declares. A bare array (a protocol
+ * that answers the list without its envelope) has no member to carry it and is
+ * answered as it came; the server log says the fault either way.
+ */
+function withListTranslationWarning(data: unknown, warning: string | undefined): unknown {
+    const member = withTranslationWarningOf(warning);
+    if (member.translationWarning === undefined) return data;
+    if (!data || typeof data !== 'object' || Array.isArray(data)) return data;
+    return { ...(data as Record<string, unknown>), ...member };
 }
 
 // ── The object mask's answer ──────────────────────────────────────────────────
@@ -4525,8 +4561,12 @@ export interface MetaListAnswerSources extends MetaItemReadGateSources {
      * The translation step: {@link translateMetaList} over this transport's
      * I/O, handed the folded `metaType`. A port rather than a call so each
      * transport keeps ONE entry into it (`RestServer.translateMetaItems`).
+     *
+     * [#35707] `reportTranslationFault` is handed on as the translation's
+     * {@link MetaListTranslationSources.reportTranslationFault}, so the chain
+     * serves the fault's sentence as the answer's `translationWarning`.
      */
-    translateList(metaType: string, items: unknown): Promise<unknown>;
+    translateList(metaType: string, items: unknown, reportTranslationFault?: (warning: string) => void): Promise<unknown>;
     /**
      * [#5224] The endpoint matcher this request's `api` face asks — the
      * `metadata` service occupying the slot, or `undefined`. It is PROBED here
@@ -4992,7 +5032,10 @@ export function createMetaListAnswer(
         visible = withChangedAtOfListedNames(raw, visible);
 
         // 9. The translation step ({@link translateMetaList}, through the transport's entry).
-        const data = await sources.translateList(metaType, visible);
+        //    [#35707] A translation fault is said on the answer, as `translationWarning`.
+        let translationWarning: string | undefined;
+        const translated = await sources.translateList(metaType, visible, (warning) => { translationWarning = warning; });
+        const data = withListTranslationWarning(translated, translationWarning);
         // 10. [#27627] The validator of what is served — over `data`, the
         //     list after every step above, never an earlier stage of it.
         return { ok: true, data, ...metaRepresentationCaching(data, cacheControl) };

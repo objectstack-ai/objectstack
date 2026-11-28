@@ -253,4 +253,53 @@ describe('[#34872] HTTP MCP list_objects and describe_object serve labels and de
         expect(noI18n).toMatchObject({ label: 'Deal', description: OBJECT_TEXT });
         expect(field(noI18n, 'subject')).toMatchObject({ label: 'Subject' });
     });
+
+    // [#35707] A translation fault: an i18n service that resolves but whose
+    // reads throw. The answers are the authored text, never a refusal, and the
+    // two the object tools render carry `translationWarning` naming the
+    // reason; a healthy answer carries no such member.
+    const throwingI18n = (failing: 'getLocales' | 'getTranslations') => ({
+        ...i18nService,
+        [failing]: () => { throw new Error('bundle offline'); },
+    });
+
+    it.each(['getLocales', 'getTranslations'] as const)('[#35707] %s throwing: describe_object and list_objects answer the authored text and say why', async (failing) => {
+        const bridge = await bridgeAs(PERSONAS.staff, 'zh-CN', { i18n: throwingI18n(failing) });
+        const described = await bridge.describeObject(OBJ);
+        expect(described).toMatchObject({ name: OBJ, label: 'Deal', description: OBJECT_TEXT });
+        expect(field(described, 'amount')).toMatchObject({ label: 'Amount', description: AMOUNT_TEXT });
+        expect(described.translationWarning).toEqual(expect.stringContaining('bundle offline'));
+        const listing = await bridge.listObjectsDiagnosed();
+        expect(listing.objects.find((o: any) => o.name === OBJ)).toMatchObject({ label: 'Deal', description: OBJECT_TEXT });
+        expect(listing.translationWarning).toEqual(expect.stringContaining('bundle offline'));
+    });
+
+    it('[#35707] CONTROL — the reads answering: the same answers are translated and carry no translationWarning', async () => {
+        const bridge = await bridgeAs(PERSONAS.staff, 'zh-CN');
+        const described = await bridge.describeObject(OBJ);
+        expect(described.label).toBe('交易');
+        expect(described).not.toHaveProperty('translationWarning');
+        const listing = await bridge.listObjectsDiagnosed();
+        expect(listing.objects.find((o: any) => o.name === OBJ)).toMatchObject({ label: '交易' });
+        expect(listing).not.toHaveProperty('translationWarning');
+    });
+
+    // [#35707] A host that hands the dispatcher its own request object, its
+    // query already parsed (`request.query`), not a Fetch `Request`: the
+    // locale is read from that query. The URL names another locale, so an
+    // answer read from the URL instead could not pass.
+    it('[#35707] a host request whose query is already parsed: `?locale=` is read from `request.query`', async () => {
+        const dispatcher = new HttpDispatcher(kernelOver(services), undefined, { enforceProjectMembership: false });
+        const hostRequest = { method: 'POST', url: '/api/v1/mcp?locale=fr-FR', headers: {}, query: { locale: 'zh-CN' } };
+        const bridge = dispatcher.buildMcpBridge({
+            request: hostRequest, response: {}, environmentId: undefined, executionContext: { ...PERSONAS.staff },
+        } as any);
+        const described = await bridge.describeObject(OBJ);
+        expect(described).toMatchObject({ name: OBJ, label: '交易', description: '一笔销售交易，从首次接触到签单。' });
+        // CONTROL — the same host request without a parsed query reads its URL: `fr-FR` has no entry.
+        const fromUrl = dispatcher.buildMcpBridge({
+            request: { ...hostRequest, query: undefined }, response: {}, environmentId: undefined, executionContext: { ...PERSONAS.staff },
+        } as any);
+        expect(await fromUrl.describeObject(OBJ)).toMatchObject({ label: 'Deal' });
+    });
 });

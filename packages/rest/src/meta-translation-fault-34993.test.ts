@@ -5,8 +5,10 @@
  * but whose `getLocales` / `getTranslations` throws. The shared translator
  * (`translationBundleOf`) answers it as no bundle, so the list and the by-name
  * read serve the authored text (200, not 500), and the server log says so at
- * `warn` — this door carries no warning on its answer. The control serves the
- * bundle label over the same harness, so the authored text is the fault's doing.
+ * `warn`. [#35707] Both answers say it too, as `translationWarning` beside the
+ * served documents; a healthy answer carries no such member. The control
+ * serves the bundle label over the same harness, so the authored text is the
+ * fault's doing.
  */
 
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
@@ -35,7 +37,8 @@ function restOver(i18n: unknown) {
     const protocol = {
         getDiscovery: vi.fn().mockResolvedValue({ version: 'v0', routes: { data: '', metadata: '', ui: '', auth: '/auth' } }),
         getMetaTypes: vi.fn().mockResolvedValue([]),
-        getMetaItems: vi.fn(async ({ type }: any) => (type === 'object' ? [ACCOUNT] : [])),
+        // The `{ type, items }` envelope the protocol answers, the member `translationWarning` rides beside.
+        getMetaItems: vi.fn(async ({ type }: any) => ({ type, items: type === 'object' ? [ACCOUNT] : [] })),
         getMetaItem: vi.fn(async ({ type, name }: any) => ({ type, name, item: ACCOUNT, lock: 'none', editable: true })),
         findData: vi.fn().mockResolvedValue([]),
     };
@@ -58,7 +61,7 @@ async function read(rest: RestServer, path: string, params: Record<string, strin
     const status = res.status.mock.calls.length ? res.status.mock.calls[res.status.mock.calls.length - 1][0] : 200;
     const body = res.json.mock.calls[res.json.mock.calls.length - 1]?.[0];
     const doc = path.endsWith(':name') ? body?.item : (Array.isArray(body) ? body : body?.items)?.[0];
-    return { status, label: doc?.label, field: doc?.fields?.industry?.label };
+    return { status, label: doc?.label, field: doc?.fields?.industry?.label, translationWarning: body?.translationWarning };
 }
 
 beforeAll(() => { vi.stubEnv('OS_REST_LOG', 'info'); });
@@ -67,7 +70,9 @@ afterAll(() => { vi.unstubAllEnvs(); });
 describe('[#34993] REST /meta serves the authored text on a translation fault', () => {
     it('control: the reads answering, the list serves the bundle label', async () => {
         expect(await read(restOver(i18nWhoseReadThrows(undefined)), '/api/v1/meta/:type', { type: 'object' }))
-            .toEqual({ status: 200, label: '客户', field: '行业' });
+            .toEqual({ status: 200, label: '客户', field: '行业', translationWarning: undefined });
+        expect(await read(restOver(i18nWhoseReadThrows(undefined)), '/api/v1/meta/:type/:name', { type: 'object', name: 'showcase_account' }))
+            .toEqual({ status: 200, label: '客户', field: '行业', translationWarning: undefined });
     });
 
     it.each(['getLocales', 'getTranslations'] as const)('%s throwing: list and by-name read answer 200 untranslated, and the log says why', async (failing) => {
@@ -75,9 +80,9 @@ describe('[#34993] REST /meta serves the authored text on a translation fault', 
         try {
             const rest = restOver(i18nWhoseReadThrows(failing));
             expect(await read(rest, '/api/v1/meta/:type', { type: 'object' }))
-                .toEqual({ status: 200, label: 'Account', field: 'Industry' });
+                .toEqual({ status: 200, label: 'Account', field: 'Industry', translationWarning: expect.stringContaining('bundle offline') });
             expect(await read(rest, '/api/v1/meta/:type/:name', { type: 'object', name: 'showcase_account' }))
-                .toEqual({ status: 200, label: 'Account', field: 'Industry' });
+                .toEqual({ status: 200, label: 'Account', field: 'Industry', translationWarning: expect.stringContaining('bundle offline') });
             expect(warn.mock.calls.map((c) => String(c[0]))).toEqual(
                 expect.arrayContaining([expect.stringContaining('bundle offline')]),
             );
