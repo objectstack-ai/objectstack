@@ -26,6 +26,8 @@
 '@object-ui/react': patch
 ---
 
+**Shipped in 19.0.0-next.2**, whose CHANGELOG missed this entry; listed here one prerelease late.
+
 feat(spec)!: an action's `locations` say what it acts on, not the part of the page it sits in
 
 **BREAKING** (19.0.0): `ACTION_LOCATIONS` is `list`, `record`, `record_page`, `record_row`, `record_related`, `record_section`. The four words that named a part of a page are retired: `list_toolbar`, `list_item`, `record_header` and `record_more`. `record` is new: the action acts on one record, so it is drawn on the record page's header and in each list row's menu. Which actions are buttons and in what order stays the object's `actionLayout`.

@@ -1,5 +1,126 @@
 # @object-ui/plugin-grid
 
+## 19.0.0-next.3
+
+### Patch Changes
+
+- 58b513a: **Shipped in 19.0.0-next.2**, whose CHANGELOG missed this entry; listed here one prerelease late.
+  
+  feat(spec)!: an action's `locations` say what it acts on, not the part of the page it sits in
+  
+  **BREAKING** (19.0.0): `ACTION_LOCATIONS` is `list`, `record`, `record_page`, `record_row`, `record_related`, `record_section`. The four words that named a part of a page are retired: `list_toolbar`, `list_item`, `record_header` and `record_more`. `record` is new: the action acts on one record, so it is drawn on the record page's header and in each list row's menu. Which actions are buttons and in what order stays the object's `actionLayout`.
+  
+  Clause-②: yes (narrowing)
+  Metadata-protocol: narrowed
+  Skills-docs: follow-up #37895
+  
+  <!-- adr-0087: registered action-locations-acted-on -->
+  
+  A replacement with a registered conversion, so `yes (narrowing)` as on main's precedents (`.changeset/pre/37086-define-metadata-form-rename.md`, `.changeset/pre/37304-knowledge-source-governed-type.md`). Narrowed: the four retired words are refused wherever a location is read. Widened in the same change: the four newly accepted values `list`, `record`, `record_page` and `record_row` at the same positions; the new `@object-ui/types` export `actionFoldedIntoMenu`; and eight new `@object-ui/i18n` Studio keys for the location labels (en, zh), which replace the eight keys of the retired words.
+  
+  FROM → TO (each action is drawn in exactly the places it was drawn before):
+  
+  - `locations: ['list_toolbar']` → `locations: ['list']`.
+  - `locations: ['list_item']` → `locations: ['record_row']`.
+  - `locations: ['record_header']` or `['record_more']` → `locations: ['record_page']`.
+  - `record_header` or `record_more` beside `list_item` → `locations: ['record']`.
+  - `locations: ['record_more']` without `record_header` (the action lived only in the record header's ⋯ menu) → `locations: ['record_page'], component: 'action:menu'`. The fold is the action's `component`, the key that already sends an action into an action bar's overflow menu.
+  - A component's single `location` (`record:quick_actions`, `action:group`, `action:bar`): `list_toolbar` → `list`, `list_item` → `record_row`, `record_header` → `record_page`.
+  
+  An old word is refused at authoring with the word to write instead. `os migrate meta --from 18 --write` rewrites sources (ADR-0087 conversion `action-locations-acted-on`, retired from the load path from day one, as every protocol-19 entry). Stored items (`applyConversionsToStoredItem`, `os migrate meta --stored`) and built artifacts replay the same conversion. It leaves a TODO, and changes nothing, where no lossless rewrite exists: a `record_more`-only action also on `list_toolbar` that does not already carry `component: 'action:menu'` (the list toolbar folds `action:menu` too); an action at `record_header` with an authored `component: 'action:menu'` (the record page header folded it into its ⋯ menu while a `record:quick_actions` bar at `record_header` drew it as a button, and `record_page` has one state for both); a component whose `location` is `record_more`; and an `action:group` at `record_header` with a `record_more`-only member. A site left as stored keeps its old word, which a protocol-19 runtime matches to no surface: that action or block is drawn nowhere until it is rewritten by hand. The protocol-19 upgrade guide carries the same step as the semantic entry `action-locations-page-parts-retired`.
+  
+  Also in this change:
+  
+  - `@object-ui/types`: `actionRendersAt` reads `record` as covering `record_page` and `record_row`. The new `actionFoldedIntoMenu(action)` answers whether an action is folded into the ⋯ (`component: 'action:menu'`). `arrangedHeaderActions` pins and unpins through `component` and no longer writes locations.
+  - `@object-ui/components`: the record `page:header` routes every folded action to its ⋯ menu, and every other `record_page` action takes the inline budget, as `record_header` actions did.
+  - `@object-ui/plugin-detail`: `record:quick_actions` defaults to `record_page` and leaves folded actions out at that location, as it left out `record_more`-only ones. The related list reads `record` as a row action.
+  - `@object-ui/core`, `@objectstack/runtime`: the record-scoped checks (`isRecordScopedAction`, `requiresRecord`) accept `record`.
+  - `@objectstack/lint`: the record-page header, related-list and action-layout rules read the new words.
+  - Studio: the action inspector, the `record:quick_actions` location dropdown and the action preview offer `record` and draw the fold as "record_page · ⋯".
+  - `@objectstack/platform-objects`, the examples and every other package: declarations and prose rewritten to the new words. The packages listed as `patch` change comments, test fixtures or authoring copy, except three that ship rewritten words: `@objectstack/plugin-approvals` and `@objectstack/service-datasource` (their declared actions' `locations`) and `@object-ui/layout` (a location literal it passes at runtime).
+  
+  Not moved: #37895 (the `skills/**` teaching of the new words; Blocked-by this change).
+- 9609c13: feat(spec)!: retire the `ask_ai` action type — the shell's 「问 AI」 entry is the one way into the assistant
+  
+  Clause-②: no (narrowing)
+  Metadata-protocol: narrowed
+  Skills-docs: follow-up #37857
+  
+  <!-- adr-0087: registered action-type-ask-ai-removed, ui-action-type-ask-ai-retired -->
+  
+  **BREAKING** enum value removal on `ActionType` (`@objectstack/spec/ui`), ADR-0160 D7 as its seventh amendment rules. `ask_ai` was published only on the 19 prerelease line (`19.0.0-next.0`) and in no stable release; it leaves before 19.0.0 with no compatibility shim. A button per page is a second entry to the assistant, and the shell's 「问 AI」 entry in the page header already opens on the record in view. The accepted cost: a list row has no ask-AI action of its own.
+  
+  | FROM | TO |
+  |:--|:--|
+  | `{ name: 'ask_about_case', type: 'ask_ai', locations: ['record_page'] }` | nothing: delete the action and every reference to it; the shell's 「问 AI」 entry opens on the record |
+  | `{ type: 'action:button', properties: { actionType: 'ask_ai' } }` | nothing: delete the row |
+  
+  The one-line fix: delete each `ask_ai` action and every name that points at it (a page header's `actions`, a list view's `rowActions` / `bulkActions`, a related list's `actions`, a quick-actions list, a record alert's `actionName`, an app navigation entry). `os migrate meta --from 18` lists the edits; `--write` deletes an `ask_ai` action that nothing in the stack names and every inline row and container member that spells it, and leaves a named one, with its references, for you to delete by hand.
+  
+  - **`@objectstack/spec`**: every slot that takes an action type refuses `ask_ai` with one prescription: a declared or inline action's `type`, an `action:button` / `action:icon` row's `actionType`, an `action:group` / `action:menu` member's `type`, and a dashboard header action's `actionType`. The D2 conversion `action-type-ask-ai-removed` (retired from the load path) deletes, over sources, only what nothing names and, at rest (stored rows, built artifacts), every `ask_ai` action, row and member. The D3 entry `ui-action-type-ask-ai-retired` names what is done by hand. `applyConversionsToStoredItem` now answers `undefined` when the chain leaves no item of a row, which a stored `action` row of this type is; `ConversionContext` gains `atRest`. `ActionSchema`'s ask_ai refinements and the dashboard's record-less refusal leave with the type.
+  - **`@objectstack/metadata-protocol`**, **`@objectstack/metadata`**, **`@objectstack/core`**, **`@objectstack/service-datasource`**: a stored row the seam yields no item of is registered and served as nothing. The database loader still finds it by name, so `DELETE /api/v1/meta/action/<name>` removes it, and `migrateStoredMetadata` lists it `skipped` with that instruction instead of re-saving it.
+  - **`@objectstack/runtime`**: the action-execution branches for `ask_ai` are gone.
+  - **`@object-ui/core`**: `ActionRunner.setAssistantFocusHandler`, `ActionRunner.drawsAction`, `ActionRunner.bulkRefusal`, `isAskAiAction` and the `AssistantFocus` / `AssistantFocusHandler` types are removed; `ActionEngine` no longer filters undrawn actions or refuses a bulk run of one.
+  - **`@object-ui/react`**: `<ActionProvider onAskAi>` and `useDrawsAction()` are removed.
+  - **`@object-ui/components`**, **`@object-ui/plugin-grid`**, **`@object-ui/plugin-detail`**: the renderers drop their drawn-action gates.
+  - **`@object-ui/app-shell`**: `setChatFocus` and its `follow` option are removed; the conversation's record pin is set from the composer chip only. `useAskAiHandler`, `AiSurfaceState.focusServed` and the catalog `focus` lookup behind them leave with the type. This also closes #37827, the record page that dropped the shell's ask-AI handler: there is no handler left to drop.
+  
+  Correction to two prerelease notes already published in `19.0.0-next.0` (`.changeset/pre/37142-ask-ai-action-type.md` and the `setChatFocus` line of `.changeset/pre/36999-conversation-focus.md`): the `ask_ai` action type and the `setChatFocus` setter they announce do not ship in 19.0.0. The in-composer record pin from #36999 stays.
+- 77edd2a: Clause-②: no
+  Metadata-protocol: none
+  
+  Phone list cards now put a line's total in the amount slot. The slot used to take only a column whose field type is literally `currency`, so on an order-line list the card showed the unit price (6,000.00) where the line total (10,800.00) belonged, and with no plain currency column there was no amount at all. A column now counts as money when its cell draws a number as currency: a `currency` field, a formula declaring `returnType: 'currency'`, or a summary declaring its currency (`currencyConfig`). The first such column the view shows is the amount, as before. A view that presents the field as another type, a masked column and a number-returning formula are still not promoted. Nothing changes on desktop.
+- 9957484: Clause-②: no
+  Metadata-protocol: none
+  
+  Phone list cards now follow the object's `highlightFields`. When an object declares them, a card's amount is the first of those fields that draws as money, and its subtitle is the next three, in that order, with empty values dropped and each number, currency or percent part under its field label (`Quantity 2 · Sales Price ¥6,000.00 · Discount % 10.00%`). The view's column order no longer decides the card, so an order line that declares `highlightFields: ['total_price', 'quantity', 'unit_price', 'discount']` shows its line total bottom right while its wide table keeps its columns. A highlighted field no column shows is drawn too: the grid's own fetch, the list page's fetch and the related list's fetch now ask for the object's `highlightFields` beside its name field, through the same field-level security gate.
+  
+  This changes the phone card of every object that declares `highlightFields` and shows its fields in a different order, or shows more than two of them: review an object's `highlightFields` order if its phone list now reads differently. An object without `highlightFields` keeps the column-order card. Nothing changes on desktop tables, apart from the fetch asking for the highlighted fields.
+- Updated dependencies [23cefa0]
+- Updated dependencies [6123f2b]
+- Updated dependencies [22e1089]
+- Updated dependencies [e606bab]
+- Updated dependencies [d578952]
+- Updated dependencies [c06dac7]
+- Updated dependencies [58b513a]
+- Updated dependencies [1f1cd21]
+- Updated dependencies [10321fa]
+- Updated dependencies [fe0473d]
+- Updated dependencies [3550665]
+- Updated dependencies [079edad]
+- Updated dependencies [33a0d4f]
+- Updated dependencies [ee2ffca]
+- Updated dependencies [3ffa92d]
+- Updated dependencies [9609c13]
+- Updated dependencies [da08375]
+- Updated dependencies [32dc5d8]
+- Updated dependencies [9957484]
+- Updated dependencies [86ce7a3]
+- Updated dependencies [d528ebc]
+- Updated dependencies [ccdfe62]
+- Updated dependencies [f9c6f92]
+- Updated dependencies [d59478f]
+- Updated dependencies [a7f7f3f]
+- Updated dependencies [7b90456]
+- Updated dependencies [03f39cc]
+- Updated dependencies [03f39cc]
+- Updated dependencies [898b056]
+- Updated dependencies [9603893]
+- Updated dependencies [216524a]
+- Updated dependencies [d994002]
+- Updated dependencies [ba2d960]
+- Updated dependencies [fd06b7a]
+  - @object-ui/i18n@19.0.0-next.3
+  - @objectstack/spec@19.0.0-next.3
+  - @object-ui/types@19.0.0-next.3
+  - @object-ui/core@19.0.0-next.3
+  - @object-ui/components@19.0.0-next.3
+  - @object-ui/plugin-detail@19.0.0-next.3
+  - @object-ui/fields@19.0.0-next.3
+  - @object-ui/react@19.0.0-next.3
+  - @object-ui/mobile@19.0.0-next.3
+  - @object-ui/permissions@19.0.0-next.3
+
 ## 19.0.0-next.2
 
 ### Patch Changes

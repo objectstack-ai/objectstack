@@ -1,5 +1,92 @@
 # @objectstack/knowledge-turso
 
+## 19.0.0-next.3
+
+### Patch Changes
+
+- bbd9733: fix(knowledge-turso)!: the Knowledge page's "Test connection" comes with the Turso fields it checks — a page without them has no such action
+  
+  Clause-②: yes (narrowing) — the public surface grows by four exports of `@objectstack/knowledge-turso` (listed below); narrowed: where `@objectstack/knowledge-turso` does not contribute its Turso group (the store is `@objectstack/knowledge-pgvector`, on PostgreSQL, or the store is mounted with a `url` or `client` of its own), the Knowledge page has no "Test connection" action and `POST /api/settings/knowledge/test` answers `400 SETTINGS_ACTION_FAILED` (no handler registered), as every undeclared action does, where it answered the Turso form check with `200`; where the store reads its URL from settings, the action is on the page, beside the two fields, and answers as before. `@objectstack/service-settings` no longer exports `knowledgeTestActionHandler`; `@objectstack/knowledge-turso` does
+  Metadata-protocol: none
+  Skills-docs: none — no skill under `skills/**` teaches the Knowledge page's test action or `knowledgeTestActionHandler`.
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No schema key, accepted value or metadata type is added, removed, renamed or re-shaped: a settings manifest and its action handlers are runtime registrations, not authorable metadata, and nothing `objectstack migrate meta` reads names the action. -->
+  
+  **BREAKING** for three readers:
+  
+  - A script or client that posts to `POST /api/settings/knowledge/test` on a deployment where the Turso fields are not on the page now gets `400 SETTINGS_ACTION_FAILED`. The check it answered there read fields nothing on that deployment reads, and opened no connection. Stop calling it there.
+  - Code that imports `knowledgeTestActionHandler` from `@objectstack/service-settings`: import it from `@objectstack/knowledge-turso` instead (`import { knowledgeTestActionHandler } from '@objectstack/knowledge-turso'`). Same check, same answers. `@objectstack/knowledge-turso` depends on the native libSQL client (`@libsql/client`); importing the handler loads nothing native, but installing the package installs that dependency.
+  - A host that registers its own `knowledge` settings page declaring `turso_url`, `turso_auth_token` and the `test` action: `KnowledgeTursoPlugin` leaves that page as written and registers no handler for it, so its `test` button now answers `400 SETTINGS_ACTION_FAILED`. Register the handler yourself after registering the page: `settings.registerAction('knowledge', 'test', knowledgeTestActionHandler)`, with `knowledgeTestActionHandler` imported from `@objectstack/knowledge-turso`.
+  
+  The `test` action left `@objectstack/service-settings`' `knowledge` manifest, and `@objectstack/service-knowledge` no longer registers its handler. `KnowledgeTursoPlugin` declares it as the last entry of the Turso group, after `turso_auth_token`, and registers `knowledgeTestActionHandler` with it, only where it contributes the group. The action's label moved with it, in all eleven locales: out of `@objectstack/service-settings`' bundles, into `knowledgeTursoSettingsTranslations`.
+  
+  New exports of `@objectstack/knowledge-turso`: `knowledgeTestActionHandler`, `KNOWLEDGE_TURSO_TEST_ACTION`, and the types `KnowledgeTursoActionInput` and `KnowledgeTursoActionResult`.
+  
+  `KnowledgeTursoPlugin` now warns once, at `init()`, when it reads its URL from settings but the Knowledge page cannot carry `turso_url` and `turso_auth_token` (no settings service, no `knowledge` page, or a host page that declares one of the group's ids without both keys): nothing can be saved there, and the store opens its default file, which the line names.
+  
+  The Turso group's description no longer says that a cloud deployment with a database per organization reuses that organization's database for a blank URL (no deployment does: a blank URL opens `knowledge.db` in the data directory), and no longer says the fields are not read on PostgreSQL (the group is never on the page there). It says instead that a blank URL uses `knowledge.db` in the data directory, in all eleven locales.
+- d753fd9: feat(service-knowledge): a caller who may read few of a source's records is answered from them, wherever they rank
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  A knowledge search re-checks every hit as the caller after ranking, and refills once at `topK × 20`. A caller who may read only a few of a source's rows (20 of 1,000, say) could find none of them within that cap and be answered nothing, though the store held their answer.
+  
+  - **`@objectstack/service-knowledge`.** Before the first round, for a caller who is not the system identity, the service reads the ids of each source's records that caller may read: as the caller, under the source's `where`, ids only, at most 501. When there are 500 or fewer, the source is handed them as a `record` scope term, so its adapter ranks only those rows. A caller's own `scope` is intersected with them, never widened: a one-record scope stays one record. A scope with a parent (metadata) term, more than 500 readable records, a read that fails (logged at `warn`), or no readable record in scope, and the source is searched as before. Every hit is still re-checked one by one, the organization filter is unchanged, and the system identity's search is unchanged. The conformance harness's engine double (`@objectstack/service-knowledge/testing`) answers that read as the caller too.
+  - **`@objectstack/knowledge-turso`.** Each new generation's passage table carries an index on `source_record_id`, so a narrowed search reads only those records' passages. A generation made before gets it from its next build; nothing to run.
+  - **`@objectstack/knowledge-pgvector`.** Each passage table carries an index on `(source_id, generation, source_record_id)`. A table made before gets it on the first write after the upgrade (`CREATE INDEX IF NOT EXISTS`, which holds writes to that table while it builds).
+  
+  Nothing to migrate.
+- e3bdc74: feat(knowledge-turso): an approximate vector index for a large source of one organization
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  Every search of a libSQL store read every vector in scope: at 1,536 dimensions about 1.2 GB at 200,000 passages. A complete build that completes on a generation of `vectorIndexThreshold` passages or more (default 20,000), all of one organization, now makes that generation's approximate index: each passage's vector quantized to one bit a dimension, in a side table a 32nd the size of the vectors. The vector leg then takes the `topK × vectorIndexOverfetch` passages nearest by that index (default 40 a hit), runs the same organization, record-scope and metadata `WHERE` over them, and ranks those in scope by their stored float32 vector; its ranks feed the reciprocal rank fusion with the keyword leg as the exact scan's did. A leg the filter leaves with fewer than 8 × `topK` candidates in scope, or short of `topK` hits, runs again as the exact scan, so a narrow record scope or filter keeps its recall and a search never answers fewer hits than before. Measured at 200,000 passages of 1,536 dimensions: a search whose keyword leg matches nothing took 81 ms at p95 instead of 1,054 ms, with a recall@10 against the exact scan of 0.998 over 100 queries.
+  
+  - **Never over two organizations.** The candidates are ranked before the filter, so a generation holding passages of more than one organization (passages of none count as one) gets no index, and each search reads the organization index and takes the exact scan once a second organization's passage is written.
+  - **Built at the end of a complete build, never on a search.** `os knowledge rebuild`, a fingerprint change, the boot build and the daily reconcile all end in one. The side table is made empty, then filled 2,048 passages to a transaction before the generation is switched to (200,000 passages: 3 s, 54 MB). A source that grows past the threshold between builds keeps the exact scan until its next complete build. After that, each write of a passage also writes its one-bit vector. A database that refuses the one-bit vectors or the index's DDL gets no index, the build completes on the exact scan, and the adapter's health check names the source and the reason. A process reads the catalog for a generation's index once (two reads) and remembers the answer; at `vectorIndexThreshold: Infinity` a search never reads the catalog for an index.
+  - **Names.** `knowledge_<source>_g<n>-vec` (the side table), `…-org` (the organization index) and three `…-vec-*` triggers, dropped with the generation by a switch and by `dropSource`. An object under one of those names that the store did not make is never dropped: the call is refused `SERVICE_UNAVAILABLE`, naming it.
+  - **Two new options**, on `KnowledgeTursoPlugin` and `TursoKnowledgeAdapter`: `vectorIndexThreshold` (`Infinity` never makes an index) and `vectorIndexOverfetch` (a whole number, 8 or more). Nothing to migrate: a store keeps the exact scan until its next complete build.
+- 69bb8ae: perf(knowledge-turso): a narrowly scoped vector search tries a wider approximate pass before the exact scan
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  The approximate vector leg runs the exact scan when its filter leaves fewer than 8 × `topK` candidates in scope. A search whose scope keeps a fifth of the passages or less hit that floor almost every time and paid the full exact scan. Such a leg now first reads 10 times the candidates once, with the same `WHERE` and the same floor. It keeps that answer only if it clears the floor, and otherwise runs the exact scan as before.
+  
+  - **Where it runs.** With no scope, or a scope that holds a parent (metadata) term. A scope of record terms alone keeps the old path: its exact scan reads only the rows in scope through the record index, and that costs less than the wider pass.
+  - **When it is skipped.** When the first pool, times 10, cannot reach the floor, for example a scope of one or two passages. Those go to the exact scan without the extra pass.
+  - **Measured** at 200,000 passages of 1,536 dimensions (clustered synthetic, `topK` 10, 50 queries per share), under a parent scope keeping 10%, 15% and 20% of the passages: p95 351, 328 and 337 ms, against 848, 907 and 908 ms for the exact scan. recall@10 is the same as the floor's alone.
+  
+  No option and no export changes, and there is nothing to migrate.
+- Updated dependencies [22e1089]
+- Updated dependencies [e606bab]
+- Updated dependencies [d578952]
+- Updated dependencies [c06dac7]
+- Updated dependencies [58b513a]
+- Updated dependencies [1f1cd21]
+- Updated dependencies [10321fa]
+- Updated dependencies [fe0473d]
+- Updated dependencies [3550665]
+- Updated dependencies [33a0d4f]
+- Updated dependencies [ee2ffca]
+- Updated dependencies [3ffa92d]
+- Updated dependencies [9609c13]
+- Updated dependencies [da08375]
+- Updated dependencies [86ce7a3]
+- Updated dependencies [f9c6f92]
+- Updated dependencies [d59478f]
+- Updated dependencies [a7f7f3f]
+- Updated dependencies [03f39cc]
+- Updated dependencies [898b056]
+- Updated dependencies [216524a]
+- Updated dependencies [d994002]
+- Updated dependencies [ba2d960]
+- Updated dependencies [fd06b7a]
+  - @objectstack/spec@19.0.0-next.3
+  - @objectstack/core@19.0.0-next.3
+
 ## 19.0.0-next.2
 
 ### Patch Changes

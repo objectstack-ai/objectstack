@@ -1,5 +1,208 @@
 # @objectstack/runtime
 
+## 19.0.0-next.3
+
+### Minor Changes
+
+- 58b513a: **Shipped in 19.0.0-next.2**, whose CHANGELOG missed this entry; listed here one prerelease late.
+  
+  feat(spec)!: an action's `locations` say what it acts on, not the part of the page it sits in
+  
+  **BREAKING** (19.0.0): `ACTION_LOCATIONS` is `list`, `record`, `record_page`, `record_row`, `record_related`, `record_section`. The four words that named a part of a page are retired: `list_toolbar`, `list_item`, `record_header` and `record_more`. `record` is new: the action acts on one record, so it is drawn on the record page's header and in each list row's menu. Which actions are buttons and in what order stays the object's `actionLayout`.
+  
+  Clause-②: yes (narrowing)
+  Metadata-protocol: narrowed
+  Skills-docs: follow-up #37895
+  
+  <!-- adr-0087: registered action-locations-acted-on -->
+  
+  A replacement with a registered conversion, so `yes (narrowing)` as on main's precedents (`.changeset/pre/37086-define-metadata-form-rename.md`, `.changeset/pre/37304-knowledge-source-governed-type.md`). Narrowed: the four retired words are refused wherever a location is read. Widened in the same change: the four newly accepted values `list`, `record`, `record_page` and `record_row` at the same positions; the new `@object-ui/types` export `actionFoldedIntoMenu`; and eight new `@object-ui/i18n` Studio keys for the location labels (en, zh), which replace the eight keys of the retired words.
+  
+  FROM → TO (each action is drawn in exactly the places it was drawn before):
+  
+  - `locations: ['list_toolbar']` → `locations: ['list']`.
+  - `locations: ['list_item']` → `locations: ['record_row']`.
+  - `locations: ['record_header']` or `['record_more']` → `locations: ['record_page']`.
+  - `record_header` or `record_more` beside `list_item` → `locations: ['record']`.
+  - `locations: ['record_more']` without `record_header` (the action lived only in the record header's ⋯ menu) → `locations: ['record_page'], component: 'action:menu'`. The fold is the action's `component`, the key that already sends an action into an action bar's overflow menu.
+  - A component's single `location` (`record:quick_actions`, `action:group`, `action:bar`): `list_toolbar` → `list`, `list_item` → `record_row`, `record_header` → `record_page`.
+  
+  An old word is refused at authoring with the word to write instead. `os migrate meta --from 18 --write` rewrites sources (ADR-0087 conversion `action-locations-acted-on`, retired from the load path from day one, as every protocol-19 entry). Stored items (`applyConversionsToStoredItem`, `os migrate meta --stored`) and built artifacts replay the same conversion. It leaves a TODO, and changes nothing, where no lossless rewrite exists: a `record_more`-only action also on `list_toolbar` that does not already carry `component: 'action:menu'` (the list toolbar folds `action:menu` too); an action at `record_header` with an authored `component: 'action:menu'` (the record page header folded it into its ⋯ menu while a `record:quick_actions` bar at `record_header` drew it as a button, and `record_page` has one state for both); a component whose `location` is `record_more`; and an `action:group` at `record_header` with a `record_more`-only member. A site left as stored keeps its old word, which a protocol-19 runtime matches to no surface: that action or block is drawn nowhere until it is rewritten by hand. The protocol-19 upgrade guide carries the same step as the semantic entry `action-locations-page-parts-retired`.
+  
+  Also in this change:
+  
+  - `@object-ui/types`: `actionRendersAt` reads `record` as covering `record_page` and `record_row`. The new `actionFoldedIntoMenu(action)` answers whether an action is folded into the ⋯ (`component: 'action:menu'`). `arrangedHeaderActions` pins and unpins through `component` and no longer writes locations.
+  - `@object-ui/components`: the record `page:header` routes every folded action to its ⋯ menu, and every other `record_page` action takes the inline budget, as `record_header` actions did.
+  - `@object-ui/plugin-detail`: `record:quick_actions` defaults to `record_page` and leaves folded actions out at that location, as it left out `record_more`-only ones. The related list reads `record` as a row action.
+  - `@object-ui/core`, `@objectstack/runtime`: the record-scoped checks (`isRecordScopedAction`, `requiresRecord`) accept `record`.
+  - `@objectstack/lint`: the record-page header, related-list and action-layout rules read the new words.
+  - Studio: the action inspector, the `record:quick_actions` location dropdown and the action preview offer `record` and draw the fold as "record_page · ⋯".
+  - `@objectstack/platform-objects`, the examples and every other package: declarations and prose rewritten to the new words. The packages listed as `patch` change comments, test fixtures or authoring copy, except three that ship rewritten words: `@objectstack/plugin-approvals` and `@objectstack/service-datasource` (their declared actions' `locations`) and `@object-ui/layout` (a location literal it passes at runtime).
+  
+  Not moved: #37895 (the `skills/**` teaching of the new words; Blocked-by this change).
+
+### Patch Changes
+
+- 98099ea: fix: an error answer whose body carries a `userMessage` sends `Vary: Accept-Language`
+  
+  Clause-②: yes (widening) — `@objectstack/types` gains the exports `LOCALIZED_ANSWER_VARY` and `answerVariesByLanguage`
+  Metadata-protocol: none
+  
+  A refusal's `userMessage` is written in the caller's language: the request's `Accept-Language` first, then the workspace default. The by-id read `GET /api/v1/data/:object/:id` answers a missing or unreadable record with `404 RECORD_NOT_FOUND` and such a sentence, and a `404` is cacheable by default. The answer did not say it depends on the request's language, so a cache could hand one caller's language to another.
+  
+  Every exit that renders a refusal body now adds `Accept-Language` to `Vary` when that body carries a `userMessage`, whatever the status:
+  
+  - **`@objectstack/rest`.** The `/data` read routes (`GET /data/:object` and `GET /data/:object/:id`).
+  - **`@objectstack/hono`.** `createHonoApp`'s two catch arms, for a declared throw.
+  - **`@objectstack/runtime`.** The dispatcher plugin's exit for a throw that leaves `dispatch()`.
+  
+  The token is appended, so a `Vary` another layer writes (`Origin`, `Accept-Encoding`) keeps its tokens. A refusal without a `userMessage` is unchanged. `@objectstack/types` exports the one predicate the three exits ask, `answerVariesByLanguage(body)`, which reads the flat body and the nested ADR-0112 body alike, and the header token `LOCALIZED_ANSWER_VARY`. Nothing to migrate.
+- 9609c13: feat(spec)!: retire the `ask_ai` action type — the shell's 「问 AI」 entry is the one way into the assistant
+  
+  Clause-②: no (narrowing)
+  Metadata-protocol: narrowed
+  Skills-docs: follow-up #37857
+  
+  <!-- adr-0087: registered action-type-ask-ai-removed, ui-action-type-ask-ai-retired -->
+  
+  **BREAKING** enum value removal on `ActionType` (`@objectstack/spec/ui`), ADR-0160 D7 as its seventh amendment rules. `ask_ai` was published only on the 19 prerelease line (`19.0.0-next.0`) and in no stable release; it leaves before 19.0.0 with no compatibility shim. A button per page is a second entry to the assistant, and the shell's 「问 AI」 entry in the page header already opens on the record in view. The accepted cost: a list row has no ask-AI action of its own.
+  
+  | FROM | TO |
+  |:--|:--|
+  | `{ name: 'ask_about_case', type: 'ask_ai', locations: ['record_page'] }` | nothing: delete the action and every reference to it; the shell's 「问 AI」 entry opens on the record |
+  | `{ type: 'action:button', properties: { actionType: 'ask_ai' } }` | nothing: delete the row |
+  
+  The one-line fix: delete each `ask_ai` action and every name that points at it (a page header's `actions`, a list view's `rowActions` / `bulkActions`, a related list's `actions`, a quick-actions list, a record alert's `actionName`, an app navigation entry). `os migrate meta --from 18` lists the edits; `--write` deletes an `ask_ai` action that nothing in the stack names and every inline row and container member that spells it, and leaves a named one, with its references, for you to delete by hand.
+  
+  - **`@objectstack/spec`**: every slot that takes an action type refuses `ask_ai` with one prescription: a declared or inline action's `type`, an `action:button` / `action:icon` row's `actionType`, an `action:group` / `action:menu` member's `type`, and a dashboard header action's `actionType`. The D2 conversion `action-type-ask-ai-removed` (retired from the load path) deletes, over sources, only what nothing names and, at rest (stored rows, built artifacts), every `ask_ai` action, row and member. The D3 entry `ui-action-type-ask-ai-retired` names what is done by hand. `applyConversionsToStoredItem` now answers `undefined` when the chain leaves no item of a row, which a stored `action` row of this type is; `ConversionContext` gains `atRest`. `ActionSchema`'s ask_ai refinements and the dashboard's record-less refusal leave with the type.
+  - **`@objectstack/metadata-protocol`**, **`@objectstack/metadata`**, **`@objectstack/core`**, **`@objectstack/service-datasource`**: a stored row the seam yields no item of is registered and served as nothing. The database loader still finds it by name, so `DELETE /api/v1/meta/action/<name>` removes it, and `migrateStoredMetadata` lists it `skipped` with that instruction instead of re-saving it.
+  - **`@objectstack/runtime`**: the action-execution branches for `ask_ai` are gone.
+  - **`@object-ui/core`**: `ActionRunner.setAssistantFocusHandler`, `ActionRunner.drawsAction`, `ActionRunner.bulkRefusal`, `isAskAiAction` and the `AssistantFocus` / `AssistantFocusHandler` types are removed; `ActionEngine` no longer filters undrawn actions or refuses a bulk run of one.
+  - **`@object-ui/react`**: `<ActionProvider onAskAi>` and `useDrawsAction()` are removed.
+  - **`@object-ui/components`**, **`@object-ui/plugin-grid`**, **`@object-ui/plugin-detail`**: the renderers drop their drawn-action gates.
+  - **`@object-ui/app-shell`**: `setChatFocus` and its `follow` option are removed; the conversation's record pin is set from the composer chip only. `useAskAiHandler`, `AiSurfaceState.focusServed` and the catalog `focus` lookup behind them leave with the type. This also closes #37827, the record page that dropped the shell's ask-AI handler: there is no handler left to drop.
+  
+  Correction to two prerelease notes already published in `19.0.0-next.0` (`.changeset/pre/37142-ask-ai-action-type.md` and the `setChatFocus` line of `.changeset/pre/36999-conversation-focus.md`): the `ask_ai` action type and the `setChatFocus` setter they announce do not ship in 19.0.0. The in-composer record pin from #36999 stays.
+- da08375: fix(runtime): the mounted-but-unimplemented `501` of `/ai`, `/automation`, `/notifications`, `/ui` and a custom flow endpoint answers in the request's language
+  
+  Clause-②: yes (widening) — `@objectstack/spec` `BUILTIN_OPERATION_MESSAGES` gains `capability_unavailable_install`, `capability_unavailable_unshipped`, `capability_unavailable_ui`, `capability_unavailable_ai` and `capability_unavailable_search` in every locale; `@objectstack/runtime` `HttpDispatcherResult.response` gains the optional, never-written `faultLogMessage`
+  Metadata-protocol: none
+  
+  When a dispatcher domain's route is mounted and nothing implements the capability behind it, it answers `501 NOT_IMPLEMENTED` with the remedy sentence discovery reports for the slot. That sentence was fixed English for every reader. It now follows the request's top `Accept-Language` tag, as the other domain `501`s already do, and carries `Vary: Accept-Language`, so a shared cache cannot hand one reader's language to the next. The same holds for a custom API endpoint whose flow target finds no automation service.
+  
+  - The English sentence, the status and `error.code` are unchanged byte for byte. A request with no `Accept-Language`, or with a language the catalog does not carry, reads exactly the English it read before.
+  - Discovery's `services.<slot>.message` stays English: it is read by SDKs, codegen and AI clients, and a host-level `/discovery` has no request to read a language from. A pin holds the `501`'s English equal to `serviceUnavailableMessage(slot)` for every slot, so the two still name the same remedy.
+  - The operator's fault log stays English: the one line a declared capability absence earns per route per process prints the English sentence whatever language the first request asked for.
+  - zh-CN now says 「定制包」 for the customization package in the three operation sentences that said 「定制软件包」, the term the console uses.
+  
+  Nothing to migrate.
+- 32dc5d8: Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  A declarative `operation: 'update'` action now tells the person about the validation warnings its write raised.
+  A `severity: 'warning'` rule lets the save through and answers `warnings`, and the edit form shows them; the
+  button that performs the same write answered only its success. The action's answer
+  (`POST /api/v1/actions/:object/:action`, and MCP `run_action`) now carries the write's `warnings`, in the data
+  door's own element shape, present only when the write raised one. The console's action runner raises the
+  success toast on its warning variant with the rule's words under the title, and keeps the Undo button; an action
+  whose success toast is turned off still shows the warning. `ToastHandler` options gain an optional `description`.
+- 93fa911: **Shipped in 19.0.0-next.2**, whose CHANGELOG missed this entry; listed here one prerelease late.
+  
+  fix(runtime): `os serve --artifact-fallback` mounts the knowledge service for a stack whose artifact ships a `knowledge_source`
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  `createStandaloneStack` (and `createDefaultHostConfig`, which returns its result) now surfaces every stack collection that a `PLATFORM_CAPABILITY_PROVIDERS` row names as its `mountedBy` — today `knowledgeSources` — read from the same resolved artifact as `objects` and `permissions`. `StandaloneStackResult` gains the optional `knowledgeSources`. The CLI's artifact-serve path wraps that result as its stack config, so `stackItemCapabilities` now finds the sources there: a stack served from its built artifact with no `objectstack.config.ts`, that ships a `knowledge_source` and does not list `requires: ['knowledge']`, is served the knowledge service and the deployment's store, as the same stack served from its config already was. Before this, such a source stayed inert on that path. A stack that already lists `requires: ['knowledge']` is served the same set as before. The list of collections is read from the table, so a later `mountedBy` row needs no edit to the runtime.
+- 898b056: fix(runtime): a knowledge source save refused for a scoped-factory miss says so, and the package duplicate words its remedy for its caller
+  
+  Clause-②: yes (widening) — `@objectstack/metadata-core` adds `knowledgeServiceNotInScope`, `KnowledgeServiceNotInScope`, `KnowledgeSourceSaveDoor` and the optional `door` input on `authoredKnowledgeSourceRefusal`; `@objectstack/runtime`'s exported `DomainHandlerDeps` adds the optional `classifyServiceOrLoud`, which makes `ClassifiedServiceLookup` reachable
+  Metadata-protocol: none
+  
+  - **`@objectstack/metadata-core`.** `authoredKnowledgeSourceRefusal` takes an optional `door` (`'save'`, the default, or `'duplicate'`). With `'duplicate'` each refusal it composes tells the caller to duplicate the package again, and does not say "Nothing was written". A door's knowledge lookup can now answer `knowledgeServiceNotInScope(scopeId)` when a `knowledge` registration serves no instance in the request's environment, a host's scoped factory for example. That save is refused `503 SERVICE_UNAVAILABLE` with its own sentence, which names the environment and does not say the deployment runs no knowledge service or point to the stack's `requires`. The `/meta` save's sentences are unchanged.
+  - **`@objectstack/runtime`.** The dispatcher's `/meta` save, the MCP `save_metadata_draft` tool and the package duplicate now tell a scoped-factory miss apart from a deployment with no knowledge service, through the new optional `DomainHandlerDeps.classifyServiceOrLoud`. A deps without that member answers both misses as before. The duplicate door's refusal now says once that nothing was copied, and tells the caller to duplicate the package again. The platform's own `KnowledgeServicePlugin` registers a plain instance, so its path is unchanged.
+  - **`@objectstack/spec`.** The upgrade-guide entry `knowledge-source-save-refused-without-knowledge-service` now names only a deployment whose stack neither declares `requires: ['knowledge']` nor ships a `knowledgeSources` entry. A stack that ships a source already mounts the service.
+- f72f335: **Shipped in 19.0.0-next.2**, whose CHANGELOG missed this entry; listed here one prerelease late.
+  
+  fix(runtime): a dispatcher door is served only by the request's own kernel
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  Every dispatcher door bridge — the auth door, the comment doors, the approval action page, the webhook redeliver door, the inbound automation hook (including the engine that judges a qualified hook's address), and the personal-view, attachment and print doors — reads the services it serves with off the request's own kernel, and only there. When the request's kernel holds no such member, the door answers its typed not-available `501 NOT_IMPLEMENTED`, the same answer an empty slot already gave. On a host with one kernel nothing changes: the request's kernel is that kernel.
+- 560b558: **Shipped in 19.0.0-next.2**, whose CHANGELOG missed this entry; listed here one prerelease late.
+  
+  fix(runtime)!: an action not bound to an object accepts no record
+  
+  Clause-②: no (narrowing)
+  Metadata-protocol: none
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No key of any schema is added, removed or re-shaped, and no stored row, registry key or authored value changes. What moves is which action calls are admitted; there is nothing for a migration to rewrite. -->
+  
+  **BREAKING** — which calls an object-less action admits. One rule, judged on the action's own declaration, at every door that runs an action: REST `POST /api/v1/actions/:object/:action` (with or without a package namespace or a record id in the path), the MCP `run_action` tool and a host's `dispatchAction`.
+  
+  - FROM: a call to an action declared on no object could carry a `recordId`, and, when called under an object's name, a `params._selectedIds`; either was handed to the action.
+  - TO: an action declared on no object accepts no record. A call to one that carries a `recordId` or a `params._selectedIds` is refused `400 VALIDATION_FAILED`, the key named in `error.details.fields[0].field`, before any record is read and before the action runs. It holds for every caller and every action type, whatever object the call is routed under, and with no object at all.
+  - An action declared on an object, in its `actions` or as a standalone action naming its `objectName`, is unchanged: its `recordId` is loaded and its selection is read in the caller's own scope first, as before.
+  - An object-less action called with neither key runs as before.
+  
+  The fix for a caller: leave the record key out of a call to an object-less action. To act on records, declare the action on their object and call it there.
+- Updated dependencies [22e1089]
+- Updated dependencies [e606bab]
+- Updated dependencies [d578952]
+- Updated dependencies [6ee2a63]
+- Updated dependencies [88ae2f9]
+- Updated dependencies [bd5407e]
+- Updated dependencies [c06dac7]
+- Updated dependencies [58b513a]
+- Updated dependencies [1f1cd21]
+- Updated dependencies [10321fa]
+- Updated dependencies [fe0473d]
+- Updated dependencies [3550665]
+- Updated dependencies [9548be2]
+- Updated dependencies [33a0d4f]
+- Updated dependencies [33a0d4f]
+- Updated dependencies [ee2ffca]
+- Updated dependencies [e2a0e90]
+- Updated dependencies [98099ea]
+- Updated dependencies [3ffa92d]
+- Updated dependencies [9609c13]
+- Updated dependencies [da08375]
+- Updated dependencies [86ce7a3]
+- Updated dependencies [f9c6f92]
+- Updated dependencies [d59478f]
+- Updated dependencies [a7f7f3f]
+- Updated dependencies [03f39cc]
+- Updated dependencies [898b056]
+- Updated dependencies [e81a44f]
+- Updated dependencies [7d6692e]
+- Updated dependencies [216524a]
+- Updated dependencies [d994002]
+- Updated dependencies [ba2d960]
+- Updated dependencies [2d8b7fa]
+- Updated dependencies [f8dcd3e]
+- Updated dependencies [fd06b7a]
+  - @objectstack/spec@19.0.0-next.3
+  - @objectstack/lint@19.0.0-next.3
+  - @objectstack/formula@19.0.0-next.3
+  - @objectstack/driver-sql@19.0.0-next.3
+  - @objectstack/metadata-protocol@19.0.0-next.3
+  - @objectstack/objectql@19.0.0-next.3
+  - @objectstack/service-datasource@19.0.0-next.3
+  - @objectstack/plugin-security@19.0.0-next.3
+  - @objectstack/rest@19.0.0-next.3
+  - @objectstack/types@19.0.0-next.3
+  - @objectstack/metadata@19.0.0-next.3
+  - @objectstack/core@19.0.0-next.3
+  - @objectstack/metadata-core@19.0.0-next.3
+  - @objectstack/plugin-auth@19.0.0-next.3
+  - @objectstack/driver-memory@19.0.0-next.3
+  - @objectstack/driver-sqlite-wasm@19.0.0-next.3
+  - @objectstack/driver-turso@19.0.0-next.3
+  - @objectstack/observability@19.0.0-next.3
+  - @objectstack/service-cluster@19.0.0-next.3
+  - @objectstack/service-i18n@19.0.0-next.3
+
 ## 19.0.0-next.2
 
 ### Patch Changes

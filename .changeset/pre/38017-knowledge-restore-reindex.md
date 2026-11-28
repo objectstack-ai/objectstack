@@ -2,6 +2,8 @@
 '@objectstack/service-knowledge': patch
 ---
 
+**Shipped in 19.0.0-next.2**, whose CHANGELOG missed this entry; listed here one prerelease late.
+
 fix(service-knowledge): a recycle-bin restore re-indexes its rows on a kernel with no realtime service
 
 Clause-②: no

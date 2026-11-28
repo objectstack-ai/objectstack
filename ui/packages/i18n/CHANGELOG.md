@@ -1,5 +1,127 @@
 # @object-ui/i18n
 
+## 19.0.0-next.3
+
+### Minor Changes
+
+- 58b513a: **Shipped in 19.0.0-next.2**, whose CHANGELOG missed this entry; listed here one prerelease late.
+  
+  feat(spec)!: an action's `locations` say what it acts on, not the part of the page it sits in
+  
+  **BREAKING** (19.0.0): `ACTION_LOCATIONS` is `list`, `record`, `record_page`, `record_row`, `record_related`, `record_section`. The four words that named a part of a page are retired: `list_toolbar`, `list_item`, `record_header` and `record_more`. `record` is new: the action acts on one record, so it is drawn on the record page's header and in each list row's menu. Which actions are buttons and in what order stays the object's `actionLayout`.
+  
+  Clause-②: yes (narrowing)
+  Metadata-protocol: narrowed
+  Skills-docs: follow-up #37895
+  
+  <!-- adr-0087: registered action-locations-acted-on -->
+  
+  A replacement with a registered conversion, so `yes (narrowing)` as on main's precedents (`.changeset/pre/37086-define-metadata-form-rename.md`, `.changeset/pre/37304-knowledge-source-governed-type.md`). Narrowed: the four retired words are refused wherever a location is read. Widened in the same change: the four newly accepted values `list`, `record`, `record_page` and `record_row` at the same positions; the new `@object-ui/types` export `actionFoldedIntoMenu`; and eight new `@object-ui/i18n` Studio keys for the location labels (en, zh), which replace the eight keys of the retired words.
+  
+  FROM → TO (each action is drawn in exactly the places it was drawn before):
+  
+  - `locations: ['list_toolbar']` → `locations: ['list']`.
+  - `locations: ['list_item']` → `locations: ['record_row']`.
+  - `locations: ['record_header']` or `['record_more']` → `locations: ['record_page']`.
+  - `record_header` or `record_more` beside `list_item` → `locations: ['record']`.
+  - `locations: ['record_more']` without `record_header` (the action lived only in the record header's ⋯ menu) → `locations: ['record_page'], component: 'action:menu'`. The fold is the action's `component`, the key that already sends an action into an action bar's overflow menu.
+  - A component's single `location` (`record:quick_actions`, `action:group`, `action:bar`): `list_toolbar` → `list`, `list_item` → `record_row`, `record_header` → `record_page`.
+  
+  An old word is refused at authoring with the word to write instead. `os migrate meta --from 18 --write` rewrites sources (ADR-0087 conversion `action-locations-acted-on`, retired from the load path from day one, as every protocol-19 entry). Stored items (`applyConversionsToStoredItem`, `os migrate meta --stored`) and built artifacts replay the same conversion. It leaves a TODO, and changes nothing, where no lossless rewrite exists: a `record_more`-only action also on `list_toolbar` that does not already carry `component: 'action:menu'` (the list toolbar folds `action:menu` too); an action at `record_header` with an authored `component: 'action:menu'` (the record page header folded it into its ⋯ menu while a `record:quick_actions` bar at `record_header` drew it as a button, and `record_page` has one state for both); a component whose `location` is `record_more`; and an `action:group` at `record_header` with a `record_more`-only member. A site left as stored keeps its old word, which a protocol-19 runtime matches to no surface: that action or block is drawn nowhere until it is rewritten by hand. The protocol-19 upgrade guide carries the same step as the semantic entry `action-locations-page-parts-retired`.
+  
+  Also in this change:
+  
+  - `@object-ui/types`: `actionRendersAt` reads `record` as covering `record_page` and `record_row`. The new `actionFoldedIntoMenu(action)` answers whether an action is folded into the ⋯ (`component: 'action:menu'`). `arrangedHeaderActions` pins and unpins through `component` and no longer writes locations.
+  - `@object-ui/components`: the record `page:header` routes every folded action to its ⋯ menu, and every other `record_page` action takes the inline budget, as `record_header` actions did.
+  - `@object-ui/plugin-detail`: `record:quick_actions` defaults to `record_page` and leaves folded actions out at that location, as it left out `record_more`-only ones. The related list reads `record` as a row action.
+  - `@object-ui/core`, `@objectstack/runtime`: the record-scoped checks (`isRecordScopedAction`, `requiresRecord`) accept `record`.
+  - `@objectstack/lint`: the record-page header, related-list and action-layout rules read the new words.
+  - Studio: the action inspector, the `record:quick_actions` location dropdown and the action preview offer `record` and draw the fold as "record_page · ⋯".
+  - `@objectstack/platform-objects`, the examples and every other package: declarations and prose rewritten to the new words. The packages listed as `patch` change comments, test fixtures or authoring copy, except three that ship rewritten words: `@objectstack/plugin-approvals` and `@objectstack/service-datasource` (their declared actions' `locations`) and `@object-ui/layout` (a location literal it passes at runtime).
+  
+  Not moved: #37895 (the `skills/**` teaching of the new words; Blocked-by this change).
+
+### Patch Changes
+
+- 23cefa0: fix(app-shell): the tool preview says beside "Open in API Console" that a call needing the server model runs in a chat
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  The tool preview's "Open in API Console" link presets the tool's direct run route. That run happens outside a chat turn, and on the hosted cloud it gets no server-side model, so a call that needs one is refused there with nothing on the preview saying why. The link now stays for every tool with a short note beside it (also the link's accessible description): it runs the tool directly, outside a chat, and on the hosted cloud a call that needs the server-side model is refused, so try it in a chat. The note names no tool: tool metadata carries no field saying which calls need the model, and for some tools that depends on the call's arguments. New studio string `engine.toolPreview.openApiConsoleNote` in `en` and `zh`; other languages fall back to `en`.
+- 6123f2b: fix(plugin-chatbot): a pending AI action that lapsed reads "Expired" in the AI Approvals inbox and in the chat's approval card, not "Rejected"
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  Widened: `@object-ui/plugin-chatbot`'s exported `ToolDecisionState` gains the member `expired` (read from `useHitlInChat().decisions`, passed in through `ChatbotEnhancedProps.toolDecisions`); `@object-ui/i18n` gains `aiApprovals.statusExpired` and `aiApprovals.expiredDetail` in every locale pack.
+  
+  A pending action nobody decided in time, or whose proposer lost access, is stored `status: 'rejected'`, `rejection_reason: 'lapsed'`, with no `decided_by`. The AI Approvals inbox badge, its phone card and its detail drawer now read such a row as "Expired", say why, and name no decider; a row a person rejected (a `decided_by` is recorded) still reads "Rejected". A decision on a lapsed item, answered `409` with `error.details.reason: 'pending_action_lapsed'`, now reads "Expired" in place of the conflict error: in the inbox the list is re-read, so the row turns "Expired"; in the chat the approval card (and the record-write card) settles on a new `ToolDecisionState` value, `expired`. Two new locale keys, `aiApprovals.statusExpired` and `aiApprovals.expiredDetail`, in all 11 packs.
+- d528ebc: fix(app-shell): the AI inquiry page keeps a conversation it could not check, reads it once, explains an app without a package, and reads previews only for the conversations it lists
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  - Opening the page with `?c=` asks the server whose conversation that is. A failed answer (a network error, a 5xx) used to read as "not this app's", so the page dropped `?c=` and opened its home state. Now only a definite answer does that (a 403 or 404, or another app's conversation). A failed check keeps `?c=` and shows "Couldn't open this conversation" with Try again and New conversation.
+  - When the conversation is this app's, the check's read now also fills the thread, so opening it reads the history once instead of twice. `useChatConversation` takes `activeRecord`: the host's read of `activeId`, used by the first resolve of that id.
+  - An app with no package (`_packageId`) has nowhere to keep the page's conversations. The page now says so instead of drawing a question box that could not start one.
+  - The empty conversation keys its suggestions by position, so an entry that declares the same question twice draws both with no React key warning.
+  - `useConversationList` takes `selectBackfillRows`: the rows the caller shows, the only ones whose missing previews are read from each conversation's detail route. The page's recent conversations pass the rows they list (at most five), so returning to the home state reads at most five details, not up to twenty.
+  - `@object-ui/i18n`: five `console.ai.askPage` keys for the two new states, in every locale.
+- 7b90456: feat(app-shell): the ChatDock AI usage ring shows a paid plan's personal allowance and team pool, and the notice once turns draw on the team pool
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  `GET /api/v1/ai/usage` may now carry an optional `tiers` on a paid plan: the caller's personal share, the team pool it overflows into, whether turns draw on the pool, and a notice in four languages. The usage hook reads it in exactly that shape; a `tiers` of any other shape is dropped on its own and the `{ pool, breakdown }` reading stands, so the ring still renders. When `tiers` is present, the popover shows one row per tier (its status, its used share as a percentage, its reset) in place of the pool's single figure, and the notice in the console language (Chinese scripts read `zh`; `ja` and `es` read their own; every other language reads `en`). A caller with no personal share sees the team pool alone. The ring, the popover's status and reset line and the call to action keep reading `pool`. Without `tiers` (Free, self-hosted, an older backend) nothing changes. Two new console strings, `console.ai.usage.tierPersonal` and `console.ai.usage.tierTeamPool`, ship in every locale pack.
+- 03f39cc: feat(plugin-chatbot): an ask answer that saved drafts shows a draft review card, with Studio review links
+  
+  Clause-②: yes (widening) — widened: `@object-ui/plugin-chatbot` exports `DraftReviewCard`, `DraftReviewCardProps` and `extractDraftReview`; `ChatbotEnhancedProps` gains the optional `onOpenReviewLink` and `reviewLinkHref`; `ChatbotEnhancedMessage` gains the optional `draftReview`.
+  Metadata-protocol: none
+  
+  When an assistant answer carries a `data-draft-review` part (`DraftReviewListSchema` in `@objectstack/spec/ai`), `ChatbotEnhanced` draws a card under it that lists the drafts the turn saved:
+  
+  - One row per draft: its label or name, its type, a verdict badge ("Will publish", "N problems", or "Verdict withheld" when no verdict was read) and a Review link to the draft's review in Studio. A verdict read by the save rather than at the turn's end says "checked when saved".
+  - The rows are grouped by package; each package has one "Review and publish" link to its Changes drawer in Studio. More drafts than the part lists show as "+N more".
+  - Nothing is published or discarded from the chat: the card has no such control, and a person publishes in Studio.
+  - A part the schema refuses draws no card; an answer without the part renders as before.
+  - The card is drawn on a live answer only. The part is not kept with the message, so a conversation reloaded from history shows no card.
+  
+  In the console (`@object-ui/app-shell`), `ChatPane` opens the links inside the app, so the conversation stays as it was, and gives them an href with the console's base path for a new tab. `@object-ui/i18n` carries the card's strings (`chatbot.draftReview.*`) in every locale pack.
+- 9603893: fix(app-shell): a metadata form row hidden by `visibleWhen` stays drawn while its key holds a value
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  In the Studio metadata forms, a row whose `visibleWhen` turned false disappeared even when the draft still held a value for it. In the hook editor, an author who declared a refusal on a JavaScript body and then switched the body to an expression lost sight of the refusal, and the save was refused at a key the form no longer showed. Such a row now stays drawn. It says that its value does not apply to the current settings and may make the save fail, and it offers a "Clear value" button. Once cleared, the row hides as before. Nothing the author entered is dropped without that click, which is the rule the flow node inspector already follows. A row whose predicate is false and that holds no value is hidden exactly as before. What a metadata author can write does not change.
+- Updated dependencies [22e1089]
+- Updated dependencies [e606bab]
+- Updated dependencies [d578952]
+- Updated dependencies [c06dac7]
+- Updated dependencies [58b513a]
+- Updated dependencies [1f1cd21]
+- Updated dependencies [10321fa]
+- Updated dependencies [fe0473d]
+- Updated dependencies [3550665]
+- Updated dependencies [33a0d4f]
+- Updated dependencies [ee2ffca]
+- Updated dependencies [3ffa92d]
+- Updated dependencies [9609c13]
+- Updated dependencies [da08375]
+- Updated dependencies [32dc5d8]
+- Updated dependencies [86ce7a3]
+- Updated dependencies [f9c6f92]
+- Updated dependencies [d59478f]
+- Updated dependencies [a7f7f3f]
+- Updated dependencies [03f39cc]
+- Updated dependencies [898b056]
+- Updated dependencies [216524a]
+- Updated dependencies [d994002]
+- Updated dependencies [ba2d960]
+- Updated dependencies [fd06b7a]
+  - @objectstack/spec@19.0.0-next.3
+  - @object-ui/core@19.0.0-next.3
+
 ## 19.0.0-next.2
 
 ### Minor Changes

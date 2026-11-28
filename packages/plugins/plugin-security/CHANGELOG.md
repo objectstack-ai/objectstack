@@ -1,5 +1,51 @@
 # @objectstack/plugin-security
 
+## 19.0.0-next.3
+
+### Patch Changes
+
+- 33a0d4f: feat(plugin-security): the security service answers the app-authored row-write scope as a filter, so a predicate write reaches the rows an authored update or delete policy admits
+  
+  Clause-②: yes
+  Metadata-protocol: none
+  
+  The `security` service gains `getAuthoredRowWriteFilter(object, operation, context)`, the filter-shaped twin of `checkAuthoredRowWrite`. It answers the rows the caller's app-authored `using` policies admit for `update` or `delete`, with the platform ownership floor (`owner_only_writes` / `owner_only_deletes`) taken out and the tenant wall kept. A row matches the filter exactly when `checkAuthoredRowWrite` answers `admit` for it: both are read off one resolution of the authored scope.
+  
+  It answers `undefined`, which widens nothing, when the caller holds no authored `using` policy for that verb, when a check-only policy is all they hold, for a principal-less or on-behalf-of context, and on any failure. It is evidence, not authorization: object permissions, the tenant wall, the caller's readable rows and row-level security (floor OR authored policies) still decide the write. Nothing to migrate.
+- Updated dependencies [22e1089]
+- Updated dependencies [e606bab]
+- Updated dependencies [d578952]
+- Updated dependencies [6ee2a63]
+- Updated dependencies [c06dac7]
+- Updated dependencies [58b513a]
+- Updated dependencies [1f1cd21]
+- Updated dependencies [10321fa]
+- Updated dependencies [fe0473d]
+- Updated dependencies [3550665]
+- Updated dependencies [33a0d4f]
+- Updated dependencies [ee2ffca]
+- Updated dependencies [98099ea]
+- Updated dependencies [3ffa92d]
+- Updated dependencies [9609c13]
+- Updated dependencies [da08375]
+- Updated dependencies [86ce7a3]
+- Updated dependencies [f9c6f92]
+- Updated dependencies [d59478f]
+- Updated dependencies [a7f7f3f]
+- Updated dependencies [03f39cc]
+- Updated dependencies [898b056]
+- Updated dependencies [7d6692e]
+- Updated dependencies [216524a]
+- Updated dependencies [d994002]
+- Updated dependencies [ba2d960]
+- Updated dependencies [fd06b7a]
+  - @objectstack/spec@19.0.0-next.3
+  - @objectstack/formula@19.0.0-next.3
+  - @objectstack/platform-objects@19.0.0-next.3
+  - @objectstack/types@19.0.0-next.3
+  - @objectstack/core@19.0.0-next.3
+  - @objectstack/metadata-core@19.0.0-next.3
+
 ## 19.0.0-next.2
 
 ### Patch Changes

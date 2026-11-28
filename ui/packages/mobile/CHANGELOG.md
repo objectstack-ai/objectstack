@@ -1,5 +1,14 @@
 # @object-ui/mobile
 
+## 19.0.0-next.3
+
+### Patch Changes
+
+- Updated dependencies [58b513a]
+- Updated dependencies [fe0473d]
+- Updated dependencies [079edad]
+  - @object-ui/types@19.0.0-next.3
+
 ## 19.0.0-next.2
 
 ### Patch Changes

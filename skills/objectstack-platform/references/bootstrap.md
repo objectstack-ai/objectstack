@@ -142,13 +142,13 @@ or `module` package id are refused (`STACK_SINGLE_APP_VIOLATION`, 422).
     "validate": "objectstack validate"
   },
   "dependencies": {
-    "@objectstack/spec": "19.0.0-next.2",
-    "@objectstack/runtime": "19.0.0-next.2",
-    "@objectstack/driver-memory": "19.0.0-next.2",
-    "@objectstack/plugin-hono-server": "19.0.0-next.2"
+    "@objectstack/spec": "19.0.0-next.3",
+    "@objectstack/runtime": "19.0.0-next.3",
+    "@objectstack/driver-memory": "19.0.0-next.3",
+    "@objectstack/plugin-hono-server": "19.0.0-next.3"
   },
   "devDependencies": {
-    "@objectstack/cli": "19.0.0-next.2",
+    "@objectstack/cli": "19.0.0-next.3",
     "typescript": "^5.3.0"
   }
 }

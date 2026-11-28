@@ -1,5 +1,63 @@
 # @objectstack/formula
 
+## 19.0.0-next.3
+
+### Minor Changes
+
+- 7d6692e: fix(formula): a date field compared with `addDays(today(), N)`, `addMonths(…)`, `date(…)`, `timestamp(…)` or the working-day functions evaluates the way the `today()` comparison does
+  
+  Clause-②: no
+  Metadata-protocol: semantic
+  
+  A `date` field reaches a flow condition, a validation rule or a formula as its `YYYY-MM-DD` text. The runtime already converts that text when it meets `today()`, `now()`, `daysFromNow()` or `daysAgo()`. It missed every other call that returns a timestamp, though every save door (`os validate`, publish, flow registration) accepted the condition:
+  
+  - An ordering such as `record.due_date < addDays(today(), 30)` failed on every run with `no such overload: dyn<string> < google.protobuf.Timestamp`. A flow with it as its start condition never ran its steps.
+  - An equality such as `record.due_date == addDays(today(), 1)` answered `false` on the very day it names (and `!=` answered `true`), with no error, so the flow was skipped as "condition not met". `== date("2026-06-21")` and `== timestamp("2026-06-21T00:00:00Z")` did the same.
+  
+  Both now answer what the `daysFromNow(N)` spelling of the same comparison answers. The set of functions converted is read from the functions the engine declares as returning a timestamp, so a function added later is covered too.
+  
+  **What changes for a deployed app.** Nothing to rewrite. A flow, validation rule or formula that already uses one of these comparisons starts behaving as written: a flow whose start or decision condition failed or was skipped on every run now fires on the records the condition names. Review such flows before upgrading if they send email, create records or call out, since they will start doing so. An author who worked around the defect with `date(record.due_date) < addDays(today(), 30)` keeps the same answer.
+
+### Patch Changes
+
+- 6ee2a63: fix(formula): `inferFormulaReturn` answers `number` for a proven plain number whose CEL type is `dyn`, so Studio withdraws a stale `currency` on a field-over-field quantity edit
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  A field read is `dyn` to cel-js, so an operator over two field reads types `dyn`. `inferFormulaReturn` answered such an expression `{}` (unproven) even when its unit proof had read every operand as a declared number. Studio's formula inspector withdraws a declared `currency` only on a `number` answer, so an author who edited `record.amount * 0.1` into `record.quantity * record.hours` kept `returnType: 'currency'` and its `currencyConfig`, and the value was still drawn as money.
+  
+  FROM `inferFormulaReturn('record.quantity * record.hours', fields)` → `{}` TO → `{ returnType: 'number' }`, over a field map that declares both as plain numeric fields. The same holds for every expression the unit proof proves a plain number whose CEL type is `dyn`: `record.quantity / record.hours`, `record.quantity + record.hours`, `quantity * hours`, a ternary or `max` over two quantities, and a ratio of two amounts in one currency (`record.amount / record.tax`). Money over two field reads (`record.amount * record.quantity`) still answers `currency`. What the proof cannot follow still answers `{}`: a ratio across two currencies, anything divided by an amount, an amount times an amount, an operand whose unit cannot be read.
+  
+  A quantity read through a relationship (`record.account.employee_count * 2`) still answers `{}`: the related object's fields are not an input to `inferFormulaReturn`, so the leaf's unit cannot be read, and a declared `currency` is kept on that edit. The function's header now records this as an accepted limit.
+  
+  Nothing to migrate. A caller that read `{}` for these shapes as "keep the declaration" now gets `number`, which means proved not money.
+- Updated dependencies [22e1089]
+- Updated dependencies [e606bab]
+- Updated dependencies [d578952]
+- Updated dependencies [c06dac7]
+- Updated dependencies [58b513a]
+- Updated dependencies [1f1cd21]
+- Updated dependencies [10321fa]
+- Updated dependencies [fe0473d]
+- Updated dependencies [3550665]
+- Updated dependencies [33a0d4f]
+- Updated dependencies [ee2ffca]
+- Updated dependencies [3ffa92d]
+- Updated dependencies [9609c13]
+- Updated dependencies [da08375]
+- Updated dependencies [86ce7a3]
+- Updated dependencies [f9c6f92]
+- Updated dependencies [d59478f]
+- Updated dependencies [a7f7f3f]
+- Updated dependencies [03f39cc]
+- Updated dependencies [898b056]
+- Updated dependencies [216524a]
+- Updated dependencies [d994002]
+- Updated dependencies [ba2d960]
+- Updated dependencies [fd06b7a]
+  - @objectstack/spec@19.0.0-next.3
+
 ## 19.0.0-next.2
 
 ### Patch Changes

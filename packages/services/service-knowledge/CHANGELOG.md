@@ -1,5 +1,134 @@
 # @objectstack/service-knowledge
 
+## 19.0.0-next.3
+
+### Minor Changes
+
+- f9c6f92: feat(knowledge)!: refuse a knowledge_source save that names an adapter the running deployment does not mount
+  
+  Clause-②: no (narrowing)
+  Metadata-protocol: narrowed
+  Skills-docs: none — no page under `skills/**` teaches a knowledge source's `adapter`; `content/docs/ai/knowledge-rag.mdx` and `content/docs/protocol/knowledge.mdx` name the save refusal
+  
+  <!-- adr-0087: registered knowledge-source-unmounted-adapter-refused-at-save -->
+  
+  **BREAKING** for an author or agent that saves a `knowledge_source` whose `adapter` names a store the running deployment does not mount (a retired store such as `ragflow`, or a typo): `PUT /api/v1/meta/knowledge_source/:name`, Studio, the MCP `save_metadata_draft` tool and a package duplicate now answer `400 VALIDATION_ERROR` where the save answered success, and nothing is written. The message names the source, the adapter and the mounted adapters. Fix: name one of the mounted adapters as the source's `adapter`, leave `adapter` out so the deployment's store holds it, or mount the named store and save again.
+  
+  Before, the save was stored, the boot named the source at `error`, and every index and search of it answered `503 SERVICE_UNAVAILABLE`. A source already stored is not touched: it keeps answering `503` until it is saved with a mounted adapter.
+  
+  Not moved: a source that leaves `adapter` out (it is placed on the deployment's store; several adapters and none the deployment's is still refused as before); a source naming a mounted adapter; the engine's own write, so a package install or a seed; a source registered in code (`KnowledgeServicePlugin({ sources })`, `registerSource`), which registers before its store starts; and `objectstack validate`, which runs with no deployment. For those three the boot's `error` line and the `503` at index and search stay the signal. Migration entry `knowledge-source-unmounted-adapter-refused-at-save` (`@objectstack/spec`) carries it for the upgrade guide.
+
+### Patch Changes
+
+- 9351562: **Shipped in 19.0.0-next.2**, whose CHANGELOG missed this entry; listed here one prerelease late.
+  
+  fix(service-knowledge): the knowledge field gate stops asking about a field named `title`; a source whose index could still hold an earlier-rule title is searched only once its index is proven built under the current recipe
+  
+  Clause-②: yes (narrowing) — narrowed: for a caller other than the system context, a source over an object that declares a field named `title` the index may carry and the source does not serve (the display field is another field, none resolves, or the object's fields cannot be enumerated; the source lists `title` in neither `content` nor `metadataFields`) is now searched only when its adapter's `indexStatus` reports the fingerprint and the recipe hash the service computes now, and the builds that record that hash purge; otherwise the search names it in `refused` as `KNOWLEDGE_REBUILD_REQUIRED` (409), and refuses whole when it was the only source, where it was searched for any caller who may query `title`. That holds until a complete build of the source has completed: on a built-in adapter the boot pass, a source reload or the reconcile runs one, and under `buildAtBoot: false` (no boot or reload build) only the reconcile, where it runs, or `os knowledge rebuild` does. It holds for good, since no build can prove the index, for a source with `refresh.onRecordChange: false` (its builds purge nothing) and on an adapter with no `indexStatus`, no `completeBuild` or no `listDocuments`. Each hit of a proven source is then served only when the record still belongs to the source and the stored `docHash` is the one the current recipe assembles from the record as it reads now (one system read per source per search round); a hit that fails that check, or that the check cannot be made for (the read fails, no record id, no stored hash, a hash that cannot be computed, an unreadable tenancy posture), is dropped, where it was served before. Widened: saving a `knowledge_source` over such an object no longer requires the author to query `title`, which the source never indexes.
+  Metadata-protocol: none
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No schema key, accepted value or metadata type is added, removed or renamed, and nothing stored is rewritten: the moved answer is whether a search serves a source whose index is not proven built under the current recipe. The adapter author's fix below is new code on optional IKnowledgeAdapter members, not a rewrite of anything authored or stored, and the operator's fix is a rebuild. -->
+  
+  **BREAKING** for deployments whose knowledge sources sit over an object that declares a field named `title` the source does not serve:
+  
+  - **Such a source is refused `KNOWLEDGE_REBUILD_REQUIRED` until a complete build under the current recipe completes.** On a built-in adapter (memory, pgvector, Turso) the boot pass, a source reload or the reconcile builds a source whose index records no recipe hash or another one, and the refusal ends when that build completes. Under `buildAtBoot: false`, which also turns off the build on reload, only the reconcile (where a job service runs it) builds it. Fix: run `os knowledge rebuild <source>`; it also ends the refusal sooner in every other case.
+  - **A proven source serves a hit only when its stored document matches the record as it reads now.** A document written before an edit the event sync has not caught up with, or left in place by a build's purge, is dropped from the answer until it is rewritten; for a stale or missing record's own document the search starts that repair in the background, once per document until a later search finds it current, and a document under a foreign id is dropped, not repaired. Fix: none needed for a synced source; `os knowledge rebuild <source>` rewrites every document now.
+  - **An adapter whose search hits carry no `docHash` serves no hit from such a source**, since a hit with no stored hash cannot be checked against its record and is dropped. The built-in adapters (memory, pgvector, Turso) return the stored `docHash` on every hit. Fix: return each hit's stored `docHash` from the adapter's `search` (ADR-0161 K8, item 3).
+  - **A source with `refresh.onRecordChange: false` stays refused** to every caller but the system context: an external indexer owns its index, its builds purge nothing, so no recorded recipe hash proves it. Fix: let the service sync the source (drop `refresh.onRecordChange: false`) and rebuild it, or search it as the system context.
+  - **On an adapter with no `indexStatus`, no `completeBuild` or no `listDocuments`, such a source stays refused**, since no build can prove what its index holds. Fix: implement all three on the adapter (`@objectstack/spec/contracts`, `IKnowledgeAdapter`), then rebuild the source.
+  
+  The field gate (ADR-0090 D10 rule 1) kept asking whether the caller may query a declared `title` field alongside the object's display field, because a document indexed before the title became the display field carries the value of `title`. That arm is retired. A complete build under the current recipe rewrites each document it walks whose title changed (its `docHash` covers the title) and, when it purges, removes every document it did not walk; the recipe hash names the title rule (ADR-0161 K7) and was first recorded by code that already read the display field. So the search asks for that proof per source instead, and only for a source where it matters: one over an object that declares no `title` field, whose display field is `title`, whose `title` is credential-class or `internal`, or that serves `title` itself, is searched as before, with no extra read. A proven source's hits are each checked against the live record, since the proof speaks for the index as its last complete build left it and not for a document written after it. Every other arm of the gate (the display field, each `content` and `metadataFields` member, the fields `where` reads, the object-level gates) is unchanged.
+- bbd9733: fix(knowledge-turso)!: the Knowledge page's "Test connection" comes with the Turso fields it checks — a page without them has no such action
+  
+  Clause-②: yes (narrowing) — the public surface grows by four exports of `@objectstack/knowledge-turso` (listed below); narrowed: where `@objectstack/knowledge-turso` does not contribute its Turso group (the store is `@objectstack/knowledge-pgvector`, on PostgreSQL, or the store is mounted with a `url` or `client` of its own), the Knowledge page has no "Test connection" action and `POST /api/settings/knowledge/test` answers `400 SETTINGS_ACTION_FAILED` (no handler registered), as every undeclared action does, where it answered the Turso form check with `200`; where the store reads its URL from settings, the action is on the page, beside the two fields, and answers as before. `@objectstack/service-settings` no longer exports `knowledgeTestActionHandler`; `@objectstack/knowledge-turso` does
+  Metadata-protocol: none
+  Skills-docs: none — no skill under `skills/**` teaches the Knowledge page's test action or `knowledgeTestActionHandler`.
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No schema key, accepted value or metadata type is added, removed, renamed or re-shaped: a settings manifest and its action handlers are runtime registrations, not authorable metadata, and nothing `objectstack migrate meta` reads names the action. -->
+  
+  **BREAKING** for three readers:
+  
+  - A script or client that posts to `POST /api/settings/knowledge/test` on a deployment where the Turso fields are not on the page now gets `400 SETTINGS_ACTION_FAILED`. The check it answered there read fields nothing on that deployment reads, and opened no connection. Stop calling it there.
+  - Code that imports `knowledgeTestActionHandler` from `@objectstack/service-settings`: import it from `@objectstack/knowledge-turso` instead (`import { knowledgeTestActionHandler } from '@objectstack/knowledge-turso'`). Same check, same answers. `@objectstack/knowledge-turso` depends on the native libSQL client (`@libsql/client`); importing the handler loads nothing native, but installing the package installs that dependency.
+  - A host that registers its own `knowledge` settings page declaring `turso_url`, `turso_auth_token` and the `test` action: `KnowledgeTursoPlugin` leaves that page as written and registers no handler for it, so its `test` button now answers `400 SETTINGS_ACTION_FAILED`. Register the handler yourself after registering the page: `settings.registerAction('knowledge', 'test', knowledgeTestActionHandler)`, with `knowledgeTestActionHandler` imported from `@objectstack/knowledge-turso`.
+  
+  The `test` action left `@objectstack/service-settings`' `knowledge` manifest, and `@objectstack/service-knowledge` no longer registers its handler. `KnowledgeTursoPlugin` declares it as the last entry of the Turso group, after `turso_auth_token`, and registers `knowledgeTestActionHandler` with it, only where it contributes the group. The action's label moved with it, in all eleven locales: out of `@objectstack/service-settings`' bundles, into `knowledgeTursoSettingsTranslations`.
+  
+  New exports of `@objectstack/knowledge-turso`: `knowledgeTestActionHandler`, `KNOWLEDGE_TURSO_TEST_ACTION`, and the types `KnowledgeTursoActionInput` and `KnowledgeTursoActionResult`.
+  
+  `KnowledgeTursoPlugin` now warns once, at `init()`, when it reads its URL from settings but the Knowledge page cannot carry `turso_url` and `turso_auth_token` (no settings service, no `knowledge` page, or a host page that declares one of the group's ids without both keys): nothing can be saved there, and the store opens its default file, which the line names.
+  
+  The Turso group's description no longer says that a cloud deployment with a database per organization reuses that organization's database for a blank URL (no deployment does: a blank URL opens `knowledge.db` in the data directory), and no longer says the fields are not read on PostgreSQL (the group is never on the page there). It says instead that a blank URL uses `knowledge.db` in the data directory, in all eleven locales.
+- 6e06729: **Shipped in 19.0.0-next.2**, whose CHANGELOG missed this entry; listed here one prerelease late.
+  
+  fix(service-knowledge): a recycle-bin restore re-indexes its rows on a kernel with no realtime service
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  On a kernel that composes no `realtime` service, record changes sync on the data engine's after-write hooks. A recycle-bin restore runs no hook (a restore is never a create, ADR-0148 D2), and its `data.record.restored` events go only to a realtime service, so a restored record stayed out of the index, and search did not find it, until a rebuild or the reconcile.
+  
+  The knowledge plugin now also registers one engine middleware there that hears the `restore` operation. Once a restore has answered, each row it wrote back is synced, the master first, through the same seams as a write: through the `knowledge-record-sync` queue when one is composed, otherwise once the unit of work open at the restore commits, off the restore's response. A restore that refuses or fails syncs nothing, and a restore inside a caller's `engine.transaction()` that rolls back syncs nothing. A restore that landed with a stale roll-up (`ERR_SUMMARY_RECOMPUTE`) syncs its rows. With a realtime service composed nothing changes: the `data.record.restored` subscription stays the only trigger, so a restore is synced once. The boot line says whether restores are covered. Nothing to migrate.
+- a7f7f3f: fix(lint)!: a knowledge source naming an absent platform object is refused at publish; `ai_context` accepts `id`; the save door's search refusal names `list`
+  
+  Clause-②: no (narrowing)
+  Metadata-protocol: narrowed
+  Skills-docs: follow-up #37310
+  
+  <!-- adr-0087: not-required (already-registered knowledge-source-publish-refuses-missing-references-and-gated-objects) the entry that registered this rule's publish refusal landed with the rule itself; this change extends its surface to an absent platform object name judged against the whole collection the host serves, says the platform-name warning is the command line's, and lists the entry only for a stack that declares knowledge sources. No id is added and no key is added, removed or re-shaped. -->
+  
+  ADR-0161 K4, row 4.
+  
+  **BREAKING** for the publish of a knowledge source whose `source.object` is a platform name the host does not serve: when the publish gate judges the source against the whole collection the host serves (a write that names no package), a platform-prefixed name no package registers there, and a known platform object (`sys_user`) the host does not serve, are now `knowledge-source-object-unknown` errors (422), as an unprefixed name already was. Before, the first was a warning and the second was not judged. FROM a source over such an object TO a source over an object the host serves: name the object by its full name, or install the package that registers it. On the command line nothing changes: a platform-prefixed name no known package registers stays a warning, and a known platform object the stack does not carry is not judged.
+  
+  - `ai_context`: a field named `id` (in `fields`, a related list's `fields`, `where` or `orderBy`) is no longer reported as `ai-context-field-unknown`. The driver provisions it, so it exists on every object; existence is now asked through the same column set the other existence rules use. A `body.field` of `id` is reported as not long text, never as unknown.
+  - `@objectstack/service-knowledge`: the save refusal for an object the API does not serve for search names the cause and fix in the words of `knowledge-source-object-not-searchable`: `enable.apiEnabled` false, an `enable.apiMethods` list that does not grant `list` (from which search derives), or `list` beside `enable.searchable: false`; the fix is to include `list` with `enable.searchable` not false. It no longer tells the author to grant `search`, a retired list value the parse strips.
+  - `@objectstack/spec`: the upgrade entry `knowledge-source-publish-refuses-missing-references-and-gated-objects` is listed by `os migrate meta` only for a stack that declares `knowledgeSources` (`--all` still lists it), and its surface states that the platform-name warning is the CLI's.
+- d753fd9: feat(service-knowledge): a caller who may read few of a source's records is answered from them, wherever they rank
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  A knowledge search re-checks every hit as the caller after ranking, and refills once at `topK × 20`. A caller who may read only a few of a source's rows (20 of 1,000, say) could find none of them within that cap and be answered nothing, though the store held their answer.
+  
+  - **`@objectstack/service-knowledge`.** Before the first round, for a caller who is not the system identity, the service reads the ids of each source's records that caller may read: as the caller, under the source's `where`, ids only, at most 501. When there are 500 or fewer, the source is handed them as a `record` scope term, so its adapter ranks only those rows. A caller's own `scope` is intersected with them, never widened: a one-record scope stays one record. A scope with a parent (metadata) term, more than 500 readable records, a read that fails (logged at `warn`), or no readable record in scope, and the source is searched as before. Every hit is still re-checked one by one, the organization filter is unchanged, and the system identity's search is unchanged. The conformance harness's engine double (`@objectstack/service-knowledge/testing`) answers that read as the caller too.
+  - **`@objectstack/knowledge-turso`.** Each new generation's passage table carries an index on `source_record_id`, so a narrowed search reads only those records' passages. A generation made before gets it from its next build; nothing to run.
+  - **`@objectstack/knowledge-pgvector`.** Each passage table carries an index on `(source_id, generation, source_record_id)`. A table made before gets it on the first write after the upgrade (`CREATE INDEX IF NOT EXISTS`, which holds writes to that table while it builds).
+  
+  Nothing to migrate.
+- Updated dependencies [22e1089]
+- Updated dependencies [e606bab]
+- Updated dependencies [d578952]
+- Updated dependencies [c06dac7]
+- Updated dependencies [58b513a]
+- Updated dependencies [1f1cd21]
+- Updated dependencies [10321fa]
+- Updated dependencies [fe0473d]
+- Updated dependencies [3550665]
+- Updated dependencies [33a0d4f]
+- Updated dependencies [ee2ffca]
+- Updated dependencies [98099ea]
+- Updated dependencies [3ffa92d]
+- Updated dependencies [9609c13]
+- Updated dependencies [da08375]
+- Updated dependencies [86ce7a3]
+- Updated dependencies [bbd9733]
+- Updated dependencies [f9c6f92]
+- Updated dependencies [d59478f]
+- Updated dependencies [a7f7f3f]
+- Updated dependencies [03f39cc]
+- Updated dependencies [898b056]
+- Updated dependencies [216524a]
+- Updated dependencies [d994002]
+- Updated dependencies [ba2d960]
+- Updated dependencies [fd06b7a]
+- Updated dependencies [f8dcd3e]
+  - @objectstack/spec@19.0.0-next.3
+  - @objectstack/types@19.0.0-next.3
+  - @objectstack/core@19.0.0-next.3
+  - @objectstack/service-settings@19.0.0-next.3
+  - @objectstack/embedder-openai@19.0.0-next.3
+
 ## 19.0.0-next.2
 
 ### Minor Changes

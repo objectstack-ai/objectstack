@@ -1,5 +1,54 @@
 # @objectstack/plugin-mcp-server
 
+## 19.0.0-next.3
+
+### Patch Changes
+
+- 5797c2a: fix(mcp): a tool argument that fails the published JSON Schema is refused with the platform's coded refusal
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  On both MCP doors (Streamable HTTP and stdio), a `tools/call` whose arguments fail the tool's published JSON Schema used to come back as the SDK's own text, `MCP error -32602: Input validation error: …`, with no `code` and no `status`, and with every unknown key echoed exactly as sent (a raw newline or NUL included, however many there were).
+  
+  It now answers the same coded tool error every other refusal on these doors answers: `isError: true`, one text content holding `{ "error": { "code": "VALIDATION_ERROR", "status": 400, "message": "Invalid arguments for tool NAME: …" } }`. The message still names each problem at its path, and an unknown key's rename advice (`sort` → `orderBy`) is kept. The keys are echoed bounded and sanitised: at most five unknown keys per object are named and the rest are counted, each key is cut at 64 characters, and every control character is written as its escape. A client that matched the `-32602` text should branch on `error.code` instead.
+- Updated dependencies [22e1089]
+- Updated dependencies [e606bab]
+- Updated dependencies [d578952]
+- Updated dependencies [6ee2a63]
+- Updated dependencies [c06dac7]
+- Updated dependencies [58b513a]
+- Updated dependencies [1f1cd21]
+- Updated dependencies [10321fa]
+- Updated dependencies [fe0473d]
+- Updated dependencies [3550665]
+- Updated dependencies [9548be2]
+- Updated dependencies [33a0d4f]
+- Updated dependencies [ee2ffca]
+- Updated dependencies [e2a0e90]
+- Updated dependencies [98099ea]
+- Updated dependencies [3ffa92d]
+- Updated dependencies [9609c13]
+- Updated dependencies [da08375]
+- Updated dependencies [86ce7a3]
+- Updated dependencies [f9c6f92]
+- Updated dependencies [d59478f]
+- Updated dependencies [a7f7f3f]
+- Updated dependencies [03f39cc]
+- Updated dependencies [898b056]
+- Updated dependencies [7d6692e]
+- Updated dependencies [216524a]
+- Updated dependencies [d994002]
+- Updated dependencies [ba2d960]
+- Updated dependencies [fd06b7a]
+  - @objectstack/spec@19.0.0-next.3
+  - @objectstack/lint@19.0.0-next.3
+  - @objectstack/formula@19.0.0-next.3
+  - @objectstack/rest@19.0.0-next.3
+  - @objectstack/types@19.0.0-next.3
+  - @objectstack/core@19.0.0-next.3
+  - @objectstack/metadata-core@19.0.0-next.3
+
 ## 19.0.0-next.2
 
 ### Patch Changes
