@@ -483,7 +483,24 @@ export const CEILINGS = new Map([
   // 26779 -> ceil(26779 / 4) = 6695; the row moves +56, the measured remainder
   // only. Pinned AT the measurement.
   //   ceil(($(wc -c < skills/objectstack-ai/SKILL.md) - 27) / 4) == ceil(26779 / 4)
-  // 6695 -> 6709 (2026-11-28, the no-knowledge-service save refusal): the
+  // 6695 -> 6893 (2026-11-28, the same follow-up's second half, after the
+  // `os validate` rules for `knowledge_source` landed): the section names the
+  // five rules `os validate` and publish report for a source
+  // (`knowledge-source-object-unknown`, `-field-unknown`,
+  // `-object-not-searchable`, `-system-object-not-ai-readable`, and the
+  // `-field-never-indexed` warning), each with its fix. Raise path the
+  // standing ruling 「A:先削重复,余额按实测提高」 (ruling record 6513306068,
+  // letter B). PAID DOWN FIRST: the `content` row's "credential-class and
+  // `internal` fields are never indexed" (the `-field-never-indexed` line
+  // says it), its "embedding is egress" (the egress paragraph says it), the
+  // `name` row's "with the package, its identity" (the intro says it), and
+  // the example's "no adapter: the deployment's store" comment (the `adapter`
+  // row says it). Arithmetic in priced bytes (stamp line excluded), against
+  // the row's 26779: the file is 26806 -> 27596 bytes, so the LANDED priced
+  // text is 27569 -> ceil(27569 / 4) = 6893; the row moves +198, the
+  // measured remainder only. Pinned AT the measurement.
+  //   ceil(($(wc -c < skills/objectstack-ai/SKILL.md) - 27) / 4) == ceil(27569 / 4)
+  // 6893 -> 6906 (2026-11-28, the no-knowledge-service save refusal): the
   // section's run-time clause said an app that ships no source "needs
   // `requires: ['knowledge']`, or its items are never indexed"; the save is now
   // refused (`503 SERVICE_UNAVAILABLE`, nothing written) until the stack
@@ -491,12 +508,12 @@ export const CEILINGS = new Map([
   // path the standing ruling 「A:先削重复,余额按实测提高」 (ruling record
   // 6513306068, letter B). PAID DOWN FIRST: the replaced clause itself, and the
   // refusal's "then save the source again" (the "until" says it). Arithmetic in
-  // priced bytes (stamp line excluded), against the row's 26779: the file is
-  // 26806 -> 26860 bytes, so the LANDED priced text is 26833 ->
-  // ceil(26833 / 4) = 6709; the row moves +14, the measured remainder only.
+  // priced bytes (stamp line excluded), against the row's 27569: the file is
+  // 27596 -> 27650 bytes, so the LANDED priced text is 27623 ->
+  // ceil(27623 / 4) = 6906; the row moves +13, the measured remainder only.
   // Pinned AT the measurement.
-  //   ceil(($(wc -c < skills/objectstack-ai/SKILL.md) - 27) / 4) == ceil(26833 / 4)
-  ['skills/objectstack-ai/SKILL.md', 6709], //          -18 (was 6824), then -5 A2′ (was 6806)
+  //   ceil(($(wc -c < skills/objectstack-ai/SKILL.md) - 27) / 4) == ceil(27623 / 4)
+  ['skills/objectstack-ai/SKILL.md', 6906], //          -18 (was 6824), then -5 A2′ (was 6806)
   // -12 (was 6331): the `http.server` decision-table row dropped a trailing
   // clause that taught `contributes.routes` as a key that "parses but serves
   // nothing". The key is retired — an authored entry is now REFUSED, carrying

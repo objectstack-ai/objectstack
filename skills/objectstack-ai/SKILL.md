@@ -13,7 +13,7 @@ license: Apache-2.0
 compatibility: Requires @objectstack/spec 19.x (Zod v4 schemas)
 metadata:
   author: objectstack-ai
-  version: "19.0.0-next.1"
+  version: "19.0.0-next.2"
   domain: ai
   tags: agent, tool, skill, knowledge, context-pack, llm, embedding, mcp
 ---
@@ -253,12 +253,12 @@ object or field, when you may not search that object or query a field it reads.
 
 | Key | Purpose |
 |:----|:--------|
-| `name` | Snake_case source name; with the package, its identity |
+| `name` | Snake_case source name |
 | `label` / `description` | Display metadata |
 | `adapter` | Optional store id (`pgvector`, `turso`, `memory`). Omitted: the deployment's store (`pgvector` on PostgreSQL, `turso` otherwise), else the only one registered; several and none the deployment's is refused, naming them |
 | `source.kind` | `'object'`, the one kind |
 | `source.object` | The object whose records are indexed |
-| `source.content` | Non-empty list of the fields whose text is indexed, in order. `'*'` is refused: embedding is egress, and a wildcard also sent fields added later. Meaningful text only, never ids or system fields; credential-class and `internal` fields are never indexed |
+| `source.content` | Non-empty list of the fields whose text is indexed, in order. `'*'` is refused: it would also send fields added later. Meaningful text only, never ids or system fields |
 | `source.metadataFields` | Fields kept for search-time filtering (`status`, `owner_id`, `tags`) |
 | `source.where` | ObjectQL `where`: keeps drafts and archived rows out |
 | `source.split` | How documents are cut into passages (below) |
@@ -273,6 +273,22 @@ deployment configures one embedder), `vectorStore` (the store is `adapter`),
 `prefix`, `mimeTypes`, `urls`, `userAgent` (no form in 19). `os migrate meta
 --from 18` lists a stack's edits; edit a registration in code by hand.
 
+`os validate` and publish check each source; an error refuses the publish:
+
+- `knowledge-source-object-unknown`: `source.object` is no object of the stack
+  or its packages (on the CLI a warning while the manifest declares a
+  dependency `packages[]` lacks). Name one, or declare and install its package.
+- `knowledge-source-field-unknown`: a `content` / `metadataFields` member is no
+  field of it (`id` and the injected system columns resolve). Fix the
+  spelling, or remove it.
+- `knowledge-source-object-not-searchable`: the API does not serve the object
+  for `search`. Leave `enable.apiEnabled` on; an `enable.apiMethods` list
+  must grant `list`, with `enable.searchable` not false.
+- `knowledge-source-system-object-not-ai-readable`: a `sys_` object without
+  `enable.aiReadable: true`. Index a business object.
+- `knowledge-source-field-never-indexed` (warning): a credential-class or
+  `internal: true` member, which the index never carries. Remove it.
+
 <!-- os:check -->
 ```typescript
 import { KnowledgeSourceSchema, type KnowledgeSource } from '@objectstack/spec/ai';
@@ -280,7 +296,7 @@ import { KnowledgeSourceSchema, type KnowledgeSource } from '@objectstack/spec/a
 export const supportKb: KnowledgeSource = KnowledgeSourceSchema.parse({
   name: 'support_kb',
   label: 'Support Knowledge Base',
-  source: {                    // no adapter: the deployment's store
+  source: {
     kind: 'object',
     object: 'kb_article',
     content: ['title', 'body'],
