@@ -4695,6 +4695,27 @@ const pt = {
     recordCitations: {
       title: 'Citado de registros',
     },
+    // The drafts an ask turn saved, with their verdicts and Studio review links.
+    draftReview: {
+      title: 'Rascunhos salvos nesta rodada',
+      hint: 'Nada foi publicado ainda. Revise os rascunhos e publique-os no Studio.',
+      package: 'Pacote {{name}}',
+      reviewAndPublish: 'Revisar e publicar',
+      reviewAndPublishAria: 'Revisar e publicar os rascunhos do pacote {{name}} no Studio',
+      review: 'Revisar',
+      reviewAria: 'Revisar o rascunho {{name}} no Studio',
+      willPublish: 'Será publicado',
+      verdictWithheld: 'Veredito indisponível',
+      checkedAtSave: 'verificado ao salvar',
+      problems: '{{count}} problemas',
+      problems_one: '{{count}} problema',
+      problems_many: '{{count}} problemas',
+      problems_other: '{{count}} problemas',
+      more: '+{{count}} outros',
+      more_one: '+{{count}} outro',
+      more_many: '+{{count}} outros',
+      more_other: '+{{count}} outros',
+    },
     questionCard: {
       aiAsks: 'A IA pergunta:',
       progress: 'Pergunta {{current}} de {{total}}',

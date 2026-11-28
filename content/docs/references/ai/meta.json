@@ -19,6 +19,7 @@
     "ask-question",
     "build-progress",
     "dataset-tools",
+    "draft-review",
     "object-query-source",
     "record-citation",
     "record-context-tools"

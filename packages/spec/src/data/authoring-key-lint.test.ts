@@ -245,3 +245,32 @@ describe('lintAuthoredRecordKeys — an unknown key gets the shared rename rule'
     expect(runComparator({ dfltValue: 'x' }, declared)[0]?.suggestion).toBe('defaultValue');
   });
 });
+
+describe('the retired `audit` / `auditTrail` field keys prescribe the field-history model that runs', () => {
+  // A field's change values show by default and its off switch is its own
+  // `fieldHistory: false` (`resolveFieldHistory`). `trackHistory` on a field
+  // only opts a media or JSON type in, so the refusal never names it.
+  for (const key of ['audit', 'auditTrail'] as const) {
+    const message = (): string => {
+      const r = FieldSchema.safeParse({ name: 'amount', type: 'number', [key]: true });
+      expect(r.success, `\`${key}\` was not refused`).toBe(false);
+      if (r.success) throw new Error('unreachable');
+      const issue = r.error.issues.find((i) => i.code === 'unrecognized_keys');
+      expect(issue, `\`${key}\` was not refused as an unknown key`).toBeTruthy();
+      return issue!.message;
+    };
+
+    it(`\`${key}\`: values already show by default, and the field's off switch is named`, () => {
+      const m = message();
+      expect(m).toContain(
+        'Delete the key: a changed field\'s old → new values already show on the record activity timeline by default',
+      );
+      expect(m).toContain('`fieldHistory: false` is this field\'s off switch');
+      expect(m).toContain('`fieldHistory: true` opts a media or structured-JSON field in');
+    });
+
+    it(`\`${key}\`: never sends the author to \`trackHistory\``, () => {
+      expect(message()).not.toContain('trackHistory');
+    });
+  }
+});
