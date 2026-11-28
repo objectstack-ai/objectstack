@@ -19,7 +19,7 @@
  * `DeclaredActionsBar` mount):
  *
  *  - a `type: 'api'` row action (the shape of objectstack's published
- *    `ReassignLeadAction`: undoable, on `list_item`, writing a lookup), run by
+ *    `ReassignLeadAction`: undoable, on `record_row`, writing a lookup), run by
  *    the runtime's own `api` handler, which looks the object's field
  *    definitions up itself;
  *  - an `operation: 'update'` row action, run by `ActionRunner`, which reads
@@ -144,7 +144,7 @@ async function runOnGridRow(action: Record<string, unknown>) {
                 type: 'object-grid',
                 objectName: OBJECT,
                 columns: ['name', 'account'],
-                rowActionDefs: [{ locations: ['list_item'], successMessage: MESSAGE, ...action }],
+                rowActionDefs: [{ locations: ['record_row'], successMessage: MESSAGE, ...action }],
               } as never}
               dataSource={dataSource as never}
             />

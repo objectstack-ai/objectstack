@@ -358,11 +358,12 @@ drawer lands on the authored one. There is no setting that keeps an authored pag
 or in the drawer.
 
 What carries over is what the object declares: its field groups and their order, field
-permissions and visibility, the actions placed at `record_header` and `record_more`, one tab per
+permissions and visibility, the actions placed at `record` and `record_page`, one tab per
 child table, the stage and the approval state. What does not is the page's own layout and
 anything that lives only on it: its tabs and sections, a related list or block placed only on
 the page, a banner, and `record_section` actions, which the standard page does not draw. To keep
-such an action reachable off the full page, add `record_more` to its `locations`, and leave it
+such an action reachable off the full page, add `record_page` to its `locations` with
+`component: 'action:menu'` (so it sits in the header's `⋯` menu), and leave it
 out of the page header's `actions` list so the full page still draws it once.
 
 So the record's title and its main button should come from the object, which both pages read.
@@ -401,7 +402,7 @@ such an object (`403 FEEDS_DISABLED`).
   a user's column sort is sent to the server. A list that declares `columns` fetches only the
   declared columns the user can read.
 - **Actions are ids.** By default a related list draws the child object's own actions: those
-  placed at `list_toolbar` as header buttons, and those at `list_item` or `record_related` in
+  placed at `list` as header buttons, and those at `record_row` or `record_related` in
   each row's menu (`record_related` shows only inside a parent record). Declaring
   `actions: ['export_contacts', 'send_welcome']` in the block's `properties` replaces that
   set, in that order; each action is still placed by its own `locations`, and `[]` shows
@@ -418,15 +419,15 @@ unknown or retired key (`description`, `icon`, `breadcrumb`, `showStar`) is refu
 | :--- | :--- | :--- |
 | `title` | Derived from the record on a record page | Heading; `{field}` tokens interpolate against the record, and a token that resolves to nothing renders empty. Set it on a non-record page |
 | `subtitle` | — | The line under the title, interpolated the same way |
-| `actions` | — | Ids of actions declared on the page's object. An authored list is the whole set: an action that declares `record_header` but is not named is not drawn, and omitting the key draws none of the object's actions. `placedActions` is the other way to say which actions |
-| `placedActions` | — | `true` asks for every action of the object placed at `record_header` / `record_more`, read live, in place of an `actions` list, so an action another package adds is drawn without editing the page. Refused beside an authored `actions` list: keep one. The platform's user, organization and approval request pages set it |
+| `actions` | — | Ids of actions declared on the page's object. An authored list is the whole set: an action that declares `record_page` but is not named is not drawn, and omitting the key draws none of the object's actions. `placedActions` is the other way to say which actions |
+| `placedActions` | — | `true` asks for every action of the object placed at `record` / `record_page`, read live, in place of an `actions` list, so an action another package adds is drawn without editing the page. Refused beside an authored `actions` list: keep one. The platform's user, organization and approval request pages set it |
 | `recordChrome` | `true` | Draw the title as the record chip (object label, copy-id button, the record's picture when the object names an `imageField`); `false` keeps a bare heading |
 | `showCopyId` | `true` | The copy-record-id button in the chip |
 | `maxVisible` / `mobileMaxVisible` | 3 on every header (in a record page's header bar the number, authored or not, is an upper bound: actions that do not fit the bar's width fold as well) / 2 in a phone record page's bottom bar (the page's own actions; Edit is in the top bar's `⋯` there), 1 elsewhere | How many actions render inline before the rest fold into the `⋯` menu |
 | `aria` | — | ARIA attributes (`ariaLabel`, `ariaDescribedBy`, …) for the `<header>` element |
 
-A named action renders only if its `locations` include `record_header` (inline) or
-`record_more` (straight into `⋯`); an id that names no action renders nothing and is reported
+A named action renders only if its `locations` include `record` or `record_page` (inline,
+or straight into `⋯` when it sets `component: 'action:menu'`); an id that names no action renders nothing and is reported
 once in the browser console. Which actions take the inline slots is metadata too: actions are
 sorted by `order` (lower first; the host's Edit / Share / Delete use 100 and above, so
 authored actions outrank them), `variant: 'primary'` breaks ties, `variant: 'danger'` draws a

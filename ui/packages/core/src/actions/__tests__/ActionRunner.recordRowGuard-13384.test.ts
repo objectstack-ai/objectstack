@@ -12,7 +12,7 @@
  * translatable.
  *
  * Measured on HotCRM's My Leads: "Add to Campaign", a single-record script
- * action with a param, placed in `list_toolbar`. With 0 or 2 rows ticked the
+ * action with a param, placed in `list`. With 0 or 2 rows ticked the
  * param dialog opened and ran to the end (the user picked a campaign, and
  * could even create one), and only after Confirm did the dispatch refuse,
  * in English under zh-CN. The runner ran the param dialog before the handler,
@@ -46,7 +46,7 @@ const ADD_TO_CAMPAIGN: ActionDef = {
   type: 'script',
   name: 'add_to_campaign',
   objectName: 'crm_lead',
-  locations: ['list_toolbar', 'list_item'],
+  locations: ['list', 'record_row'],
   actionParams: [{ name: 'campaign', label: 'Campaign', type: 'text', required: true }],
 };
 
@@ -125,7 +125,7 @@ describe('objectui#13384 — the row-count refusal comes before the param dialog
 
   it('control — an object-level toolbar action with 0 rows still opens its dialog and dispatches', async () => {
     const result = await runnerWithRows([])
-      .execute(launch({ ...ADD_TO_CAMPAIGN, locations: ['list_toolbar'] }));
+      .execute(launch({ ...ADD_TO_CAMPAIGN, locations: ['list'] }));
 
     expect(dialog).toHaveBeenCalledTimes(1);
     expect(result.success).toBe(true);

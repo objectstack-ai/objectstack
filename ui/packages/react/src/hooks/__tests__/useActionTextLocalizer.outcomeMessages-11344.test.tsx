@@ -44,7 +44,7 @@ const DELETE_ENVIRONMENT = {
   name: 'delete_environment',
   type: 'script',
   label: 'Delete environment',
-  locations: ['record_header'],
+  locations: ['record_page'],
   outcomeMessages: {
     archived: {
       en: 'Environment ${result.name} archived',

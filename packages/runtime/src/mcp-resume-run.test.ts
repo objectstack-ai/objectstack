@@ -62,7 +62,7 @@ const SCHEDULE = {
     objectName: OBJECT,
     type: 'flow',
     target: 'schedule_followup',
-    locations: ['record_header'],
+    locations: ['record_page'],
     ai: { exposed: true, description: 'Schedule a follow-up task for this lead.' },
 };
 /** Two screens in a row, so a resume can pause again. */
@@ -72,7 +72,7 @@ const WIZARD = {
     objectName: OBJECT,
     type: 'flow',
     target: 'followup_wizard',
-    locations: ['record_header'],
+    locations: ['record_page'],
     ai: { exposed: true, description: 'Walk through a two-step follow-up wizard.' },
 };
 /** Gated on a capability the default caller does not hold. */

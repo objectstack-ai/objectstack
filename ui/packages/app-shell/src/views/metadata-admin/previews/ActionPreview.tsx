@@ -53,6 +53,7 @@ import {
   SelectValue,
 } from '@object-ui/components';
 import type { ActionParam } from '@object-ui/types';
+import { actionRendersAt } from '@object-ui/types';
 import { actionCopySource, isActionCopyEnvelope } from '@object-ui/core';
 import { paramDegradesWithoutTarget, paramToField } from '../../../utils/paramToField.js';
 import type { MetadataPreviewProps } from '../preview-registry.js';
@@ -336,6 +337,7 @@ export function ActionPreview({ name, draft, locale }: MetadataPreviewProps) {
               )}
               <PlacementPreview
                 locations={locations}
+                folded={d.component === 'action:menu'}
                 label={label}
                 icon={icon}
                 variant={variant}
@@ -848,12 +850,18 @@ function Frame({ label, children }: { label: string; children: React.ReactNode }
   );
 }
 
-function PlacementPreview({ locations, label, icon, variant, iconOnly, locale }: {
-  locations: string[]; label: string; icon?: string; variant?: string; iconOnly?: boolean; locale?: string;
+function PlacementPreview({ locations, folded, label, icon, variant, iconOnly, locale }: {
+  locations: string[]; folded?: boolean; label: string; icon?: string; variant?: string; iconOnly?: boolean; locale?: string;
 }) {
+  // Placement is `actionRendersAt`'s: `record` is drawn on the record page and
+  // on each list row (objectstack#36495). On the record page an action folded
+  // into the ⋯ menu (`component: 'action:menu'`) is drawn there, not as a
+  // header button.
+  const onRecordPage = actionRendersAt({ locations }, 'record_page');
+  const onRow = actionRendersAt({ locations }, 'record_row');
   const btn = <FauxButton label={label} icon={icon} variant={variant} iconOnly={iconOnly} />;
   // The row frame: the action on each row of a list. Drawn for both locations
-  // that place an action on a list's rows — `list_item` (every list of the
+  // that place an action on a list's rows — `record_row` (every list of the
   // object) and `record_related` (the rows of a related list inside a parent
   // record, objectui#11270) — each under its own caption.
   const rows = (
@@ -868,8 +876,8 @@ function PlacementPreview({ locations, label, icon, variant, iconOnly, locale }:
   );
   return (
     <div className="space-y-2.5">
-      {locations.includes('record_header') && (
-        <Frame label="record_header">
+      {onRecordPage && !folded && (
+        <Frame label="record_page">
           <div className="rounded border bg-background">
             <div className="flex items-center justify-between gap-2 border-b px-3 py-2">
               <div className="flex items-center gap-2">
@@ -885,8 +893,8 @@ function PlacementPreview({ locations, label, icon, variant, iconOnly, locale }:
           </div>
         </Frame>
       )}
-      {locations.includes('list_toolbar') && (
-        <Frame label="list_toolbar">
+      {locations.includes('list') && (
+        <Frame label="list">
           <div className="rounded border bg-background">
             <div className="flex items-center justify-between gap-2 border-b px-3 py-2">
               <div className="text-xs font-medium">{tr('engine.actionPreview.placement.records', locale)}</div>
@@ -896,7 +904,7 @@ function PlacementPreview({ locations, label, icon, variant, iconOnly, locale }:
           </div>
         </Frame>
       )}
-      {locations.includes('list_item') && <Frame label="list_item">{rows}</Frame>}
+      {onRow && <Frame label="record_row">{rows}</Frame>}
       {locations.includes('record_section') && (
         <Frame label="record_section">
           <div className="rounded border bg-background">
@@ -916,8 +924,8 @@ function PlacementPreview({ locations, label, icon, variant, iconOnly, locale }:
           showed the author a placement the product does not use. Pinned in
           `__tests__/ActionPreview.recordRelatedRow-11270.test.tsx`. */}
       {locations.includes('record_related') && <Frame label="record_related">{rows}</Frame>}
-      {locations.includes('record_more') && (
-        <Frame label="record_more">
+      {onRecordPage && folded && (
+        <Frame label="record_page · ⋯">
           <div className="w-52 rounded border bg-background">
             <div className="flex items-center gap-1.5 border-b px-3 py-1.5 text-[11px] text-muted-foreground">
               <MoreHorizontal className="h-3.5 w-3.5" /> {tr('engine.actionPreview.placement.more', locale)}

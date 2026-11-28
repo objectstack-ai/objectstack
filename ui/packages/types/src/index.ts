@@ -1295,6 +1295,7 @@ export {
   OBJECTUI_LOCAL_PARAM_FIELD_TYPES,
   ACTION_PARAM_FIELD_TYPES,
   actionRendersAt,
+  actionFoldedIntoMenu,
   placedHeaderActions,
   arrangedHeaderActions,
   readActionLayoutArm,

@@ -2,7 +2,7 @@
  * Dev-only harness for record-header `type:'api'` actions (objectui#3391).
  *
  * Reproduces the issue's exact declaration: an object action on
- * `locations:['record_header']` whose target is
+ * `locations:['record_page']` whose target is
  * `/api/v1/data/os_tianshun_ehr_production_plan/{id}`, with a required
  * field-backed param, `bodyExtra` and a confirm dialog. Before the fix the
  * header executor never stashed the record under `params._rowRecord`, so the
@@ -40,7 +40,7 @@ const OBJECT_DEF = {
     {
       name: 'copy_plan_row',
       label: '复制',
-      locations: ['record_header'],
+      locations: ['record_page'],
       type: 'api',
       method: 'PATCH',
       target: `/api/v1/data/${OBJECT_NAME}/{id}`,

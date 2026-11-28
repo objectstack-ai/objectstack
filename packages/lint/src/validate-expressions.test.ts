@@ -1685,7 +1685,7 @@ describe('validateStackExpressions (ADR-0032 build-time)', () => {
     it('flags a bare-field `visible` on a stack action (the trap that hid Mark Done)', () => {
       const issues = validateStackExpressions({
         objects: [{ name: 'showcase_task', fields: { done: { type: 'boolean' }, status: { type: 'select' } } }],
-        actions: [{ name: 'mark_done', objectName: 'showcase_task', type: 'script', locations: ['record_header'], visible: '!done' }],
+        actions: [{ name: 'mark_done', objectName: 'showcase_task', type: 'script', locations: ['record_page'], visible: '!done' }],
       });
       const v = issues.filter(i => i.where.includes("action 'mark_done' visible"));
       expect(v).toHaveLength(1);

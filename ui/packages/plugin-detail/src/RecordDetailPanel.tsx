@@ -325,7 +325,7 @@ export function RecordDetailPanel({
             ? [
                 {
                   type: 'action:bar',
-                  location: 'record_header',
+                  location: 'record_page',
                   systemActions: [
                     {
                       name: 'sys_open_new_tab',

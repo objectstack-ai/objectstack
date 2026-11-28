@@ -56,12 +56,22 @@ export type { ActionLocation } from '@objectstack/spec/ui';
 export { ACTION_LOCATIONS, ActionLocationSchema } from '@objectstack/spec/ui';
 
 /**
+ * The surfaces `record` covers: an action that acts on one record is drawn on
+ * the record page and on each list row (objectstack#36495). The other words
+ * name one surface each.
+ */
+const RECORD_SURFACES: readonly ActionLocation[] = ['record_page', 'record_row'];
+
+/**
  * THE placement rule: does `action` render at `location`?
  *
  * `locations` is an action's placement declaration, and this predicate is the
  * single owner of what it means (objectui#3142). An action renders at a
  * location only if it **declares** that location — a missing or empty
  * `locations` places the action NOWHERE, it does not place it everywhere.
+ * One word covers two surfaces: `record` (acts on one record) is drawn at
+ * `record_page` and at `record_row` (objectstack#36495), so asking either of
+ * those answers yes for a `record` action.
  *
  * That reading is the platform's: ADR-0078 lists "an `action` with no
  * `locations`" as a verified inert shape — metadata that parses, reports
@@ -97,13 +107,24 @@ export function actionRendersAt(
 ): boolean {
   if (!location) return true;
   const declared = action?.locations;
-  return Array.isArray(declared) && declared.includes(location);
+  if (!Array.isArray(declared)) return false;
+  return declared.includes(location) || (RECORD_SURFACES.includes(location) && declared.includes('record'));
 }
 
 /**
- * THE record header's placed actions: every action of an object whose
- * `locations` include `record_header` or `record_more`, in declaration order,
- * the first of each name (an unnamed entry passes through).
+ * Is `action` folded into the record page header's ⋯ menu? `component:
+ * 'action:menu'` is the fold: an action placed on the record page draws there
+ * only, never as a button (objectstack#36495; until protocol 19 the
+ * `record_more` location said it).
+ */
+export function actionFoldedIntoMenu(action: { component?: unknown } | null | undefined): boolean {
+  return action?.component === 'action:menu';
+}
+
+/**
+ * THE record header's placed actions: every action of an object placed on the
+ * record page (`record` or `record_page`), in declaration order, the first of
+ * each name (an unnamed entry passes through).
  *
  * ONE reader for the two headers that draw "the object's header actions"
  * (objectstack#29951): the synthesized default record page
@@ -111,7 +132,7 @@ export function actionRendersAt(
  * `placedActions: true` (objectstack#30018, ruling record 6624172200, letter A).
  * Both read it off the object's actions as served at render time, so an action
  * another package places on the object is in the set. Placement is
- * {@link actionRendersAt}'s; this adds only the header's two locations and the
+ * {@link actionRendersAt}'s; this adds only the header's location and the
  * first-of-a-name rule.
  */
 export function placedHeaderActions<T extends { name?: unknown; locations?: readonly string[] }>(
@@ -119,7 +140,7 @@ export function placedHeaderActions<T extends { name?: unknown; locations?: read
 ): T[] {
   const seen = new Set<string>();
   return (actions ?? []).filter((action) => {
-    if (!actionRendersAt(action, 'record_header') && !actionRendersAt(action, 'record_more')) return false;
+    if (!actionRendersAt(action, 'record_page')) return false;
     const name = typeof action?.name === 'string' ? action.name : '';
     if (name === '') return true;
     if (seen.has(name)) return false;
@@ -166,16 +187,15 @@ export function readActionLayoutArm(value: unknown): ActionLayoutArm | undefined
  * `$export`, which the host draws itself) is skipped: it draws nothing, and
  * no other action takes a pinned one's place.
  *
- * - `record`: a pinned action is placed at `record_header` and leads the sort;
- *   an unpinned one is placed at `record_more` only, the header's
- *   overflow-only placement (`page:header`'s `isMoreOnly`).
- * - `list`: a pinned action leads the `action:bar`'s sort; an unpinned one is
- *   `component: 'action:menu'`, which the bar places in its overflow without
- *   spending an inline slot.
+ * In both scopes a pinned action leads the sort and draws as a button (an
+ * authored `component: 'action:menu'` is lifted), and an unpinned one is
+ * `component: 'action:menu'`, which the header (`record`) and the
+ * `action:bar` (`list`) place in their overflow without spending an inline
+ * slot.
  */
 export function arrangedHeaderActions<
   T extends { name?: unknown; locations?: readonly string[]; order?: unknown; component?: unknown },
->(actions: readonly T[], layoutArm: unknown, scope: 'list' | 'record'): T[] {
+>(actions: readonly T[], layoutArm: unknown, _scope: 'list' | 'record'): T[] {
   const arm = readActionLayoutArm(layoutArm);
   if (!arm) return [...actions];
   const rankOf = (names: readonly string[]) => {
@@ -197,20 +217,10 @@ export function arrangedHeaderActions<
     if (at !== undefined) {
       seen.add(name);
       const component = action.component === 'action:menu' ? undefined : action.component;
-      const locations =
-        scope === 'record' && !(action.locations ?? []).includes('record_header')
-          ? [...(action.locations ?? []), 'record_header']
-          : action.locations;
-      pinned.push({ ...action, locations, order: PINNED_HEADER_ACTION_ORDER + at, component } as T);
+      pinned.push({ ...action, order: PINNED_HEADER_ACTION_ORDER + at, component } as T);
       continue;
     }
-    let overflow: T;
-    if (scope === 'list') {
-      overflow = { ...action, component: 'action:menu' };
-    } else {
-      const locations = (action.locations ?? []).filter((l) => l !== 'record_header');
-      overflow = { ...action, locations: locations.includes('record_more') ? locations : [...locations, 'record_more'] };
-    }
+    const overflow: T = { ...action, component: 'action:menu' };
     const moreAt = name && !seen.has(name) ? moreRank.get(name) : undefined;
     if (moreAt !== undefined) {
       seen.add(name);
@@ -717,7 +727,7 @@ export interface UIActionSchema {
   /**
    * Sort order within a location group (lower = higher / more prominent;
    * defaults to 0). The action:bar stable-sorts actions by `order` before the
-   * inline/overflow split, so in `record_header` a lower `order` promotes an
+   * inline/overflow split, so in `record_page` a lower `order` promotes an
    * action into the primary-button slot and a higher `order` pushes it toward
    * the "More" (⋯) overflow menu. Mirrors `Action.order` in `@objectstack/spec`.
    */
@@ -753,7 +763,7 @@ export interface UIActionSchema {
    * {@link bodyExtra}: the shape cannot drift from the contract, and the keys
    * the spec refuses beside it (`target`, `body`, `method`, `bodyExtra`,
    * `bodyShape`, `recordIdParam`, `recordIdField`, `onSuccess`,
-   * `opensInNewTab`, `newTabUrl`, `list_toolbar` placement, and any explicit
+   * `opensInNewTab`, `newTabUrl`, `list` placement, and any explicit
    * `type` other than `'script'`) stay the spec's to enforce, not this
    * interface's to restate.
    */

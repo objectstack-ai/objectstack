@@ -40,8 +40,8 @@ export const SYS_APPROVAL_REQUEST_OBJECT = 'sys_approval_request';
  *
  * `sys_approval_request` places its decision levers at `record_section` (the
  * per-record action group) and the two headline decisions additionally at
- * `list_item`. The record page consumes `record_section` verbatim rather than
- * re-mapping it onto the host's own `record_header` / `record_more` slots:
+ * `record_row`. The record page consumes `record_section` verbatim rather than
+ * re-mapping it onto the host's own `record` / `record_page` slots:
  * those two are the HOST object's locations, evaluated against the HOST
  * record, and routing another object's actions through them would need a
  * translation layer on every one of them. Reading the location the metadata

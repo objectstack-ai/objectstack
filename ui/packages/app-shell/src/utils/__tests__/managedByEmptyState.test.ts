@@ -131,14 +131,14 @@ describe('resolveManagedByEmptyState', () => {
 
   /**
    * The toolbar half of "the page offers a create action": the same three
-   * questions `action:bar` and `action:button` ask of a `list_toolbar` action.
+   * questions `action:bar` and `action:button` ask of a `list` action.
    */
   describe('listToolbarDrawsAction (objectui#11687)', () => {
     const allowAll = () => true;
     const invite = {
       name: 'invite_user',
       label: 'Invite User',
-      locations: ['list_toolbar'],
+      locations: ['list'],
       // `requiresFeature: 'organization'` as the spec lowers it (default-on flag).
       visible: { dialect: 'cel', source: 'features.organization != false' },
     };
@@ -152,19 +152,19 @@ describe('resolveManagedByEmptyState', () => {
     });
 
     it('does not count an action placed only on rows or the record header', () => {
-      const rowOnly = { name: 'cancel_invitation', locations: ['list_item', 'record_header'] };
+      const rowOnly = { name: 'cancel_invitation', locations: ['record'] };
       const unplaced = { name: 'orphan' };
       expect(listToolbarDrawsAction([rowOnly, unplaced], allowAll, {})).toBe(false);
     });
 
     it('does not count an action the caller may not invoke', () => {
-      const gated = { name: 'create_x', locations: ['list_toolbar'], requiredPermissions: ['manage_x'] };
+      const gated = { name: 'create_x', locations: ['list'], requiredPermissions: ['manage_x'] };
       expect(listToolbarDrawsAction([gated], () => false, {})).toBe(false);
       expect(listToolbarDrawsAction([gated], allowAll, {})).toBe(true);
     });
 
     it('fails closed on a `visible` that throws, as the button does', () => {
-      const broken = { name: 'x', locations: ['list_toolbar'], visible: { dialect: 'cel', source: 'nope.missing ==' } };
+      const broken = { name: 'x', locations: ['list'], visible: { dialect: 'cel', source: 'nope.missing ==' } };
       expect(listToolbarDrawsAction([broken], allowAll, {})).toBe(false);
     });
 

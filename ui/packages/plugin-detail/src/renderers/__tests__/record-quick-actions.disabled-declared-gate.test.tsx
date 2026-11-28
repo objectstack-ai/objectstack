@@ -39,7 +39,7 @@ import { RecordQuickActionsRenderer } from '../record-quick-actions';
 
 const LABEL = 'Act';
 /** `locations` is not defaulted — `getActionsForLocation` requires the match. */
-const ACT = { name: 'act', label: LABEL, type: 'script', locations: ['record_header'] };
+const ACT = { name: 'act', label: LABEL, type: 'script', locations: ['record_page'] };
 
 function mount(action: any, record: Record<string, unknown> = {}) {
   return render(

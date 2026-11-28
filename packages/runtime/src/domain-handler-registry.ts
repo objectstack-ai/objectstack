@@ -283,18 +283,24 @@ export interface DomainHandlerDeps {
     getObjectQL(context: HttpProtocolContext, environmentId?: string): Promise<IObjectQLEngine | null>;
     /**
      * Service lookup on the request's RESOLVED (per-environment) kernel —
-     * NOT the default kernel and NOT the scoped-factory path. Domains whose
-     * data must live in the same store as their service bindings (e.g.
-     * share-links: the token row and the shared record sit next to the
-     * `shareLinks` service's engine) read through this and fall back to
-     * `resolveService` themselves.
+     * NOT the default kernel and NOT the scoped-factory path.
+     *
+     * ⭐ A dispatcher DOOR reads its member through `readDoorSlot`
+     * (`./domains/own-door-bridge.ts`), which wraps this and nothing else: a
+     * door is served only by the request's own kernel, so a door ⛔ never adds
+     * a `resolveService` fall-back after this lookup.
+     *
+     * Elsewhere, a domain whose data must live in the same store as its service
+     * bindings (share-links: the token row and the shared record sit next to
+     * the `shareLinks` service's engine) reads its engine through this first and
+     * falls back to `resolveService` itself.
      *
      * [#4127 batch 4] The third and last lookup path on this contract, split by
      * the same rule as `resolveService`. It resolves the SAME slots off a
      * different kernel, so a slot's contract cannot depend on which path
-     * reached it — and its one caller proves the point: `share-links` tries
-     * this path and falls back to `resolveService` for the same `'objectql'`
-     * slot, so before this the two arms of one expression had different types.
+     * reached it: `share-links` tries this path and falls back to
+     * `resolveService` for the same `'objectql'` slot, so before the split the
+     * two arms of one expression had different types.
      */
     getRequestKernelService<K extends keyof ServiceSlotContracts>(context: HttpProtocolContext, name: K): Promise<ServiceSlotContract<K> | undefined>;
     getRequestKernelService(context: HttpProtocolContext, name: string): Promise<any>;

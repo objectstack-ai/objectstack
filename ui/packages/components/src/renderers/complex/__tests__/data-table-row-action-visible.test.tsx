@@ -12,7 +12,7 @@
  * way ObjectGrid's `RowActionMenuItem` already does.
  *
  * Bug context: a `sys_organization` detail page's Members tab renders member
- * rows through a related list, which feeds the child object's `list_item`
+ * rows through a related list, which feeds the child object's `record_row`
  * actions into the data-table as `rowActionDefs`. `sys_member`'s
  * `transfer_ownership` action declares
  *   `visible: "record.role != 'owner' && features.organization != false"`,

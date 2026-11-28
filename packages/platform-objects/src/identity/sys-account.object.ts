@@ -63,7 +63,7 @@ export const SysAccount = ObjectSchema.create({
       icon: 'unlink',
       variant: 'danger',
       mode: 'delete',
-      locations: ['list_item', 'record_header'],
+      locations: ['record'],
       type: 'api',
       target: '/api/v1/auth/unlink-account',
       // Confirm question on `description`, not `confirmText`: this action collects

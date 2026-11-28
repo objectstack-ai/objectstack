@@ -4652,7 +4652,7 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
              *
              * `rowActionDefs` is PRODUCER-DERIVED, not authored: `app-shell`'s
              * `ObjectView` builds it from `objectDef.actions` filtered by
-             * `locations.includes('list_item')` and writes it onto a
+             * `actionRendersAt(action, 'record_row')` and writes it onto a
              * `fullSchema: ListViewSchema`; `plugin-view`'s `ObjectView`
              * composes the same key onto a `list-view` node. `@objectstack/spec/ui`
              * REFUSES it by name on both the list and the grid surface, and

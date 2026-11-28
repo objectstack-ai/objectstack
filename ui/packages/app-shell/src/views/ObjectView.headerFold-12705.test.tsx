@@ -124,9 +124,9 @@ import { ExpressionProvider } from '../providers/ExpressionProvider';
 
 const USER = { id: 'u1', name: 'Ada', profile: 'admin' };
 
-const UPDATE_STAGE = { name: 'update_stage', label: 'Update Stage', type: 'script', locations: ['list_toolbar'] };
-const INVITE = { name: 'invite_user', label: 'Invite User', type: 'script', variant: 'primary', locations: ['list_toolbar'] };
-const CREATE_USER = { name: 'create_user', label: 'Create User', type: 'script', locations: ['list_toolbar'] };
+const UPDATE_STAGE = { name: 'update_stage', label: 'Update Stage', type: 'script', locations: ['list'] };
+const INVITE = { name: 'invite_user', label: 'Invite User', type: 'script', variant: 'primary', locations: ['list'] };
+const CREATE_USER = { name: 'create_user', label: 'Create User', type: 'script', locations: ['list'] };
 
 /** An opportunity-like list: New, Import, one toolbar action. */
 const OPPORTUNITY = {
@@ -300,7 +300,7 @@ describe('the object list’s header folds its actions (objectui#12705)', () => 
       type: 'url',
       target: 'https://example.test/report',
       openIn: 'new-tab',
-      locations: ['list_toolbar'],
+      locations: ['list'],
     };
     headerWidth = 400;
     const { cluster } = renderList({ ...OPPORTUNITY, actions: [UPDATE_STAGE, OPEN_REPORT] }, '?runAction=open_report');
@@ -319,7 +319,7 @@ describe('the object list’s header folds its actions (objectui#12705)', () => 
  * header keeps `actions` at every width and the description truncates instead.
  */
 describe('a list with no declared primary keeps its actions labelled (objectstack#33988)', () => {
-  const LAUNCH = { name: 'launch_contract', label: 'Launch Contract', type: 'script', locations: ['list_toolbar'] };
+  const LAUNCH = { name: 'launch_contract', label: 'Launch Contract', type: 'script', locations: ['list'] };
   /** The card's object: no New for the reader, one undeclared toolbar action, its English description. */
   const CONTRACTS = {
     name: 'demo_contract',
@@ -359,6 +359,6 @@ describe('declaredPrimaryToolbarAction (objectui#12705)', () => {
     expect(declaredPrimaryToolbarAction([CREATE_USER, INVITE] as any)?.name).toBe('invite_user');
     expect(declaredPrimaryToolbarAction([CREATE_USER, late, early] as any)?.name).toBe('early');
     expect(declaredPrimaryToolbarAction([CREATE_USER, UPDATE_STAGE] as any)).toBeUndefined();
-    expect(declaredPrimaryToolbarAction([{ ...INVITE, locations: ['record_header'] }] as any)).toBeUndefined();
+    expect(declaredPrimaryToolbarAction([{ ...INVITE, locations: ['record_page'] }] as any)).toBeUndefined();
   });
 });
