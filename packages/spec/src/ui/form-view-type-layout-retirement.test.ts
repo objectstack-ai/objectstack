@@ -16,7 +16,10 @@
  *   2. The split-only keys `sections[].pane` (and the legacy `groups[].pane`),
  *      `splitSize`, `splitResizable` and — since the renderer half, #27159 —
  *      `splitDirection` are `retiredKey()` tombstones, refused on every
- *      layout. `modalSize` stays declared — a stated boundary, pinned as one.
+ *      layout. `modalSize` stayed declared here, a stated boundary, and was
+ *      retired at 19 ([#36544] `form-view-modal-size-removed`): the boundary
+ *      pin below now asserts its refusal, and its kit is pinned in
+ *      `form-view-drawer-keys-retirement.test.ts`.
  *      ([#29012] `drawerSide` / `drawerWidth` stayed here and were retired
  *      later in the same release: `form-view-drawer-keys-removed`, pinned in
  *      `form-view-drawer-keys-retirement.test.ts`.)
@@ -228,16 +231,23 @@ describe('the split-only keys — `pane`, `splitSize`, `splitResizable`, `splitD
     ]));
   });
 
-  it('STATED BOUNDARY: `modalSize` stays declared', () => {
-    // `modalSize` stays declared; since #36425 the console's record dialog reads no form view (its verdict: #36544).
-    // [#29012] `drawerSide` / `drawerWidth` left this boundary: they are
-    // tombstones now (`form-view-drawer-keys-retirement.test.ts`).
+  it('THE BOUNDARY MOVED: `modalSize` no longer stays declared, it is refused with its prescription', () => {
+    // [#36544] `modalSize` was this retirement's stated boundary while the
+    // console's record dialog read it. That dialog reads no form view since
+    // #36425, so the key is a tombstone now, as `drawerSide` / `drawerWidth`
+    // are ([#29012]); the kit of both is pinned in
+    // `form-view-drawer-keys-retirement.test.ts`.
     const r = FormViewSchema.safeParse({
       type: 'simple',
       sections: SECTIONS,
       modalSize: 'lg',
     });
-    expect(r.success).toBe(true);
+    expect(r.success).toBe(false);
+    expect(r.error!.issues, JSON.stringify(r.error!.issues)).toHaveLength(1);
+    expect(r.error!.issues[0]!.path).toEqual(['modalSize']);
+    expect(r.error!.issues[0]!.message.startsWith('`view.form.modalSize` was removed in @objectstack/spec 19.0.0 (ADR-0049)'), r.error!.issues[0]!.message).toBe(true);
+    // The same form without the key is the form this retirement left legal.
+    expect(FormViewSchema.safeParse({ type: 'simple', sections: SECTIONS }).success).toBe(true);
   });
 
   it('fails tsc at the authoring site: the tombstoned keys admit only absence', () => {
@@ -414,8 +424,9 @@ describe(`the D2 conversion ${CONVERSION_ID}`, () => {
           splitDirection: 'vertical',
           sections: [{ label: 'A', pane: 'primary', fields: ['name'] }, { label: 'B', pane: 'secondary', fields: ['email'] }],
         },
-        // [#29012] The bystander is `modalSize`: `drawerSide` is stripped by its own conversion now.
-        quick: { type: 'drawer', modalSize: 'lg', sections: [{ label: 'Q', fields: ['status'] }] },
+        // The bystander is `columns`: `drawerSide` ([#29012]) and `modalSize`
+        // ([#36544]) are each stripped by a conversion of their own now.
+        quick: { type: 'drawer', columns: 2, sections: [{ label: 'Q', fields: ['status'] }] },
       },
     };
     const notices: ConversionNotice[] = [];
@@ -432,7 +443,7 @@ describe(`the D2 conversion ${CONVERSION_ID}`, () => {
     expect(parsed.formViews?.beside?.type).toBe('simple');
     expect(parsed.formViews?.beside).not.toHaveProperty('splitDirection');
     expect(parsed.formViews?.quick?.type).toBe('simple');
-    expect(parsed.formViews?.quick?.modalSize).toBe('lg');
+    expect(parsed.formViews?.quick?.columns).toBe(2);
     // A live layout is the author's and is never touched.
     expect(out.form).toBe(row.form);
     // Copy-on-write: the stored row is not mutated.
@@ -440,11 +451,11 @@ describe(`the D2 conversion ${CONVERSION_ID}`, () => {
   });
 
   it('a STORED form view item record converts its `config`', () => {
-    const row = { name: 'crm_lead.peek', object: 'crm_lead', viewKind: 'form', config: { type: 'modal', modalSize: 'lg', sections: SECTIONS } };
+    const row = { name: 'crm_lead.peek', object: 'crm_lead', viewKind: 'form', config: { type: 'modal', columns: 2, sections: SECTIONS } };
     const notices: ConversionNotice[] = [];
     const out = applyConversionsToStoredItem('view', row, { onNotice: (n) => notices.push(n) }) as typeof row;
     expect(notices.filter(ours).map((n) => n.path)).toEqual(['views[0].config.type']);
-    expect(out.config).toEqual({ modalSize: 'lg', sections: SECTIONS });
+    expect(out.config).toEqual({ columns: 2, sections: SECTIONS });
     expect(ViewItemSchema.safeParse(out).success).toBe(true);
   });
 

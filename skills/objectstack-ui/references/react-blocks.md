@@ -25,6 +25,7 @@ Server-connected create/edit/view form for one object. Config props come from th
 | `readOnly` | `boolean` | binding |  | Render every field read-only, whatever `mode` says. |
 | `drawerSide` | `'top' \| 'bottom' \| 'left' \| 'right'` | binding |  | Edge the drawer container opens from, when the React `ObjectForm` block opens this form with formType 'drawer' |
 | `drawerWidth` | `string` | binding |  | Size of the drawer container the React `ObjectForm` block opens with formType 'drawer', as a CSS length such as "480px": its width when drawerSide is left or right, its height when top or bottom. Unset, the drawer keeps its default size. |
+| `modalSize` | `'sm' \| 'default' \| 'lg' \| 'xl' \| 'full'` | binding |  | Size bucket of the block's modal container (formType 'modal'). Unset, the modal picks a size from the form's columns and field count. |
 | `modalCloseButton` | `boolean` | binding |  | Show the close button of the block's modal container (formType 'modal'). |
 | `contentLayout` | `'simple' \| 'tabbed'` | binding |  | How the modal presentation lays out sections; 'tabbed' needs more than one section to differ from 'simple'. |
 | `confirmOnDiscard` | `boolean` | binding |  | Ask before discarding unsaved edits when a drawer/modal form is dismissed. Set false to close immediately. |
@@ -46,7 +47,6 @@ Server-connected create/edit/view form for one object. Config props come from th
 | `layout` | `'vertical' \| 'horizontal'` | data |  | Field layout direction — 'vertical' (the renderer default) or 'horizontal'. Multi-column is not a layout value: set `columns` |
 | `columns` | `integer` | data |  | Number of columns for the form body |
 | `tabPosition` | `'top' \| 'bottom' \| 'left' \| 'right'` | data |  | Tab strip position (tabbed forms) |
-| `modalSize` | `'sm' \| 'default' \| 'lg' \| 'xl' \| 'full'` | data |  | Size bucket of the dialog a caller opens this form in: the console's New / Edit dialog, or the modal container of the React `ObjectForm` block (formType 'modal… |
 | `sections` | `object[]` | data |  |  |
 | `subforms` | `object[]` | data |  | Inline master-detail child collections |
 | `submitBehavior` | `object` | data |  | Post-submit behavior. On the `redirect` arm, `url` is relative-only and interpolates only declared record fields as `{{record.field_name}}`, URL-escaped. |

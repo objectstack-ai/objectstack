@@ -27,8 +27,10 @@ import { type Dict, isDict, stripKeys } from '../shared.js';
  * tombstone. Deleting is the whole edit: a form whose `type` was retired lands
  * on the `simple` default, the conversion invents no layout. The keys go on
  * every form, whatever its `type`: each is refused on every form now, and a
- * `pane` on a non-split form was already a parse error. `modalSize` stays,
- * because the console's record dialog reads it on every layout. `drawerSide`
+ * `pane` on a non-split form was already a parse error. `modalSize` stayed
+ * here, because the console's record dialog read it on every layout; it left
+ * the form view at 19, once that dialog stopped loading a form view
+ * ([#36544] `form-view-modal-size-removed`). `drawerSide`
  * and `drawerWidth` stayed here and left the form view later in the same
  * release ([#29012] {@link formViewDrawerKeysRemoved}).
  *
@@ -210,7 +212,9 @@ const formViewPresentationTypesRemoved: MetadataConversion = {
             // `drawerSide`, which `form-view-drawer-keys-removed` now strips.)
             quick: { type: 'drawer', title: 'Quick', sections: [{ label: 'Quick', fields: ['status'] }] },
             // A modal form whose sections ride the legacy `groups` alias.
-            dialog: { type: 'modal', modalSize: 'lg', groups: [{ label: 'Edit', fields: ['title'] }] },
+            // ([#36544] Its bystander key is not `modalSize`, which
+            // `form-view-modal-size-removed` strips at 19.)
+            dialog: { type: 'modal', columns: 2, groups: [{ label: 'Edit', fields: ['title'] }] },
           },
         },
         // A form view item record: the payload is `config`.
@@ -264,7 +268,7 @@ const formViewPresentationTypesRemoved: MetadataConversion = {
               ],
             },
             quick: { title: 'Quick', sections: [{ label: 'Quick', fields: ['status'] }] },
-            dialog: { modalSize: 'lg', groups: [{ label: 'Edit', fields: ['title'] }] },
+            dialog: { columns: 2, groups: [{ label: 'Edit', fields: ['title'] }] },
           },
         },
         { name: 'fv_task.peek', object: 'fv_task', viewKind: 'form', config: {} },

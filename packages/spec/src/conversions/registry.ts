@@ -141,6 +141,7 @@ import { flowDecisionModeInclusiveExplicit } from './entries/18/flow-decision-mo
 import { actionLocationsActedOn } from './entries/19/action-locations-acted-on.js';
 import { actionTypeAskAiRemoved } from './entries/19/action-type-ask-ai-removed.js';
 import { agentModelProviderRemoved } from './entries/19/agent-model-provider-removed.js';
+import { formViewModalSizeRemoved } from './entries/19/form-view-modal-size-removed.js';
 import { knowledgeSourceContentFieldsToContent } from './entries/19/knowledge-source-content-fields-to-content.js';
 import { knowledgeSourceIdToName } from './entries/19/knowledge-source-id-to-name.js';
 import { knowledgeSourceInertKeysRemoved } from './entries/19/knowledge-source-inert-keys-removed.js';
@@ -332,6 +333,13 @@ const MAJOR_18_CONVERSIONS: readonly OrderedConversion[] = [
  * left and converts to `record_page`. In the other order the locations entry
  * leaves the group at `record_header` as a TODO, the removal deletes the
  * member, and the group is stranded at a word protocol 19 draws nowhere.
+ *
+ * The form view's `modalSize` delete writes form payloads only, which no
+ * other entry of this major writes, and applies last (`order: 4`). One entry
+ * READS them: over sources `action-type-ask-ai-removed` takes every string of
+ * the stack as a possible name of a declared `ask_ai` action, a `modalSize`
+ * value included. It applies before this delete, so such a value still counts
+ * there, and that is its conservative side: the action is kept for the author.
  */
 const MAJOR_19_CONVERSIONS: readonly OrderedConversion[] = [
   { conversion: actionLocationsActedOn, order: 3 },
@@ -340,6 +348,7 @@ const MAJOR_19_CONVERSIONS: readonly OrderedConversion[] = [
   // first, so it cannot hold a `record_header` group back as a TODO there.
   { conversion: actionTypeAskAiRemoved, order: 2.5 },
   { conversion: agentModelProviderRemoved, order: 2 },
+  { conversion: formViewModalSizeRemoved, order: 4 },
   { conversion: knowledgeSourceContentFieldsToContent, order: 2 },
   { conversion: knowledgeSourceIdToName, order: 1 },
   { conversion: knowledgeSourceInertKeysRemoved, order: 3 },
