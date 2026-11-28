@@ -51,6 +51,26 @@
  * service answers at index and search for a store that is not mounted.
  * Nothing was written.
  *
+ * ## A knowledge service registered, with no instance in this scope
+ *
+ * A host can register `knowledge` per environment, as a scoped factory that
+ * answers no instance for some of them. The deployment does run a knowledge
+ * service then, so the sentence above would be false, and its remedy (the
+ * stack's `requires`) is not the fix: the host's registration decides. A door
+ * whose lookup tells that miss apart answers it as
+ * {@link knowledgeServiceNotInScope}, and the save is refused with its own
+ * sentence ({@link noKnowledgeServiceInScopeRefusal}), the same status and
+ * code. The platform's `KnowledgeServicePlugin` registers a plain instance,
+ * so its own service never reaches this.
+ *
+ * ## The door's wording
+ *
+ * The sentences name the save's remedy (save the source again, nothing was
+ * written). A door that copies sources rather than saves one, the package
+ * duplicate, asks with `door: 'duplicate'` and gets its caller's remedy
+ * (duplicate the package again) and no "nothing was written" of its own: that
+ * door's prefix says once that nothing was copied.
+ *
  * ## Fail direction
  *
  * Access-narrowing, so it fails closed: a knowledge service that cannot be
@@ -78,18 +98,61 @@ export type AuthoredKnowledgeSourceVerdict =
     | { admitted: true }
     | ({ admitted: false } & AuthoredKnowledgeSourceRefusal);
 
+/**
+ * Which door asks, for the remedy its caller is told: `save` (the default) for
+ * a door that saves one item, `duplicate` for the package duplicate, which
+ * copies a package's sources.
+ */
+export type KnowledgeSourceSaveDoor = 'save' | 'duplicate';
+
+/** Brand of {@link knowledgeServiceNotInScope}, shared across copies of this module. */
+const NOT_IN_SCOPE = Symbol.for('@objectstack/metadata-core/knowledge-service-not-in-scope');
+
+/**
+ * What a door's `resolveKnowledgeService` answers when a `knowledge`
+ * registration exists and the lookup made in the request's scope produced no
+ * instance (a host's scoped factory that serves no service for that
+ * environment). Built by {@link knowledgeServiceNotInScope}.
+ */
+export interface KnowledgeServiceNotInScope {
+    readonly [NOT_IN_SCOPE]: true;
+    /** The scope the lookup was made in: the request's environment. */
+    readonly scopeId: string;
+}
+
+/** The answer a door's lookup gives for a scope-relative miss of the `knowledge` service. */
+export function knowledgeServiceNotInScope(scopeId: string): KnowledgeServiceNotInScope {
+    return Object.freeze({ [NOT_IN_SCOPE]: true as const, scopeId });
+}
+
+function isKnowledgeServiceNotInScope(value: unknown): value is KnowledgeServiceNotInScope {
+    return typeof value === 'object' && value !== null && (value as Record<symbol, unknown>)[NOT_IN_SCOPE] === true;
+}
+
 /** The member of the `knowledge` service the doors ask, reached duck-typed. */
 export interface KnowledgeSourceSaveAdmitter {
     admitAuthoredSource(item: unknown, context: unknown): Promise<AuthoredKnowledgeSourceVerdict>;
 }
 
-function unavailable(why: string): AuthoredKnowledgeSourceRefusal {
+/** The remedy and the no-op each door's caller is told. */
+const DOOR_WORDING: Readonly<Record<KnowledgeSourceSaveDoor, { notDone: string; retry: string; nothingDone: string }>> = {
+    save: { notDone: 'was not saved', retry: 'save the source again', nothingDone: ' Nothing was written.' },
+    duplicate: { notDone: 'cannot be copied', retry: 'duplicate the package again', nothingDone: '' },
+};
+
+function sourceSubject(item: unknown): string {
+    const name = (item as { name?: unknown } | null | undefined)?.name;
+    return typeof name === 'string' && name !== '' ? `The knowledge source '${name}'` : 'The knowledge source';
+}
+
+function unavailable(why: string, door: KnowledgeSourceSaveDoor): AuthoredKnowledgeSourceRefusal {
+    const wording = DOOR_WORDING[door];
     return {
         status: 503,
         code: 'SERVICE_UNAVAILABLE',
         message:
-            `The knowledge source was not saved: whether its author may search what it would index could not be ` +
-            `judged (${why}). Nothing was written; try again.`,
+            `The knowledge source ${wording.notDone}: whether its author may search what it would index could not be ` +
+            `judged (${why}).` + (door === 'save' ? ' Nothing was written; try again.' : ' Duplicate the package again.'),
     };
 }
 
@@ -100,18 +163,41 @@ function unavailable(why: string): AuthoredKnowledgeSourceRefusal {
  * while the process runs, so the remedy is ordered: the token, a restart, then
  * the save.
  */
-function noKnowledgeServiceRefusal(item: unknown): AuthoredKnowledgeSourceRefusal {
-    const name = (item as { name?: unknown } | null | undefined)?.name;
-    const source = typeof name === 'string' && name !== '' ? `The knowledge source '${name}'` : 'The knowledge source';
+function noKnowledgeServiceRefusal(item: unknown, door: KnowledgeSourceSaveDoor): AuthoredKnowledgeSourceRefusal {
+    const wording = DOOR_WORDING[door];
     return {
         status: 503,
         code: 'SERVICE_UNAVAILABLE',
         message:
-            `${source} was not saved: this deployment runs no knowledge service, so nothing would load, index or ` +
-            "search it. Add requires: ['knowledge'] to the stack (or, on a host that composes its own kernel, " +
-            'KnowledgeServicePlugin from @objectstack/service-knowledge and a knowledge store), restart the server, ' +
-            'then save the source again: the service is mounted when the server starts, never while it runs. ' +
-            'Nothing was written.',
+            `${sourceSubject(item)} ${wording.notDone}: this deployment runs no knowledge service, so nothing would ` +
+            "load, index or search it. Add requires: ['knowledge'] to the stack (or, on a host that composes its own " +
+            'kernel, KnowledgeServicePlugin from @objectstack/service-knowledge and a knowledge store), restart the ' +
+            `server, then ${wording.retry}: the service is mounted when the server starts, never while it runs.` +
+            wording.nothingDone,
+    };
+}
+
+/**
+ * The refusal of an author's `knowledge_source` save where a `knowledge`
+ * registration exists and answers no instance for the request's environment
+ * (a host's scoped factory). The deployment does run a knowledge service, so
+ * the stack's `requires` is not the remedy: the host's registration decides
+ * which environments it serves.
+ */
+function noKnowledgeServiceInScopeRefusal(
+    item: unknown,
+    scopeId: string,
+    door: KnowledgeSourceSaveDoor,
+): AuthoredKnowledgeSourceRefusal {
+    const wording = DOOR_WORDING[door];
+    return {
+        status: 503,
+        code: 'SERVICE_UNAVAILABLE',
+        message:
+            `${sourceSubject(item)} ${wording.notDone}: the knowledge service registered on this deployment serves ` +
+            `no instance for environment '${scopeId}', so nothing would load, index or search it there. The host's ` +
+            `knowledge service registration decides which environments it serves; once it serves '${scopeId}', ` +
+            `${wording.retry}.` + wording.nothingDone,
     };
 }
 
@@ -121,7 +207,9 @@ function noKnowledgeServiceRefusal(item: unknown): AuthoredKnowledgeSourceRefusa
  *
  * `resolveKnowledgeService` answers the request environment's `knowledge`
  * service, `undefined` when none is registered (an author's save is then
- * refused), and throws when one is registered and cannot be resolved.
+ * refused), {@link knowledgeServiceNotInScope} when one is registered and
+ * serves no instance in the request's scope (refused, with its own sentence),
+ * and throws when one is registered and cannot be resolved.
  */
 export async function authoredKnowledgeSourceRefusal(input: {
     /** The metadata type saved, in any URL spelling the protocol accepts. */
@@ -131,23 +219,27 @@ export async function authoredKnowledgeSourceRefusal(input: {
     /** The author's execution context. */
     executionContext: unknown;
     resolveKnowledgeService: () => Promise<unknown> | unknown;
+    /** The door that asks, for its caller's remedy; `save` when absent. */
+    door?: KnowledgeSourceSaveDoor;
 }): Promise<AuthoredKnowledgeSourceRefusal | undefined> {
     if (canonicalMetaUrlType(input.type) !== KNOWLEDGE_SOURCE_TYPE) return undefined;
     if ((input.executionContext as { isSystem?: unknown } | null | undefined)?.isSystem === true) return undefined;
+    const door: KnowledgeSourceSaveDoor = input.door ?? 'save';
     let service: unknown;
     try {
         service = await input.resolveKnowledgeService();
     } catch (err) {
-        return unavailable(`the knowledge service could not be resolved: ${err instanceof Error ? err.message : String(err)}`);
+        return unavailable(`the knowledge service could not be resolved: ${err instanceof Error ? err.message : String(err)}`, door);
     }
-    if (service === undefined || service === null) return noKnowledgeServiceRefusal(input.item);
+    if (service === undefined || service === null) return noKnowledgeServiceRefusal(input.item, door);
+    if (isKnowledgeServiceNotInScope(service)) return noKnowledgeServiceInScopeRefusal(input.item, service.scopeId, door);
     const admit = (service as Partial<KnowledgeSourceSaveAdmitter>).admitAuthoredSource;
     if (typeof admit !== 'function') return undefined;
     let verdict: AuthoredKnowledgeSourceVerdict;
     try {
         verdict = await admit.call(service, input.item, input.executionContext);
     } catch (err) {
-        return unavailable(err instanceof Error ? err.message : String(err));
+        return unavailable(err instanceof Error ? err.message : String(err), door);
     }
     if (!verdict || verdict.admitted === true) return undefined;
     return { status: verdict.status, code: verdict.code, message: verdict.message };
