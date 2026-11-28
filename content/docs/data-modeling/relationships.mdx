@@ -63,7 +63,10 @@ price_book: Field.lookup('price_book', {
 
 - **The reference.** `{ $record }` is the whole `value`, never a member of an `in` / `notIn`
   list, and pairs only with `eq`, `ne`, `gt`, `lt`, `gte` or `lte`. `os validate` refuses a
-  path that names no field of the object the lookup is on, or of the object its hop points at.
+  path that names no field of the object the lookup is on, or of the object its hop points at,
+  and a path whose first field, or whose leaf behind the hop, holds a list or an object rather
+  than one value: a multi-valued field, or a structured one (`json`, `address`, `location`,
+  `repeater` and the like).
 - **Where it resolves.** In a record form, whatever its layout. Every other picker host leaves
   every `{ $record }` entry out: inline edit on a record page, a record page's header or
   related list, an action's parameter dialog, and a bulk action over selected rows.
