@@ -375,8 +375,7 @@ export class TursoKnowledgeAdapter implements IKnowledgeAdapter {
    * Whether the approximate vector index of a generation instance (its
    * passage table and the time its generation row was made, {@link
    * vectorIndexKey}) is complete, as this process last found it: kept true by
-   * the triggers while the instance lasts, and a generation another process
-   * drops and makes again under the same number is another instance.
+   * the triggers while the instance lasts.
    */
   private readonly vectorIndexKnown = new Map<string, boolean>();
   /**

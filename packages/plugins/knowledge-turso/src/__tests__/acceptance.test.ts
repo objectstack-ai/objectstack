@@ -1372,6 +1372,13 @@ for (const kind of ['memory', 'file'] as StoreKind[]) {
         for (const query of ['w1x w2x', 'w3x w4x', 'w5x']) await adapter.search(query, { source: s, topK: 5 });
         expect(vectorCatalogReads(watched, from)).toBe(0);
         expect(vectorLegs(watched.sql, from)).toEqual({ approximate: 0, exact: 3 });
+        if (vectorIndexThreshold === Infinity) {
+          // An adapter that did not build the source reads no catalog for an index either.
+          const other = new TursoKnowledgeAdapter({ id: 'under_test', client: watched.client, embedder: new FakeEmbedder(), vectorIndexThreshold });
+          const at = watched.sql.length;
+          for (const query of ['w1x w2x', 'w3x w4x']) await other.search(query, { source: s, topK: 5 });
+          expect(vectorCatalogReads(watched, at)).toBe(0);
+        }
       }
     });
 
@@ -1446,14 +1453,14 @@ describe('knowledge-turso approximate vector index: two processes on one file st
     await adapter.completeBuild(ctx(s));
   };
 
-  it('a source another process dropped and built again under the threshold is searched by the exact scan, not by the index it had', async () => {
+  it('the index memory is keyed per generation instance', async () => {
     const s = source('ann_two_procs');
     const { a, b } = processes();
     await build(a.adapter, s, 60);
     let from = b.sql.length;
     expect(await b.adapter.search('w1x w2x', { source: s, topK: 5 })).toHaveLength(5);
     expect(vectorLegs(b.sql, from)).toEqual({ approximate: 1, exact: 0 });
-    // Generation 1 again, made anew, under the threshold: no index.
+    // A new instance of generation 1, under the threshold.
     await a.adapter.dropSource(ctx(s));
     await build(a.adapter, s, 30);
     expect(await vectorObjects(a.client, `knowledge_${s.name}_g1`)).toEqual([]);
@@ -1462,7 +1469,7 @@ describe('knowledge-turso approximate vector index: two processes on one file st
     expect(vectorLegs(b.sql, from)).toEqual({ approximate: 0, exact: 1 });
   });
 
-  it('an index gone under the memory of it is answered by the exact scan, and forgotten', async () => {
+  it('a failed approximate statement is answered by the exact scan, and its memory forgotten', async () => {
     const s = source('ann_gone');
     const { a, b, raw } = processes();
     await build(a.adapter, s, 60);
