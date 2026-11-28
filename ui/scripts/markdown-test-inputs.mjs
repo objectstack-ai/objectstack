@@ -857,7 +857,7 @@ export const ADJUDICATED = new Map([
     'scripts/__tests__/markdown-test-inputs.test.ts',
     {
       reads: [],
-      notRead: ['../AGENTS.md', '../README.md', '../ROADMAP.md', '../SECURITY.md', 'AGENTS.md', 'packages/app-shell/README.md', 'packages/plugin-dashboard/README.md'],
+      notRead: ['../AGENTS.md', '../README.md', '../ROADMAP.md', '../SECURITY.md', '../docs/adr/0084-application-builder-information-architecture.md', 'AGENTS.md', 'packages/app-shell/README.md', 'packages/plugin-dashboard/README.md'],
     },
   ],
   // objectstack#26080 folded `QUICK_REFERENCE.md` into the repository root's
