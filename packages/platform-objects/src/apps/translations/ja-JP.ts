@@ -102,6 +102,7 @@ export const jaJP: TranslationData = {
         nav_settings_storage: { label: 'ファイルストレージ' },
         nav_settings_ai: { label: 'AI と Embedder' },
         nav_settings_knowledge: { label: 'ナレッジ' },
+        nav_knowledge_sync_states: { label: 'ナレッジ同期状況' },
         nav_settings_lifecycle: { label: 'データライフサイクル' },
         nav_recycle_bin: { label: 'ごみ箱' },
         nav_public_forms: { label: '公開フォーム' },

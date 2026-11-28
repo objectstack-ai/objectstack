@@ -113,6 +113,7 @@ export const ptBR: TranslationData = {
         nav_settings_storage: { label: 'Armazenamento de arquivos' },
         nav_settings_ai: { label: 'IA e Embedder' },
         nav_settings_knowledge: { label: 'Conhecimento' },
+        nav_knowledge_sync_states: { label: 'Status de sincronização do conhecimento' },
         nav_settings_lifecycle: { label: 'Ciclo de vida dos dados' },
         nav_recycle_bin: { label: 'Lixeira' },
         nav_public_forms: { label: 'Formulários públicos' },

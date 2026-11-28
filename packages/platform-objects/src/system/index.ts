@@ -25,6 +25,9 @@ export { SysMigration } from './sys-migration.object.js';
 export { SysMigrationJournal } from './sys-migration-journal.object.js';
 // [ADR-0057] The lifecycle sweeper's clock state, tenant-less.
 export { SysLifecycleState } from './sys-lifecycle-state.object.js';
+// [ADR-0161] One row per knowledge source: its last build and failed syncs,
+// tenant-less. Registered by the knowledge service, not by this package.
+export { SysKnowledgeSyncState } from './sys-knowledge-sync-state.object.js';
 // [ADR-0148, #30237] The recycle bin: one entry per delete operation.
 export { SysRecycleBin } from './sys-recycle-bin.object.js';
 // [#31021] Which declared seed rows landed in an organization.

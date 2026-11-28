@@ -106,6 +106,7 @@ export const zhCN: TranslationData = {
         nav_settings_storage: { label: '文件存储' },
         nav_settings_ai: { label: 'AI 与向量化' },
         nav_settings_knowledge: { label: '知识库' },
+        nav_knowledge_sync_states: { label: '知识库同步状态' },
         nav_settings_lifecycle: { label: '数据生命周期' },
         nav_recycle_bin: { label: '回收站' },
         nav_public_forms: { label: '对外表单' },

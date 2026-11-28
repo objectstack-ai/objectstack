@@ -113,6 +113,7 @@ export const de: TranslationData = {
         nav_settings_storage: { label: 'Dateispeicher' },
         nav_settings_ai: { label: 'KI und Embedder' },
         nav_settings_knowledge: { label: 'Wissen' },
+        nav_knowledge_sync_states: { label: 'Wissenssynchronisierung' },
         nav_settings_lifecycle: { label: 'Datenlebenszyklus' },
         nav_recycle_bin: { label: 'Papierkorb' },
         nav_public_forms: { label: 'Öffentliche Formulare' },
