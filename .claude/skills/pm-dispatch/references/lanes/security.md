@@ -41,7 +41,7 @@
 - 问题随附复核判词与全部异议。
 - 每次发版前呈发布与否清单:上次发版后 `closed` 的公告,高危、中危在前;先经上条复核。
 - 清单按组列,成员列在牵头下。
-- 修复在版本 X 内,只当其合并提交是 X 打标提交的祖先(`git merge-base --is-ancestor`)。
+- 修复在版本 X 内,只当其合并提交是 X 打标提交的祖先(`git-history.mjs ancestor`)。
 - ⛔ 合并时刻早于打标时刻不是证据。
 - 维护者批准即 `awaiting publish`;本席经中继依序 `advisory_rewrite` 换正文、`advisory_versions`、`advisory_state` 发布即 `published`,照第 3 节;正文含席位签名行即拒;⛔ 不发清单外的。
 

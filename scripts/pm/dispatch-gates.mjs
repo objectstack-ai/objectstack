@@ -13268,8 +13268,9 @@ export function residueLines(
  * review owed ONLY by a `Clause-②: yes` declaration is served at
  * `TIER_DEFAULT` by the lane seat, as its own review of record. No lane names
  * this tier. As the `--tier` note spells it, a card that WIDENS a published
- * accept set or the public surface is spec-lane work, whichever seat found
- * it; a card that only NARROWS one is `Clause-②: no`, stays in its lane, and
+ * accept set or the public surface is built and reviewed by the seat that
+ * claimed it — a contract-surface hit no longer moves the card to another
+ * lane; a card that only NARROWS one is `Clause-②: no`, stays in its lane, and
  * owes one contract-review-tier review before the queue. The
  * BUILD of such a card is at the default judgment tier, so
  * this constant is a review tier and never a dispatch mandate. Declared HERE
@@ -13502,7 +13503,7 @@ export function tierLines(result) {
     ' REVIEW too — owed by SURFACE, never by lane — at the tier of the face that made it owed:' +
     ` ${CONTRACT_REVIEW_TIER_NAME} for a published schema or governed rules text (in-seat at tier or by the at-tier` +
     ` subagent), ${TIER_DEFAULT_NAME} for the \`Clause-②: yes\` declaration alone, the lane seat's own review of record;` +
-    ' default-tier build; a hit outside the spec lane is spec-lane work and moves there. A card that only NARROWS one is' +
+    ' default-tier build; a contract-surface hit no longer moves the card — build and review stay with the claiming seat. A card that only NARROWS one is' +
     ' `Clause-②: no`, stays in its lane, and owes one contract-review-tier review before the queue — judged from' +
     ' the card CONTENT. This line is a FLOOR, never a clearance.';
   // The suspicion tail prints only on a hit — unlike the clause-② note above,
@@ -13513,7 +13514,7 @@ export function tierLines(result) {
     : [
         `  Clause ② SUSPECT surface — a hint, not a verdict: judge the tier from the card CONTENT as best you can` +
           ` (a card widening a published accept set or the public surface is reviewed at ${CONTRACT_REVIEW_TIER}` +
-          ' in the spec lane — a contract-surface hit is spec-lane work whichever seat found it — built at the default tier;' +
+          ' and built at the default tier, both by the claiming seat — a contract-surface hit no longer moves the card;' +
           ' a card that only narrows one stays in its lane and owes the same review before the queue);' +
           ` whichever tier is dispatched, the PR's actual diff passes the clause-② enqueue gate before the card may enqueue.`,
         ...suspects.map((s) => `    - ${s.path} ⇢ '${s.glob}' — ${s.why}`),
