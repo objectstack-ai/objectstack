@@ -41,6 +41,18 @@
  * - a write whose own data names an organization the wall does not admit, and
  *   an update whose own data empties a row's organization, are refused —
  *   judged for every caller;
+ * - a write is judged again as it will be stored, as the plain door judges
+ *   it: the rows the write's before-hooks leave are held to the same rule
+ *   (the engine's `postHookWriteImageCheck` seam, its judging half only —
+ *   the system strips stay off), so an organization a hook writes onto the
+ *   row is judged as one the write sent;
+ * - the option bag's tenant keys (`tenantId`, `tenantIds`, which the engine
+ *   hands its driver as given) never widen the elevation past the wall: a
+ *   write whose bag names an organization the wall does not admit, or clears
+ *   the key, is refused, and a read whose bag does is answered by the read
+ *   rule — the wall is composed onto its predicate, as the plain door's is. A
+ *   before-hook that sets either key on the bag it is handed is held to the
+ *   same rule as it sets it;
  * - a caller the wall DENIES — no active organization under `isolated`, an
  *   empty membership set under `group`, a person outside every organization
  *   under `single` (ADR-0093 D8.1, as amended) — reads nothing (zero rows, no
@@ -319,6 +331,91 @@ function admittedOrganizations(verdict: TenantLayer0Verdict): ReadonlySet<string
   return undefined;
 }
 
+/** The verbs whose option bag the engine hands its driver: `find`, `findOne`, `update`, `delete` and `purge`. */
+const BAG_VERBS: ReadonlySet<string> = new Set(['find', 'findOne', 'update', 'delete', 'purge']);
+
+/** The option bag's driver pass-through tenant keys. */
+const BAG_TENANT_KEYS = ['tenantId', 'tenantIds'] as const;
+
+/**
+ * What an option bag's tenant keys ask of the driver: the organizations they
+ * name, and whether `tenantId` is present yet names none (`null`, `''`, any
+ * value that is not an organization id) — the driver then applies no tenant
+ * scope at all. `undefined` when the bag sets neither key.
+ */
+interface BagTenantAsk {
+  organizations: string[];
+  clears: boolean;
+}
+
+function bagTenantAsk(options: unknown): BagTenantAsk | undefined {
+  if (!options || typeof options !== 'object') return undefined;
+  const bag = options as { tenantId?: unknown; tenantIds?: unknown };
+  const tenantId = bag.tenantId;
+  const tenantIds = bag.tenantIds;
+  if (tenantId === undefined && tenantIds === undefined) return undefined;
+  const organizations: string[] = [];
+  const clears = tenantId !== undefined && !(typeof tenantId === 'string' && tenantId !== '');
+  if (typeof tenantId === 'string' && tenantId !== '') organizations.push(tenantId);
+  if (Array.isArray(tenantIds)) for (const id of tenantIds) if (typeof id === 'string' && id !== '') organizations.push(id);
+  return { organizations, clears };
+}
+
+/** Does the bag's ask reach past `admitted` (`undefined`: the verdict has no wall)? */
+function bagReachesPast(ask: BagTenantAsk, admitted: ReadonlySet<string> | undefined): boolean {
+  if (admitted === undefined) return false;
+  return ask.clears || ask.organizations.some((id) => !admitted.has(id));
+}
+
+/** The refusal of a write whose option bag reaches past the caller's wall. */
+function bagRefusal(source: ElevationSource, object: string, operation: string): PermissionDeniedError {
+  return new PermissionDeniedError(
+    `[Security] Access denied: this ${operation} on '${object}' names, in its options, an organization scope the user ` +
+      `${SUBJECT[source]} runs for may not write in, and ${ELEVATION[source]} does not lift the organization wall.`,
+    { operation, object },
+  );
+}
+
+/**
+ * Hold a tenant key a before-hook sets on the operation's option bag to the
+ * caller's wall, as it is set: `admitted()` answers the organizations the
+ * wall admits (`undefined`: no wall). A write's key that reaches past it is
+ * refused; a read's is narrowed to what the wall admits — an organization
+ * outside it scopes to none, and a key cleared keeps the scope it had.
+ */
+function holdBagTenantKeys(
+  bag: Record<string, unknown>,
+  isRead: boolean,
+  admitted: () => ReadonlySet<string> | undefined,
+  refuse: () => Error,
+): void {
+  for (const key of BAG_TENANT_KEYS) {
+    let value = bag[key];
+    // Enumerable only while it holds a value, as a plain key would be: the
+    // engine picks the bag's driver keys by enumerability.
+    const define = () =>
+      Object.defineProperty(bag, key, {
+        configurable: true,
+        enumerable: value !== undefined,
+        get: () => value,
+        set: (next: unknown) => {
+          const ask = next === undefined ? undefined : bagTenantAsk({ [key]: next });
+          const wall = admitted();
+          if (!ask || !bagReachesPast(ask, wall)) {
+            value = next;
+          } else if (!isRead) {
+            throw refuse();
+          } else if (!ask.clears) {
+            const inside = ask.organizations.filter((id) => wall!.has(id));
+            value = key === 'tenantId' ? (inside[0] ?? RLS_DENY_FILTER.id) : inside.length > 0 ? inside : [RLS_DENY_FILTER.id];
+          }
+          define();
+        },
+      });
+    define();
+  }
+}
+
 /** Rows of a write payload, each a plain object. */
 function payloadRows(data: unknown): Record<string, unknown>[] {
   const rows = Array.isArray(data) ? data : data === undefined || data === null ? [] : [data];
@@ -344,6 +441,7 @@ export async function applyAppAutomationOrganizationWall(
     options?: unknown;
     ast?: { where?: unknown } | null;
     tenantLayer0Verdict?: unknown;
+    postHookWriteImageCheck?: { evaluate(rows: readonly Record<string, unknown>[]): unknown; honoured?: boolean };
   },
   deps: AppAutomationWallDeps,
 ): Promise<void> {
@@ -358,25 +456,97 @@ export async function applyAppAutomationOrganizationWall(
   // [ADR-0095 D1] A write whose own data names an organization, or an update
   // whose own data empties the column, is judged for EVERY caller.
   const touchesOrganization = rows.some((row) => namesOrganization(row) || (verb === 'update' && emptiesOrganization(row)));
+  // [ADR-0095 D1] The option bag's driver pass-through tenant keys: an
+  // explicit one wins the driver's scope under every verdict, so the scope
+  // they ask for is held to the caller's wall.
+  const bagAsk = BAG_VERBS.has(operation) ? bagTenantAsk(opCtx.options) : undefined;
+
+  // The caller's facts and Layer 0, worked out at most once for this
+  // operation, and only where something asks for them. The door's facts are
+  // resolved for the caller where the context does not carry them (a flow
+  // run's envelope carries no permission sets).
+  let judged: Promise<{ callerContext: Record<string, unknown>; answer: CallerLayer0Answer }> | undefined;
+  const judge = () =>
+    (judged ??= (async () => {
+      const callerContext = carriesDoorFacts(caller.callerContext)
+        ? caller.callerContext
+        : await deps.completeCaller(caller.callerContext);
+      return { callerContext, answer: await deps.callerLayer0(callerContext, object, operation) };
+    })());
+  // The organizations the verdict admits, once it is worked out: `null` until
+  // then, `undefined` for a verdict with no wall.
+  let judgedAdmitted: ReadonlySet<string> | undefined | null = null;
+  // The caller's own active organization, which its wall always admits — the
+  // judgement where no verdict is worked out (narrower, never wider). A
+  // decided segment's facts are not its caller's, so it has none.
+  const ownOrganization =
+    caller.decided !== true && carriesActiveOrganization(caller.callerContext) ? String(caller.callerContext.tenantId) : undefined;
+
+  // [ADR-0095 D1, the plain door's stored-image half] A write is judged again
+  // on the rows its before-hooks leave, as `composeWriteTenantWall` judges
+  // them at the plain door: a row stored in an organization the caller's wall
+  // does not admit, or an update left in none, is refused. The judging half
+  // only — the system strips stay off. A row in the caller's own active
+  // organization needs no verdict, so the common write pays nothing.
+  if (operation === 'insert' || operation === 'update') {
+    const prior = opCtx.postHookWriteImageCheck;
+    opCtx.postHookWriteImageCheck = {
+      async evaluate(images: readonly Record<string, unknown>[]) {
+        if (prior) {
+          prior.honoured = true;
+          await prior.evaluate(images);
+        }
+        const asks = images.some(
+          (row) =>
+            (namesOrganization(row) && String(row[ORGANIZATION_FIELD]) !== ownOrganization) ||
+            (operation === 'update' && emptiesOrganization(row)),
+        );
+        if (!asks) return;
+        const admitted = admittedOrganizations((await judge()).answer.tenantLayer0Verdict);
+        if (!admitted) return;
+        for (const row of images) {
+          if (namesOrganization(row) && !admitted.has(String(row[ORGANIZATION_FIELD]))) {
+            throw landingRefusal(caller.source, object, operation);
+          }
+          if (operation === 'update' && emptiesOrganization(row)) throw removalRefusal(caller.source, object, operation);
+        }
+      },
+    };
+  }
+
+  // A tenant key a before-hook sets on the bag after this point is held to
+  // the wall as it is set: the organizations the verdict admits, or — where
+  // none is worked out — the caller's own active organization alone.
+  if (BAG_VERBS.has(operation) && opCtx.options && typeof opCtx.options === 'object') {
+    holdBagTenantKeys(
+      opCtx.options as Record<string, unknown>,
+      !isWrite,
+      () => (judgedAdmitted !== null ? judgedAdmitted : new Set(ownOrganization !== undefined ? [ownOrganization] : [])),
+      () => bagRefusal(caller.source, object, operation),
+    );
+  }
+
   // Judged by the wall's own verdict: a federated object, a decided segment
-  // (judged by its run's caller), and a write whose own data names or empties
-  // the organization.
-  const alwaysAsked = deps.isFederated(object) || caller.decided === true || touchesOrganization;
+  // (judged by its run's caller), a write whose own data names or empties
+  // the organization, and an option bag that sets a tenant key.
+  const alwaysAsked = deps.isFederated(object) || caller.decided === true || touchesOrganization || bagAsk !== undefined;
   if (!alwaysAsked && !callerMayLackOrganization(caller.callerContext)) return;
 
-  // The door's facts, resolved for the caller where the context does not
-  // carry them (a flow run's envelope carries no permission sets), and the
-  // question asked again: a resolved active membership may answer it.
-  const callerContext = carriesDoorFacts(caller.callerContext)
-    ? caller.callerContext
-    : await deps.completeCaller(caller.callerContext);
+  // …and the question asked again: a resolved active membership may answer it.
+  const { callerContext, answer } = await judge();
   if (!alwaysAsked && !callerMayLackOrganization(callerContext)) return;
 
-  const answer = await deps.callerLayer0(callerContext, object, operation);
   const { tenantLayer0Verdict, crossedByPlatformAdmin } = answer;
   // A deny verdict's projection is the deny sentinel, never "no wall".
   const layer0 = tenantLayer0Verdict.kind === 'deny' ? (answer.layer0 ?? RLS_DENY_FILTER) : answer.layer0;
   const denied = tenantLayer0Verdict.kind === 'deny';
+  judgedAdmitted = admittedOrganizations(tenantLayer0Verdict);
+  // A write whose bag reaches past the caller's wall is refused. A denied
+  // caller's delete and purge keep the read rule below (they match nothing);
+  // a read's bag is bounded by the wall composed onto its predicate below.
+  if (bagAsk && isWrite && !(denied && verb === REMOVAL) && bagReachesPast(bagAsk, judgedAdmitted)) {
+    throw bagRefusal(caller.source, object, operation);
+  }
   // [ADR-0123 D2] A denied caller's delete and purge are answered by the read
   // rule, as its plain door answers them: the wall's deny filter goes onto a
   // predicate delete (it matches nothing), and a by-id delete answers as a

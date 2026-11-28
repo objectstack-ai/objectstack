@@ -50,6 +50,10 @@ const BODY_BAG_UPDATE =
   "await ctx.api.object('eoww_task').update({ touched: 'bag' }, { where: { name: input.name }, multi: true, tenantId: input.org }); return { wrote: 1 };";
 const BODY_BAG_UPDATE_BY_ID =
   "await ctx.api.object('eoww_task').update({ id: input.target, touched: 'bag' }, { tenantId: input.org }); return { wrote: 1 };";
+const BODY_BAG_CLEAR_FIND =
+  "const rows = await ctx.api.object('eoww_task').find({ where: {}, tenantId: null }); return { seen: rows.map((r) => r.name).sort() };";
+const BODY_BAG_CLEAR_UPDATE =
+  "await ctx.api.object('eoww_task').update({ touched: 'bag' }, { where: { name: input.name }, multi: true, tenantId: '' }); return { wrote: 1 };";
 const BODY_BAG_DELETE =
   "await ctx.api.object('eoww_task').delete({ where: { name: input.name }, multi: true, tenantId: input.org }); return { removed: 1 };";
 
@@ -99,6 +103,8 @@ const APP = {
         ['eoww_bag_update', BODY_BAG_UPDATE],
         ['eoww_bag_update_by_id', BODY_BAG_UPDATE_BY_ID],
         ['eoww_bag_delete', BODY_BAG_DELETE],
+        ['eoww_bag_clear_find', BODY_BAG_CLEAR_FIND],
+        ['eoww_bag_clear_update', BODY_BAG_CLEAR_UPDATE],
       ] as const
     ).map(([name, source]) => ({
       name,
@@ -362,7 +368,22 @@ describe('an app-authored elevation’s writes are judged by its caller’s orga
       expect(one.body.data).toEqual({ seen: [] });
       const many = await run(alice, 'eoww_bag_find_many', { orgs: [orgA, orgB] });
       expect(many.status, JSON.stringify(many.body)).toBe(200);
-      expect(many.body.data).toEqual({ seen: [] });
+      expect(many.body.data).toEqual({ seen: ['A1'] });
+    });
+
+    it('a read whose bag clears the tenant key is answered by the read rule', async () => {
+      await reseed();
+      const r = await run(alice, 'eoww_bag_clear_find');
+      expect(r.status, JSON.stringify(r.body)).toBe(200);
+      expect(r.body.data).toEqual({ seen: ['A1'] });
+    });
+
+    it('a write whose bag clears the tenant key is refused 403', async () => {
+      await reseed();
+      const r = await run(alice, 'eoww_bag_clear_update', { name: 'B1' });
+      expect(r.status, JSON.stringify(r.body)).toBe(403);
+      expect(r.body.error.code).toBe('PERMISSION_DENIED');
+      expect((await rowNamed('B1'))!.touched ?? null).toBeNull();
     });
 
     it('a predicate update whose bag names another organization is refused 403', async () => {
