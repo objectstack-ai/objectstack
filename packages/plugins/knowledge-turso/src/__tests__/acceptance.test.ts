@@ -1521,7 +1521,8 @@ describe('knowledge-turso approximate vector index: recall and options', () => {
     }
     expect(wanted).toBe(400);
     expect(found / wanted).toBeGreaterThanOrEqual(0.95);
-  });
+    // Two builds of 2,000 passages: 1,017 ms locally, the same shape as the scoped case below (5,971 ms on CI).
+  }, 30_000);
 
   it('recall@10 stays 0.95 or more under a record scope that keeps 10%, 5% or 3% of the passages', async () => {
     const s = source('ann_scoped_recall');
@@ -1552,7 +1553,8 @@ describe('knowledge-turso approximate vector index: recall and options', () => {
       console.info(`scoped recall@10, ${share * 100}% in scope (${ids.length} passages): ${(found / wanted).toFixed(3)}`);
       expect(found / wanted, `recall@10 at a share of ${share}`).toBeGreaterThanOrEqual(0.95);
     }
-  });
+    // Two builds of 2,000 passages: 1,384 ms locally, 5,971 ms on CI (Test Core), past the 5 s default.
+  }, 30_000);
 
   it('refuses a threshold below 1 and an over-fetch that is not a whole number of 8 or more', () => {
     const client = store.client();
