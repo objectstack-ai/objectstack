@@ -1060,7 +1060,7 @@ These properties are available on **all** field types:
 | `defaultValue` | `any` | — | Default value for new records |
 | `group` | `string` | — | Field grouping / section |
 | `inlineHelpText` | `string` | — | Inline help tooltip |
-| `trackHistory` | `boolean` | — | Render this field's value changes as entries on the record activity timeline |
+| `trackHistory` | `boolean` | — | Opt a media or JSON field into old → new values on the record activity timeline; other fields show them already, and `false` does not hide them (that is `fieldHistory: false`) |
 | `requiredPermissions` | `string[]` | — | Capabilities required to read/edit this field (masked on read, denied on write) |
 | `dependsOn` | `string[]` | — | Fields whose values scope this field's options (lookup candidate query; select/radio option gating) |
 | `visibleWhen` | `Expression` | — | Show field only when predicate is true |

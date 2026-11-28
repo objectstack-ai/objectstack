@@ -613,7 +613,7 @@ export function selfTest() {
     t('both closed books still exist where the rule names their ledgers', BUDGET_BOOKS.filter((b) => !existsSync(join(REPO_ROOT, b.ledger))).map((b) => b.ledger), []);
     const runFirstLines = text(`.github/workflows/${CI_WORKFLOW}`).split('\n').filter((l, i, all) => /^\s+run: \|\s*$/.test(all[i - 1] ?? '') && l.trim() === SELECTOR_STEP).length;
     t('⭐ ci.yml\'s planner and shard steps still open their run block with the selector, the step the diff base is read from', runFirstLines >= 2, true);
-    t('ci.yml still names the aggregate, the shard and the planner jobs this file reads', [TEST_CORE_GATE, 'Test Core (${{ matrix.shard }}/10)', TEST_CORE_PLAN].filter((n) => !text(`.github/workflows/${CI_WORKFLOW}`).includes(`name: ${n}`)), []);
+    t('ci.yml still names the aggregate, the shard and the planner jobs this file reads', [TEST_CORE_GATE, 'Test Core (${{ matrix.shard }}/12)', TEST_CORE_PLAN].filter((n) => !text(`.github/workflows/${CI_WORKFLOW}`).includes(`name: ${n}`)), []);
   }
 
   battery('PRBASE: the last green Test Core run on this PR, its log line, never a branch alone');

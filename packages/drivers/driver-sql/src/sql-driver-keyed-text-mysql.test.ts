@@ -218,32 +218,41 @@ declareDialectCell(MYSQL_CELL, 'keyed text columns (#11374)', (cell) => {
       expect(subPart ?? null).toBeNull();
     }, 60_000);
 
+    // #35862: the refusal is reported at `error` on the durability channel and
+    // NO LONGER THROWN — a throw skipped every later index and every later boot
+    // step for the object. These two pins read the log line where they used to
+    // read the rejection; the disposition they pin (named, and never weakened)
+    // is unchanged.
     it('refuses a NON-UNIQUE unkeyable column by name instead of weakening it', async () => {
       driver = new SqlDriver(cell.config());
       await driver.execute(`drop table if exists ${UNBOUNDED_NONUNIQUE_TABLE}`).catch(() => {});
+      const errors = captureErrors(driver);
 
       // Loud, and specifically loud: the raw server error names a column in a
       // table that was just created successfully, which reads as an index
       // quirk rather than an object whose declared index is now absent.
-      await expect(driver.initObjects([unboundedNonUniqueObject()])).rejects.toThrow(
-        /cannot create index 'idx_os11374_unbounded_nonuniq_token'.*declares no `maxLength`/s,
-      );
+      await driver.initObjects([unboundedNonUniqueObject()]);
+      expect(
+        errors.filter((m) => /cannot create index 'idx_os11374_unbounded_nonuniq_token'.*declares no `maxLength`/s.test(m)),
+      ).toHaveLength(1);
 
       // ⛔ The negative half, and the point of the whole disposition: no index
-      // was substituted. A prefix index here would have made `initObjects`
-      // resolve and left an index that means something else. #11627 did NOT
-      // relax this — a hash shadow is offered only to a UNIQUE index, because
-      // a digest serves no lookup an ordinary index exists to accelerate.
-      expect(await indexNames(driver, UNBOUNDED_NONUNIQUE_TABLE)).toEqual([]);
+      // was substituted. A prefix index here would have left an index that
+      // means something else. #11627 did NOT relax this — a hash shadow is
+      // offered only to a UNIQUE index, because a digest serves no lookup an
+      // ordinary index exists to accelerate.
+      expect(await indexesKeying(driver, UNBOUNDED_NONUNIQUE_TABLE, 'token')).toEqual([]);
     }, 60_000);
 
     it('gives a NON-UNIQUE bound past the key ceiling the same named refusal', async () => {
       driver = new SqlDriver(cell.config());
       await driver.execute(`drop table if exists ${TOO_WIDE_NONUNIQUE_TABLE}`).catch(() => {});
-      await expect(driver.initObjects([tooWideNonUniqueObject()])).rejects.toThrow(
-        /cannot create index 'idx_os11374_too_wide_nonuniq_token'.*wider than 768 characters/s,
-      );
-      expect(await indexNames(driver, TOO_WIDE_NONUNIQUE_TABLE)).toEqual([]);
+      const errors = captureErrors(driver);
+      await driver.initObjects([tooWideNonUniqueObject()]);
+      expect(
+        errors.filter((m) => /cannot create index 'idx_os11374_too_wide_nonuniq_token'.*wider than 768 characters/s.test(m)),
+      ).toHaveLength(1);
+      expect(await indexesKeying(driver, TOO_WIDE_NONUNIQUE_TABLE, 'token')).toEqual([]);
     }, 60_000);
 
     /**
@@ -368,6 +377,24 @@ async function columnTypes(driver: SqlDriver, table: string): Promise<Record<str
 }
 
 /** Non-PRIMARY index names physically present on the table. */
+/** Every index (name) with a key part on `column` — what a substituted index would show up as. */
+async function indexesKeying(driver: SqlDriver, table: string, column: string): Promise<string[]> {
+  const rows = await rowsOf(
+    driver,
+    `select distinct index_name from information_schema.statistics
+      where table_schema = database() and table_name = ? and column_name = ?`,
+    [table, column],
+  );
+  return (rows as any[]).map((r) => String(r.INDEX_NAME ?? r.index_name)).sort();
+}
+
+/** Collect the driver's `error` channel — where `logDurabilityFailure` writes. */
+function captureErrors(driver: SqlDriver): string[] {
+  const errors: string[] = [];
+  (driver as any).logger = { debug() {}, info() {}, warn() {}, error: (msg: string) => errors.push(msg) };
+  return errors;
+}
+
 async function indexNames(driver: SqlDriver, table: string): Promise<string[]> {
   const rows = await rowsOf(
     driver,

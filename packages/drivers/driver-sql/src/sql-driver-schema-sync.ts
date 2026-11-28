@@ -909,7 +909,9 @@ export async function syncDeclaredIndexes(this: Pick<SchemaSyncHost, 'concurrent
       // that was just created successfully, which reads as an index quirk
       // rather than what it is — the object is now registered with its
       // declared uniqueness absent. Re-throw the SAME failure carrying the
-      // field-level fix; the boot still fails loudly, it just says why.
+      // field-level fix; the boot still fails loudly, it just says why. Since
+      // #35862 only a UNIQUE index re-throws; a plain one is logged and the
+      // sync goes on (see the `!unique` arm below).
       const unkeyable = await this.explainUnkeyableTextColumn(tableName, name, columns, e);
       if (unkeyable) {
         // #11627: a UNIQUE index MySQL cannot key directly is expressible
@@ -1043,6 +1045,23 @@ export async function syncDeclaredIndexes(this: Pick<SchemaSyncHost, 'concurrent
           }
         }
         this.logDurabilityFailure(unkeyable, msg);
+        if (!unique) {
+          // #35862: a PLAIN index MySQL refuses to key stays refused (no
+          // prefix, no shadow: the scope limit above) and is reported once,
+          // on the line just above, on the durability channel. It is NOT
+          // thrown. A throw leaves this loop, so no index after this one is
+          // attempted, and it leaves `initObjects` for this object, so the
+          // old-key index retirement, the drift reconcile and report, the
+          // canonical datetime/time/json/boolean backfills and the MySQL
+          // datetime/time widenings were all skipped on every boot, for an
+          // index whose only job is an access path. The drift report still
+          // carries the index as missing, so `os migrate plan` names it too.
+          //
+          // ⛔ UNIQUE keeps the throw below: there the refusal means a declared
+          // constraint is unenforced after the shadow route also failed, and
+          // this disposition does not decide that case.
+          continue;
+        }
         throw Object.assign(new Error(`${unkeyable} (server said: ${msg})`), {
           code: (e as { code?: string }).code,
           cause: e,

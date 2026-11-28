@@ -23,4 +23,4 @@ Unchanged: the engine's own writes (a package install, a seed, a migration) are 
 
 ## FROM → TO
 
-- A deployment whose stack does not declare `requires: ['knowledge']`, where authors save knowledge sources → add `requires: ['knowledge']` to the stack, restart, then save the source.
+- A deployment whose stack neither declares `requires: ['knowledge']` nor ships a `knowledgeSources` entry, where authors save knowledge sources → add `requires: ['knowledge']` to the stack, restart, then save the source.

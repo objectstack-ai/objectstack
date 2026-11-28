@@ -296,17 +296,25 @@ declareDialectCell(MYSQL_CELL, 'hash-shadow key (#11627)', (cell) => {
      * creating one would trade a loud refusal for a table that syncs, costs
      * writes on every row, and accelerates nothing. This asserts the refusal is
      * still a refusal — the scope limit is a decision, not an omission.
+     *
+     * #35862: the refusal is reported at `error` and no longer thrown, so the
+     * object's remaining boot steps run. What this pins is unchanged: no
+     * index, and no shadow column grown for it.
      */
     it('leaves a non-unique unkeyable index refused rather than shadowing it', async () => {
       driver = new SqlDriver(cell.config());
+      const errors: string[] = [];
+      (driver as any).logger = { debug() {}, info() {}, warn() {}, error: (msg: string) => errors.push(msg) };
       const nonUnique = {
         name: 'os11627_nonuniq',
         fields: { v: { type: 'text', maxLength: 1024 } },
         indexes: [{ fields: ['v'], unique: false, name: 'idx_os11627_nonuniq_v' }],
       };
-      await expect(driver.initObjects([nonUnique])).rejects.toThrow(
-        /hash-shadow|cannot create index|BLOB\/TEXT/i,
-      );
+      await driver.initObjects([nonUnique]);
+      expect(errors.filter((m) => /cannot create index 'idx_os11627_nonuniq_v'/.test(m))).toHaveLength(1);
+      const { cols, idx } = await catalog('os11627_nonuniq');
+      expect(idx.filter((i: any) => i.INDEX_NAME === 'idx_os11627_nonuniq_v')).toEqual([]);
+      expect(cols.filter((c: any) => isHashShadowColumn(c.COLUMN_NAME))).toEqual([]);
     }, 60_000);
   });
 });
