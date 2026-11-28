@@ -37,7 +37,7 @@ refused by name. `isDefault: true` makes it the object's default record page.
 that looks nothing like the default (a chart tab, a bespoke strip) is `kind: 'full'`: `regions` drawn as authored ([Pages](./pages.md)).
 A phone and the drawer draw the standard page (steps 1–3); no key keeps a full page
 there, only a page named in the URL (a print page) draws everywhere. The standard page
-draws no `record_section` action: one that must show there also lists `record_more`.
+draws no `record_section` action: one that must show there also lists `record_page`.
 
 **5 · On an object's list the name opens the page, its hover icon the drawer.**
 `navigation.mode` is deprecated there: `drawer`, `page`, `new_window` change

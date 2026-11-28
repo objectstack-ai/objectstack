@@ -83,6 +83,13 @@ export interface KanbanBoardCoreProps {
    * reason: only `ObjectKanban`, which asks the grouped lane read, supplies it.
    */
   laneCounts?: KanbanBoardProps['laneCounts'];
+  /**
+   * Draw the trailing "Uncategorized" lane even when no loaded card lands in
+   * it: its records sit past the page (objectstack#37516). A PROP for the
+   * reason `laneCounts` is: only `ObjectKanban`, which asks the grouped lane
+   * read, knows it.
+   */
+  keepUncolumned?: boolean;
   /** Half of the Quick Add pair. Only `KanbanRenderer` supplies it. */
   quickAdd?: boolean;
   /** The other half of the Quick Add pair. Only `KanbanRenderer` supplies it. */
@@ -137,6 +144,7 @@ export const KanbanBoardCore: React.FC<KanbanBoardCoreProps> = ({
   dropBlockedReason,
   onLaneRowsChange,
   laneCounts,
+  keepUncolumned,
   quickAdd,
   onQuickAdd,
 }) => {
@@ -150,8 +158,9 @@ export const KanbanBoardCore: React.FC<KanbanBoardCoreProps> = ({
         schema.groupBy,
         schema.coverImageField,
         t('kanban.uncategorized'),
+        keepUncolumned === true,
       ),
-    [schema, t],
+    [schema, t, keepUncolumned],
   );
 
   return (

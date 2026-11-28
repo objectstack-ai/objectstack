@@ -92,7 +92,10 @@ const FIELD_ALIAS_ROWS: Readonly<Record<string, string>> = {
   component: 'widget', renderer: 'widget', control: 'widget',
   mimeTypes: 'accept', allowedTypes: 'accept', fileTypes: 'accept',
   maxFileSize: 'maxSize', maxBytes: 'maxSize',
-  trackChanges: 'trackHistory', feedTracked: 'trackHistory',
+  // NOTE: no `trackChanges` / `feedTracked` rows. They renamed onto
+  // `trackHistory`, whose `false` turns nothing off and whose `true` matters
+  // only for a media or structured-JSON type; both keys are answered in prose
+  // with the `fieldHistory` model beside `tracked` in `field.zod.ts`.
   permissions: 'requiredPermissions', requiredCapabilities: 'requiredPermissions',
 };
 

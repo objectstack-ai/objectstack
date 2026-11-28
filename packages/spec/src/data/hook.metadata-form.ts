@@ -3,6 +3,20 @@
 import { defineMetadataForm } from '../ui/view.zod';
 
 /**
+ * The rows `refusals` and `texts` are shown where the hook has code that can
+ * throw a code or ask for a text: a `js` body, or no body and a handler. That
+ * is the test `HookSchema` refuses both keys by (`hook.zod.ts`, the refusals
+ * and texts refinements); an `expression` body is refused, so its form does
+ * not offer them. The handler half reads non-empty, as the schema's does.
+ *
+ * Written without parentheses on purpose: the Studio form evaluator splits
+ * `||` before `&&` but has no grouping, and a parenthesised group fails open
+ * (the row is shown on every draft).
+ */
+const SANDBOXED_CODE_VISIBLE =
+  "data.body.language == 'js' || data.body == null && data.handler != null && data.handler != ''";
+
+/**
  * Form Layout for Hook Metadata Type
  *
  * Hooks intercept the data lifecycle. The body field is a composite
@@ -10,7 +24,8 @@ import { defineMetadataForm } from '../ui/view.zod';
  * `source` renders in a Monaco code editor with language-appropriate
  * syntax highlighting. The hook's refusal catalogue (`refusals`) and its
  * declared texts (`texts`) sit beside it: a js body or a handler may declare
- * them, an expression body may not.
+ * them, an expression body may not, so both rows are shown only where
+ * `HookSchema` accepts them (`SANDBOXED_CODE_VISIBLE` above).
  */
 export const hookForm = defineMetadataForm({
   schemaId: 'hook',
@@ -58,6 +73,7 @@ export const hookForm = defineMetadataForm({
           field: 'refusals',
           type: 'record',
           widget: 'key-only-record',
+          visibleWhen: SANDBOXED_CODE_VISIBLE,
           helpText: 'Refusal catalogue, keyed by the SCREAMING_SNAKE code the hook throws (e.g. CLEAN_VERSION_REQUIRED). The caller reads the declared message, translated into their language, with the declared status. For a JavaScript (L2) body or a handler; refused on an expression body',
           fields: [
             { field: 'message', type: 'textarea', required: true, helpText: 'The sentence the user reads when the body throws this code. Plain text, unless the entry declares params: then a {{ name }} hole fills a declared param' },
@@ -82,6 +98,7 @@ export const hookForm = defineMetadataForm({
           field: 'texts',
           type: 'record',
           widget: 'key-only-record',
+          visibleWhen: SANDBOXED_CODE_VISIBLE,
           helpText: "Sentences the hook writes into records, keyed by the snake_case key its code asks for with ctx.text (e.g. follow_up_subject). The hook gets the declared message in the organization's language, translated, with the declared message as the fallback. For a JavaScript (L2) body or a handler; refused on an expression body",
           fields: [
             { field: 'message', type: 'textarea', required: true, helpText: 'The sentence the hook writes when its code asks for this key. Plain text, unless the entry declares params: then a {{ name }} hole fills a declared param' },

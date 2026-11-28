@@ -242,6 +242,7 @@ import {
 // (`AuthoredRowWriteHost`).
 import {
   checkAuthoredRowWrite,
+  getAuthoredRowWriteFilter,
   type AuthoredRowWriteHost,
 } from './security-plugin-authored-row-write.js';
 // [#25223 cut 11] The `security` service registration `start()` runs; the
@@ -2348,7 +2349,7 @@ export class SecurityPlugin implements Plugin {
       const readQl = () => this.ql;
       const readTenancyPosture = () => this.tenancyPosture;
       const readEpoch = () => this.epoch;
-      const host: Pick<SecurityServiceHost, 'acceptedDefaultPermissionSets' | 'baselinePermissionSets' | 'bootstrapPermissionSets' | 'canExport' | 'canReadObject' | 'canWriteObject' | 'checkAuthoredRowWrite' | 'checkControlledByParentWrite' | 'declareEveryone' | 'delegatedAdminGate' | 'describeEffectiveAccess' | 'describePositionGrants' | 'epoch' | 'explainAccessForCaller' | 'getEffectiveObjectPermissions' | 'getMetadataReadableFields' | 'getMetadataReadableWithheldFields' | 'getObjectSecurityMeta' | 'getQueryableFields' | 'getReadFilter' | 'getReadableFields' | 'getRecordFieldAccess' | 'getWritableFields' | 'logger' | 'ownershipFloorAlternates' | 'permissionEvaluator' | 'platformBaselineSets' | 'ql' | 'resolvePermissionSetsForContext' | 'tenancyPosture'> = {
+      const host: Pick<SecurityServiceHost, 'acceptedDefaultPermissionSets' | 'baselinePermissionSets' | 'bootstrapPermissionSets' | 'canExport' | 'canReadObject' | 'canWriteObject' | 'checkAuthoredRowWrite' | 'checkControlledByParentWrite' | 'declareEveryone' | 'delegatedAdminGate' | 'describeEffectiveAccess' | 'describePositionGrants' | 'epoch' | 'explainAccessForCaller' | 'getAuthoredRowWriteFilter' | 'getEffectiveObjectPermissions' | 'getMetadataReadableFields' | 'getMetadataReadableWithheldFields' | 'getObjectSecurityMeta' | 'getQueryableFields' | 'getReadFilter' | 'getReadableFields' | 'getRecordFieldAccess' | 'getWritableFields' | 'logger' | 'ownershipFloorAlternates' | 'permissionEvaluator' | 'platformBaselineSets' | 'ql' | 'resolvePermissionSetsForContext' | 'tenancyPosture'> = {
         acceptedDefaultPermissionSets: this.acceptedDefaultPermissionSets,
         baselinePermissionSets: this.baselinePermissionSets,
         bootstrapPermissionSets: this.bootstrapPermissionSets,
@@ -2363,6 +2364,7 @@ export class SecurityPlugin implements Plugin {
         describePositionGrants: (...a) => this.describePositionGrants(...a),
         get epoch() { return readEpoch(); },
         explainAccessForCaller: (...a) => this.explainAccessForCaller(...a),
+        getAuthoredRowWriteFilter: (...a) => this.getAuthoredRowWriteFilter(...a),
         getEffectiveObjectPermissions: (...a) => this.getEffectiveObjectPermissions(...a),
         getMetadataReadableFields: (...a) => this.getMetadataReadableFields(...a),
         getMetadataReadableWithheldFields: (...a) => this.getMetadataReadableWithheldFields(...a),
@@ -3055,6 +3057,39 @@ export class SecurityPlugin implements Plugin {
       resolvePermissionSetsForContext: (...a) => this.resolvePermissionSetsForContext(...a),
     };
     return checkAuthoredRowWrite.call(host, object, recordId, operation, context);
+  }
+
+  /**
+   * [#37535, ruling record 7190344023 (2a)] `ISecurityService.getAuthoredRowWriteFilter`
+   * — the filter-shaped twin of {@link checkAuthoredRowWrite}, for a predicate
+   * write that names no row: the authored policies' own scope for `(object,
+   * operation)` under the caller, the platform ownership floor taken out by
+   * provenance and the tenant wall (Layer 0) AND-ed beside it. It is compiled
+   * by the SAME resolution the verdict reads (`authoredRowWriteLayers`), so a
+   * row matches it iff the verdict admits that row.
+   *
+   * The record sharing middleware ORs it into its bulk write scope, verb for
+   * verb, so a predicate update or delete reaches the rows the by-id write of
+   * each reaches through the verdict's deferral. Evidence, never
+   * authorization, exactly as the verdict: this plugin's own layers (the
+   * tenant wall, floor OR authored policies, the caller's readable rows) still
+   * decide the write. `undefined` — the answer that widens nothing — on every
+   * abstention the verdict takes (no principal, on-behalf-of, no authored
+   * `using` policy, a null Layer 1) and on any failure.
+   */
+  getAuthoredRowWriteFilter(
+    object: string,
+    operation: AuthoredRowWriteOperation,
+    context?: any,
+  ): Promise<Record<string, unknown> | undefined> {
+    const readLogger = () => this.logger;
+    const host: Pick<AuthoredRowWriteHost, 'collectRLSPolicies' | 'computeLayeredRlsFilter' | 'logger' | 'resolvePermissionSetsForContext'> = {
+      collectRLSPolicies: (...a) => this.collectRLSPolicies(...a),
+      computeLayeredRlsFilter: (...a) => this.computeLayeredRlsFilter(...a),
+      get logger() { return readLogger(); },
+      resolvePermissionSetsForContext: (...a) => this.resolvePermissionSetsForContext(...a),
+    };
+    return getAuthoredRowWriteFilter.call(host, object, operation, context);
   }
 
   /**

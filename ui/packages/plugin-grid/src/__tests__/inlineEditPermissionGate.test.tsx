@@ -201,14 +201,6 @@ async function kebabOffersEdit(c: Case): Promise<boolean> {
   return screen.queryAllByTestId('row-action-builtin-edit').length > 0;
 }
 
-/** Header cell count — the observable for the save/cancel `rowActions` column. */
-async function headerCellCount(c: Case): Promise<number> {
-  const { container } = renderGrid(c);
-  await waitFor(() => expect(screen.getByText('Row One')).toBeInTheDocument());
-  await waitFor(() => expect(screen.getByText('Row Two')).toBeInTheDocument());
-  return container.querySelectorAll('thead th').length;
-}
-
 beforeEach(() => {
   state.permUpdate = true;
   state.effectiveOps = undefined;
@@ -247,22 +239,6 @@ describe("ObjectGrid `editable` vs can(object, 'update') (#5143)", () => {
     expect(await kebabOffersEdit({ editable: true, permUpdate: true })).toBe(true);
     cleanup();
     expect(await entersEditState({ editable: true, permUpdate: true })).toBe(true);
-  });
-
-  it('e — no verdict draws a save/cancel column: the gated grid IS the non-editable grid', async () => {
-    // The staged model drew a trailing save/cancel column on an editable grid,
-    // and this case pinned that a read-only principal did not get it. That
-    // column is retired with the staged model (objectstack#35827): each cell
-    // saves on its own, so an editable grid, a gated one and a never-editable
-    // one are column-for-column the same.
-    const editableWithGrant = await headerCellCount({ editable: true, permUpdate: true });
-    cleanup();
-    const editableNoGrant = await headerCellCount({ editable: true, permUpdate: false });
-    cleanup();
-    const neverEditable = await headerCellCount({ permUpdate: true });
-
-    expect(editableNoGrant).toBe(neverEditable);
-    expect(editableWithGrant).toBe(neverEditable);
   });
 });
 

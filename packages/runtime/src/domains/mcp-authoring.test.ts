@@ -998,7 +998,11 @@ describe('[ADR-0161 K4] a knowledge_source draft needs the human to hold manage_
   });
 
   it('CONTROL: a human holding both saves and discards; the same human still saves another type', async () => {
-    const { authoring, served } = await authorThroughDomain({ systemPermissions: ['manage_metadata', 'manage_knowledge_sources'] });
+    // A deployment that mounts a knowledge service admitting the source (on one with none, ruled D refuses the save).
+    const { authoring, served } = await authorThroughDomain({
+      systemPermissions: ['manage_metadata', 'manage_knowledge_sources'],
+      knowledge: { admitAuthoredSource: async () => ({ admitted: true }) },
+    });
     expect((await save(authoring)).isError).toBe(false);
     expect((await discard(authoring)).body).toEqual({ discarded: { type: 'knowledge_source', name: 'faq', package: 'com.acme.crm' } });
     expect(served.protocolCalls.filter((c: any) => c[0] === 'saveMetaItem').map((c: any) => c[1].type)).toEqual(['knowledge_source']);
@@ -1063,7 +1067,25 @@ describe('[ADR-0161 K4] save_metadata_draft asks the knowledge service to admit 
     expect(served.protocolCalls.filter((c: any) => c[0] === 'saveMetaItem')).toEqual([]);
   });
 
-  it('CONTROL: an admitted source is saved; another type is never asked about; no knowledge service judges nothing', async () => {
+  /**
+   * Ruled D: on a deployment that registers no knowledge service, nothing
+   * loads, indexes or searches a source, and nothing mounts the service while
+   * the server runs. So the human's draft save is refused, naming the reason
+   * and the remedy, instead of being kept and never served.
+   */
+  it('no knowledge service registered: the draft save is refused 503 SERVICE_UNAVAILABLE with the remedy, and nothing is written', async () => {
+    const none = await authorThroughDomain({ systemPermissions: BOTH });
+    const refused = await save(none.authoring);
+    expect(refused.isError).toBe(true);
+    expect(refused.body.error).toMatchObject({ code: 'SERVICE_UNAVAILABLE', status: 503 });
+    expect(refused.body.error.message).toMatch(/^The knowledge source 'faq' was not saved: this deployment runs no knowledge service/);
+    expect(refused.body.error.message).toMatch(/requires: \['knowledge'\].*restart the server.*then save the source again/);
+    expect(none.served.protocolCalls.filter((c: any) => c[0] === 'saveMetaItem')).toEqual([]);
+    // Another type saves as before on the same deployment.
+    expect((await call(none.authoring, 'save_metadata_draft', { type: 'flow', name: 'lead_intake', item: FLOW_DRAFT, package: 'com.acme.crm' })).isError).toBe(false);
+  });
+
+  it('CONTROL: an admitted source is saved; another type is never asked about; a registered knowledge service that is not the platform\'s judges nothing', async () => {
     const admitAuthoredSource = vi.fn(async () => ({ admitted: true }));
     const { authoring, served } = await authorThroughDomain({ systemPermissions: BOTH, knowledge: { admitAuthoredSource } });
     expect((await save(authoring)).isError).toBe(false);
@@ -1071,8 +1093,8 @@ describe('[ADR-0161 K4] save_metadata_draft asks the knowledge service to admit 
     expect(admitAuthoredSource).toHaveBeenCalledTimes(1);
     expect(served.protocolCalls.filter((c: any) => c[0] === 'saveMetaItem').map((c: any) => c[1].type)).toEqual(['knowledge_source', 'flow']);
 
-    const none = await authorThroughDomain({ systemPermissions: BOTH });
-    expect((await save(none.authoring)).isError).toBe(false);
+    const hostMounted = await authorThroughDomain({ systemPermissions: BOTH, knowledge: { search: async () => [] } });
+    expect((await save(hostMounted.authoring)).isError).toBe(false);
   });
 });
 
@@ -1408,7 +1430,12 @@ describe('done when: an OAuth author saves an app-crm flow draft with no routabl
     const metadata = new MetadataManager({} as never);
     metadata.setTypeRegistry(DEFAULT_METADATA_TYPE_REGISTRY);
     const protocol = await realProtocol(new Map([['metadata', metadata]]));
-    const { authoring } = await authorThroughDomain({ protocol, systemPermissions: ['manage_metadata', 'manage_knowledge_sources'] });
+    // A deployment that mounts a knowledge service admitting the source (on one with none, ruled D refuses the save).
+    const { authoring } = await authorThroughDomain({
+      protocol,
+      systemPermissions: ['manage_metadata', 'manage_knowledge_sources'],
+      knowledge: { admitAuthoredSource: async () => ({ admitted: true }) },
+    });
     const entry = (await protocol.getMetaTypes!()).entries!.find((e) => e.type === 'knowledge_source') as any;
 
     const { contract } = (await call(authoring, 'list_metadata_items', { type: 'knowledge_source', contract: true })).body;
