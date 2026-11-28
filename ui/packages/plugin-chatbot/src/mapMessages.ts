@@ -16,11 +16,14 @@
  */
 import type {
   DatasetProvenance,
+  DraftReviewListParsed,
   ObjectQuerySource,
   RecordCitationParsed,
 } from '@objectstack/spec/ai';
 import {
   DatasetProvenanceSchema,
+  DRAFT_REVIEW_PART_TYPE,
+  DraftReviewListSchema,
   ObjectQuerySourceSchema,
   RECORD_CITATIONS_PART_TYPE,
   RecordCitationsSchema,
@@ -268,6 +271,24 @@ export function extractRecordCitations(parts: readonly AnyPart[]): RecordCitatio
   if (!part) return undefined;
   const parsed = RecordCitationsSchema.safeParse(part.data);
   return parsed.success && parsed.data.length > 0 ? parsed.data : undefined;
+}
+
+/**
+ * The drafts an ask turn saved, read off the message's `data-draft-review`
+ * part ({@link DRAFT_REVIEW_PART_TYPE}) through the published contract
+ * (`DraftReviewListSchema`). A part the schema refuses is no list at all, so a
+ * producer that drifts from the contract is seen as a turn without the card,
+ * never drawn half-right. With a stable part id the stream keeps one part, so
+ * the last one is read.
+ *
+ * Read on a live answer only: the part is not in `STORED_ANSWER_DATA_PARTS`,
+ * so a history or cache rebuild does not draw the card again.
+ */
+export function extractDraftReview(parts: readonly AnyPart[]): DraftReviewListParsed | undefined {
+  const part = parts.filter((p) => p.type === DRAFT_REVIEW_PART_TYPE).pop();
+  if (!part) return undefined;
+  const parsed = DraftReviewListSchema.safeParse(part.data);
+  return parsed.success ? parsed.data : undefined;
 }
 
 /**
@@ -565,6 +586,7 @@ export function uiMessageToChatMessage(
   const legacyTools = Array.isArray(msg.toolInvocations) ? msg.toolInvocations : [];
   const resolvedTools = tools.length > 0 ? tools : legacyTools;
   const recordCitations = extractRecordCitations(parts);
+  const draftReview = extractDraftReview(parts);
   return {
     id: (msg.id ?? `msg-${Math.random().toString(36).slice(2, 8)}`) as string,
     role: (msg.role ?? 'assistant') as ChatMessage['role'],
@@ -575,6 +597,8 @@ export function uiMessageToChatMessage(
     charts: extractCharts(parts, { anchored: typeof msg.content !== 'string' }),
     // ADR-0160 D9 — the answer's verified record citations, drawn as chips.
     ...(recordCitations ? { recordCitations } : {}),
+    // The drafts the turn saved, drawn as a review card under the answer.
+    ...(draftReview ? { draftReview } : {}),
     streaming: opts.streaming,
   };
 }

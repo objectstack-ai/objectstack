@@ -4700,6 +4700,27 @@ const es = {
     recordCitations: {
       title: 'Citado de registros',
     },
+    // The drafts an ask turn saved, with their verdicts and Studio review links.
+    draftReview: {
+      title: 'Borradores guardados en este turno',
+      hint: 'Todavía no se ha publicado nada. Revise los borradores y publíquelos en Studio.',
+      package: 'Paquete {{name}}',
+      reviewAndPublish: 'Revisar y publicar',
+      reviewAndPublishAria: 'Revisar y publicar los borradores del paquete {{name}} en Studio',
+      review: 'Revisar',
+      reviewAria: 'Revisar el borrador {{name}} en Studio',
+      willPublish: 'Se publicará',
+      verdictWithheld: 'Veredicto no disponible',
+      checkedAtSave: 'comprobado al guardar',
+      problems: '{{count}} problemas',
+      problems_one: '{{count}} problema',
+      problems_many: '{{count}} problemas',
+      problems_other: '{{count}} problemas',
+      more: '+{{count}} más',
+      more_one: '+{{count}} más',
+      more_many: '+{{count}} más',
+      more_other: '+{{count}} más',
+    },
     questionCard: {
       aiAsks: 'La IA pregunta:',
       progress: 'Pregunta {{current}} de {{total}}',

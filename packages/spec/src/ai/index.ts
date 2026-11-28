@@ -26,6 +26,7 @@
  * - Object-query source — the `source` block the Ask data tools answer beside their result
  * - Build Progress  — phase vocabulary for the agent loop's `data-build-progress` frames
  * - Ask question    — the envelope a question tool's result carries, from which the console draws a question card
+ * - Draft review    — the `data-draft-review` part listing the drafts an ask turn saved, drawn as a review card
  */
 
 export * from './agent.zod';
@@ -51,6 +52,7 @@ export * from './knowledge-document.zod';
 export * from './solution-blueprint.zod';
 export * from './build-progress.zod';
 export * from './ask-question.zod';
+export * from './draft-review.zod';
 
 // [#12414] entry-nameability: these factories' return types expand to mention
 // `/data`'s `FilterCondition` — public on its own subpath but not nameable

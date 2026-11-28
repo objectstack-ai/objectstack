@@ -14,6 +14,7 @@ import { collectDroppedRefinements } from '../../scripts/lib/dropped-refinements
 import { Field } from './field.zod';
 import { defineStack } from '../stack.zod';
 import { isMaskedOnReadFieldType } from './masked-field-types';
+import { resolveFieldHistory } from './field-history-default';
 import { CONTROLLED_BY_PARENT_MASTER_INVALID, type ControlledByParentMasterShape } from './controlled-by-parent-master';
 import type { StateMachineValidation } from './validation.zod';
 
@@ -98,6 +99,65 @@ describe('ObjectCapabilities', () => {
     expect(trashMsg).toContain('The recycle bin that shipped later (ADR-0148) has no flag');
     expect(trashMsg, 'the prescription carries ADR ids and the migration command, never a tracker id')
       .not.toMatch(/#\d{3,5}/);
+  });
+
+  // `enable.trash` and `versioning` both promised history, so both refusals
+  // say where field history lives now. It is the model `resolveFieldHistory`
+  // enforces (values on by default, `enable.fieldHistory: false` for the
+  // object, a field's own `fieldHistory: false`, a media or structured-JSON
+  // field opting in with `fieldHistory: true`), never `trackHistory`: on a
+  // field that only opts a media or JSON type in and `false` turns nothing off.
+  describe('retired history-promising keys prescribe the field-history model that runs', () => {
+    const trashMessage = (): string => {
+      const r = ObjectCapabilities.safeParse({ trash: false });
+      expect(r.success).toBe(false);
+      return r.success ? '' : r.error.issues.map((i) => i.message).join('\n');
+    };
+    const versioningMessage = (): string => {
+      try {
+        ObjectSchema.create({
+          name: 'demo',
+          fields: { status: { type: 'text' } },
+          versioning: { enabled: true },
+        } as Record<string, unknown> as Parameters<typeof ObjectSchema.create>[0]);
+      } catch (e) {
+        return (e as Error).message;
+      }
+      throw new Error('`versioning` was not refused');
+    };
+
+    for (const [key, read] of [['enable.trash', trashMessage], ['versioning', versioningMessage]] as const) {
+      it(`${key}: values show by default, and the two off switches are named`, () => {
+        const message = read();
+        expect(message).toContain(
+          'Field history is on by default: a changed field\'s old → new values show on the record activity timeline',
+        );
+        expect(message, 'the default-off types are named with their opt-in').toContain(
+          'except a media or structured-JSON field, which opts in with `fieldHistory: true`.',
+        );
+        expect(message).toContain('`enable.fieldHistory: false` turns them off for the object');
+        expect(message).toContain('a field opts out with its own `fieldHistory: false`');
+        expect(message).toMatch(/For retention, (use )?a (data lifecycle policy \(`lifecycle`\)|`lifecycle` policy)/);
+      });
+
+      it(`${key}: never sends the author to \`trackHistory\``, () => {
+        expect(read()).not.toContain('trackHistory');
+      });
+    }
+
+    it('the prescription agrees with resolveFieldHistory', () => {
+      const text = { type: 'text' } as const;
+      expect(resolveFieldHistory(text, {}), 'values show by default').toBe(true);
+      expect(resolveFieldHistory(text, { enable: { fieldHistory: false } }), 'object off switch').toBe(false);
+      expect(resolveFieldHistory({ ...text, fieldHistory: false }, {}), 'field off switch').toBe(false);
+      expect(resolveFieldHistory({ ...text, trackHistory: false }, {}), 'trackHistory: false is no off switch').toBe(true);
+      const json = { type: 'json' } as const;
+      expect(resolveFieldHistory(json, {}), 'a structured-JSON field is off by default').toBe(false);
+      expect(resolveFieldHistory({ ...json, fieldHistory: true }, {}), 'fieldHistory: true opts it in').toBe(true);
+      const image = { type: 'image' } as const;
+      expect(resolveFieldHistory(image, {}), 'a media field is off by default').toBe(false);
+      expect(resolveFieldHistory({ ...image, fieldHistory: true }, {}), 'fieldHistory: true opts it in').toBe(true);
+    });
   });
 
   it('rejects unknown capability keys instead of stripping them', () => {
@@ -1316,7 +1376,7 @@ describe('ObjectSchema.create()', () => {
 
     it('tombstone: dead metadata keys removed in 16.0 carry upgrade guidance', () => {
       const cases: Array<[string, unknown, string]> = [
-        ['versioning', { enabled: true }, 'trackHistory'],
+        ['versioning', { enabled: true }, 'fieldHistory'],
         ['softDelete', { enabled: true }, 'the recycle bin that shipped later (ADR-0148)'],
         ['search', { fields: ['name'] }, 'searchableFields'],
         ['recordName', { type: 'autonumber' }, 'autonumber'],
