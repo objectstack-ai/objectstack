@@ -5,7 +5,7 @@
 
 perf(metadata-protocol): a by-name `form` read and an anonymous form-door request read the `view` list once and each type's stored rows once
 
-Clause-②: no
+Clause-②: yes (widening) — ObjectStackProtocolImplementation.readFormRequest
 Metadata-protocol: none
 
 The effective `form` read resolves over both types (ADR-0159 D5): the generic `form` list, the projection of the `view` list, and the cross-type resolution over the stored rows of both types. Those readings asked for the same stored rows separately, and an anonymous form door made five protocol calls (the `view` list, the `form` list, the unreadable bodies and both per-package layers), each reading the rows again. With the overlay row cache off, a by-name `form` read read the `form` and `view` rows twice each, and a form-door GET read the `view` list twice, the `view` rows five times and the `form` rows three times.
