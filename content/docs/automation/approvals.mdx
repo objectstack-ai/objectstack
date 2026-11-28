@@ -425,7 +425,7 @@ cancelled too, and when the run is one item of a batch (`map`), the batch goes o
 to its next item and records the deleted one as cancelled. Runs left paused by
 deletes made before this release are not cleaned up automatically: find them by
 the cancelled request whose `cancel_reason` is `record_deleted`, which names its
-run in `flow_run_id`, and cancel that run by hand if it is still `suspended`
+run in `flow_run_id`, and cancel that run by hand if it is still `paused`
 (requests voided by a delete after this release carry the same reason, and
 their runs already show `cancelled`). The delete removes the record's
 `master_detail` lines with it. In the
