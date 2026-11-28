@@ -626,8 +626,10 @@ describe('[#15356] can a record-before-update flow reach a multi:true batch payl
     // #4862 fact 4, re-checked: `record` is NOT the bare payload — it carries
     // this row's own `title`, a field this write never mentioned.
     expect(seen.map((s) => s.recordTitle).sort()).toEqual(['alpha', 'beta']);
-    // The `record` CEL root and the flow's `record` variable are ONE object.
-    expect(seen.every((s) => s.sameAsVariable === true)).toBe(true);
+    // The run binds its OWN copy of the record it was handed: the flow's
+    // `record` variable is not the object on the run's context, so what the
+    // function writes on the context's record is not the run's value.
+    expect(seen.every((s) => s.sameAsVariable === false)).toBe(true);
     // The function is handed no payload handle at all: `AutomationContext`
     // declares no `input`/`data` member, and the arg bag carries only these four.
     expect(seen[0]?.argKeys).toEqual(['automation', 'input', 'logger', 'variables']);
