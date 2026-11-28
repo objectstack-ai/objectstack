@@ -3009,10 +3009,11 @@ export class AnalyticsService implements IAnalyticsService {
    * service, so neither host imports this package. `createDatasetTools` with
    * `analytics` set to this service; `definitions` on the answer is
    * {@link getDatasetToolDefinitions}. Refuses at every call unless
-   * {@link hasPluginWiredAdmission}.
+   * {@link hasPluginWiredAdmission}. [#35707] The executor logs through this
+   * service's logger unless `deps` names one.
    */
   datasetTools(deps: Omit<DatasetToolsDeps, 'analytics'>): DatasetTools {
-    return createDatasetTools({ ...deps, analytics: this });
+    return createDatasetTools({ logger: this.logger, ...deps, analytics: this });
   }
 
   /**

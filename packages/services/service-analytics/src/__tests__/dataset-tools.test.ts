@@ -333,10 +333,14 @@ describe('list_datasets — the catalogue asks the query\'s own gates', () => {
       status: 400,
     });
 
-    const failing = service.datasetTools({ loadDatasets: async () => { throw new Error('metadata loader down'); } });
+    // [#35707] The caller is told the catalogue could not be read, in a fixed
+    // sentence; the loader's own error text goes to the server log alone.
+    const warn = vi.fn();
+    const failing = service.datasetTools({ loadDatasets: async () => { throw new Error('metadata loader down'); }, logger: { warn } });
     const failed = await failing.listDatasets({}, ME);
-    expect(failed).toMatchObject({ datasets: [], partial: true });
-    expect(failed.warning).toContain('metadata loader down');
+    expect(failed).toMatchObject({ datasets: [], partial: true, warning: 'The dataset catalogue could not be read, so no dataset is listed.' });
+    expect(JSON.stringify(failed)).not.toContain('metadata loader down');
+    expect(warn.mock.calls.map((c) => String(c[0]))).toEqual([expect.stringContaining('metadata loader down')]);
 
     const degraded = service.datasetTools({
       loadDatasets: async () => ({ items: [PIPELINE], partial: true as const, warning: 'one source unavailable' }),
@@ -530,10 +534,21 @@ describe('query_dataset', () => {
 
   it('answers 503 when the dataset read itself fails, never NOT_FOUND', async () => {
     const { service } = await bootWired();
-    const tools = service.datasetTools({ loadDatasets: async () => { throw new Error('loader down'); } });
-    await expect(
-      tools.queryDataset({ datasetName: 'pipeline', selection: { measures: ['revenue'] } }, ME),
-    ).rejects.toMatchObject({ code: 'SERVICE_UNAVAILABLE', status: 503 });
+    // [#35707] A fixed sentence (the REST door's own); the read's error rides
+    // as `cause` and reaches the logger, never the answer.
+    const warn = vi.fn();
+    const failure = new Error('loader down');
+    const tools = service.datasetTools({ loadDatasets: async () => { throw failure; }, logger: { warn } });
+    const refused = await tools.queryDataset({ datasetName: 'pipeline', selection: { measures: ['revenue'] } }, ME)
+      .then(() => undefined, (e: unknown) => e as Error & { cause?: unknown });
+    expect(refused).toMatchObject({
+      code: 'SERVICE_UNAVAILABLE',
+      status: 503,
+      message: 'The dataset "pipeline" could not be resolved: the dataset read failed. This is a server-side fault, not a missing dataset.',
+    });
+    expect(refused!.message).not.toContain('loader down');
+    expect(refused!.cause).toBe(failure);
+    expect(warn.mock.calls.map((c) => String(c[0]))).toEqual([expect.stringContaining('loader down')]);
   });
 
   // A selection naming no measure has nothing to project. The spec selection

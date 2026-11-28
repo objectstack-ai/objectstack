@@ -40,7 +40,7 @@
  * `packages/metadata-protocol/src/protocol.injected-system-columns.test.ts`.
  */
 
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import { ObjectStackProtocolImplementation } from '@objectstack/metadata-protocol';
 // [#5619] The producer's OWN write-verb dispatch decisions, so the fake engine
 // below cannot accept a call ObjectQL refuses.
@@ -736,4 +736,103 @@ describe('[#33952] a zh-CN read of a patched field label, echoed back, is stored
         expect(stored.fields.registration_number.label).toBe('税号');
         expect(stored.fields.name.label).toBe('Account Name');
     });
+});
+
+/**
+ * [#35707] The object save reads the registered i18n service's whole catalog
+ * to tell a translated echo from typed text. A service whose `getLocales` or
+ * `getTranslations` throws leaves it unable to tell, so the save is refused
+ * 503 `SERVICE_UNAVAILABLE` (a declared refusal with one fixed sentence; the
+ * service's error rides as `cause`) and nothing is stored — never a body whose
+ * translated labels became the authored ones. The stored-row migration reads
+ * the same catalog and is refused the same way. The controls run over a
+ * service that reads.
+ */
+const TRANSLATIONS_UNREADABLE =
+    'The translations could not be read, so a label a translated read served back cannot be told from one '
+    + 'written by hand; nothing was saved or migrated. Retry once the translations can be read.';
+
+describe('[#35707] an object save or migration over translations that cannot be read is refused, and stores nothing', () => {
+    const body = () => ({
+        name: 'crm_note', label: 'Note', sharingModel: 'private',
+        fields: { title: { name: 'title', type: 'text', label: 'Title' } },
+    });
+    const i18nOf = (failing?: 'getLocales' | 'getTranslations') => ({
+        getLocales: () => {
+            if (failing === 'getLocales') throw new Error('bundle offline');
+            return ['en', 'zh-CN'];
+        },
+        getTranslations: (locale: string) => {
+            if (failing === 'getTranslations') throw new Error('bundle offline');
+            return locale === 'zh-CN' ? { objects: { crm_note: { label: '笔记' } } } : {};
+        },
+    });
+    const saveOver = async (i18n: unknown) => {
+        const host = makeHost(false);
+        const protocol: any = new ObjectStackProtocolImplementation(host.engine, () => new Map<string, any>([['i18n', i18n]]));
+        const outcome = await protocol.saveMetaItem({ type: 'object', name: 'crm_note', item: body(), mode: 'publish' } as any)
+            .then(() => null, (e: unknown) => e);
+        return { outcome, stored: Array.from(host.rows.values()).some((r) => r.name === 'crm_note') };
+    };
+
+    it('control: the translations reading, the save stores the body', async () => {
+        expect(await saveOver(i18nOf())).toEqual({ outcome: null, stored: true });
+    });
+
+    for (const failing of ['getLocales', 'getTranslations'] as const) {
+        it(`${failing} throwing: a declared 503 SERVICE_UNAVAILABLE refusal with the fixed sentence, and no row`, async () => {
+            const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+            try {
+                const { outcome, stored } = await saveOver(i18nOf(failing));
+                expect(outcome).toMatchObject({ code: 'SERVICE_UNAVAILABLE', status: 503, refusal: true });
+                expect((outcome as Error).message).toBe(TRANSLATIONS_UNREADABLE);
+                expect(((outcome as Error).cause as Error).message).toBe('bundle offline');
+                expect(stored).toBe(false);
+            } finally {
+                warn.mockRestore();
+            }
+        });
+    }
+
+    /**
+     * The catalog's other reader: the stored-row migration reads it for every
+     * stored object row, on the preview pass and the apply pass alike. Without
+     * it an echoed row would be counted `canonical`, so both passes are
+     * refused the same way and the stored row is untouched.
+     */
+    const migrateOver = async (i18n: unknown, apply: boolean) => {
+        const host = makeHost(false);
+        const protocol: any = new ObjectStackProtocolImplementation(host.engine, () => new Map<string, any>([['i18n', i18n]]));
+        await host.engine.insert('sys_metadata', {
+            type: 'object', name: 'crm_note', organization_id: null, package_id: null, state: 'active',
+            metadata: JSON.stringify(body()),
+        });
+        const before = JSON.stringify(Array.from(host.rows.values()));
+        const outcome = await protocol.migrateStoredMetadata({ types: ['object'], ...(apply ? { apply: true } : {}) })
+            .then((r: any) => r, (e: unknown) => e);
+        return { outcome, unchanged: JSON.stringify(Array.from(host.rows.values())) === before };
+    };
+
+    it('control: the translations reading, the migration preview and apply answer, and the row is untouched', async () => {
+        for (const apply of [false, true]) {
+            const { outcome, unchanged } = await migrateOver(i18nOf(), apply);
+            expect(outcome).not.toBeInstanceOf(Error);
+            expect(Array.isArray(outcome.rows)).toBe(true);
+            expect(unchanged).toBe(true);
+        }
+    });
+
+    for (const apply of [false, true]) {
+        it(`a throwing read refuses the migration ${apply ? 'apply' : 'preview'} pass the same way, and the row is untouched`, async () => {
+            const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+            try {
+                const { outcome, unchanged } = await migrateOver(i18nOf('getTranslations'), apply);
+                expect(outcome).toMatchObject({ code: 'SERVICE_UNAVAILABLE', status: 503, refusal: true });
+                expect((outcome as Error).message).toBe(TRANSLATIONS_UNREADABLE);
+                expect(unchanged).toBe(true);
+            } finally {
+                warn.mockRestore();
+            }
+        });
+    }
 });

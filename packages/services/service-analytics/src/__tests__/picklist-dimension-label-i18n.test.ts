@@ -47,7 +47,7 @@
  * service as `i18n`.
  */
 
-import { describe, it, expect, beforeAll, afterAll } from 'vitest';
+import { describe, it, expect, beforeAll, afterAll, vi } from 'vitest';
 import { ObjectQL } from '@objectstack/objectql';
 import { SqlDriver } from '@objectstack/driver-sql';
 import { DatasetSchema } from '@objectstack/spec/ui';
@@ -340,6 +340,30 @@ describe('[#22178] a picklist-bound select dimension renders its labels in the r
           expect(await labelsOf(face, 'industry', 'en')).toEqual(EXPECTED['zh-CN'].industry);
           expect(await labelsOf(face, 'type', 'en')).toEqual(EXPECTED['zh-CN'].type);
         });
+      });
+
+      // [#35707] A translation fault is no failed query: the bundle the option
+      // labels translate through is answered as none, so the rows carry the
+      // authored labels, and one warn line says why.
+      for (const failing of ['getLocales', 'getTranslations'] as const) {
+        it(`#35707: ${failing} throwing — zh-CN rows answer the authored labels, and the log says the translations could not be read`, async () => {
+          const warn = vi.spyOn(quiet, 'warn');
+          try {
+            await withI18n({ [failing]: () => { throw new Error('bundle offline'); } }, async () => {
+              expect(await labelsOf(face, 'industry', 'zh-CN')).toEqual(AUTHORED.industry);
+              expect(await labelsOf(face, 'type', 'zh-CN')).toEqual(AUTHORED.type);
+            });
+            const said = warn.mock.calls.map((c) => String((c as unknown[])[0])).filter((m) => m.startsWith('[Analytics]'));
+            expect(said.length).toBeGreaterThan(0);
+            expect(said[0]).toContain('bundle offline');
+          } finally {
+            warn.mockRestore();
+          }
+        });
+      }
+
+      it('#35707 CONTROL — the same reads answering again, zh-CN rows answer the translated labels', async () => {
+        expect(await labelsOf(face, 'type', 'zh-CN')).toEqual(EXPECTED['zh-CN'].type);
       });
     });
   }

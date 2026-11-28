@@ -4715,9 +4715,18 @@ export class RestServer {
      * transports run, reached here through {@link metaListAnswerSources}; this
      * method folds the spelling and hands in this transport's I/O.
      */
-    private async translateMetaItems(req: any, type: string, environmentId: string | undefined, items: any): Promise<any> {
+    private async translateMetaItems(
+        req: any,
+        type: string,
+        environmentId: string | undefined,
+        items: any,
+        reportTranslationFault?: (warning: string) => void,
+    ): Promise<any> {
         return metaReadGate.translateMetaList(
-            this.metaListTranslationSources(environmentId, req),
+            {
+                ...this.metaListTranslationSources(environmentId, req),
+                ...(reportTranslationFault ? { reportTranslationFault } : {}),
+            },
             RestServer.metaTypeSingular(type),
             items,
         );
@@ -4760,7 +4769,8 @@ export class RestServer {
         return {
             ...this.metaItemReadGateSources(environmentId, req, p),
             requestLocale: (i18n) => this.extractLocale(req, i18n),
-            translateList: (_metaType, items) => this.translateMetaItems(req, req.params.type, environmentId, items),
+            translateList: (_metaType, items, reportTranslationFault) =>
+                this.translateMetaItems(req, req.params.type, environmentId, items, reportTranslationFault),
             resolveEndpointMatcher: () => this.resolveEndpointMatchAuthority(environmentId, req),
             notifyMissingEndpointMatcher: (surface) => this.notifyMissingEndpointAuthority(surface),
             resolveObjectMasker: () => this.resolveObjectMasker(environmentId, req, 'object'),

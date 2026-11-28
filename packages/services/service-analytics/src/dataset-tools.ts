@@ -177,10 +177,19 @@ export function getDatasetToolDefinitions(): readonly AIToolDefinition[] {
  * [#34993] A `warning` without `partial` is a whole read the host says
  * something about (a translation fault: every row, its text untranslated):
  * `list_datasets` says it, and `query_dataset` still answers.
+ * [#35707] `translationWarning` is that translation fault named as one: the
+ * rows are whole, their text untranslated. `list_datasets` says it as it says
+ * `warning`, and `query_dataset` serves it as its answer's
+ * `translationWarning`.
  */
 export type DatasetToolSource =
   | readonly unknown[]
-  | { readonly items: readonly unknown[]; readonly partial?: true; readonly warning?: string };
+  | {
+    readonly items: readonly unknown[];
+    readonly partial?: true;
+    readonly warning?: string;
+    readonly translationWarning?: string;
+  };
 
 /** The ADR-0090 D10 narrowing probe, in `McpDataBridge.diagnoseDelegation`'s shape. */
 export type DatasetToolDelegationProbe = (
@@ -226,6 +235,13 @@ export interface DatasetToolsDeps {
    * on a bridge that omits it. A throw is read as "cannot say".
    */
   readonly diagnoseDelegation?: DatasetToolDelegationProbe;
+  /**
+   * [#35707] Where a failure the answer says in a fixed sentence is logged
+   * with its own text: the caller is told the catalogue or the dataset could
+   * not be read, never why. {@link AnalyticsService.datasetTools} binds the service's
+   * logger; absent, the text is not logged.
+   */
+  readonly logger?: { warn(message: string): void };
 }
 
 /** A tool call in the `ToolCallPart` shape's two members the executor reads. */
@@ -315,6 +331,8 @@ interface LoadedDatasets {
   readonly holdings: ReadonlyArray<{ readonly packageId: string | null; readonly name: unknown; readonly dataset?: Dataset }>;
   readonly partial: boolean;
   readonly warning?: string;
+  /** [#35707] The host's translation-fault sentence ({@link DatasetToolSource}). */
+  readonly translationWarning?: string;
 }
 
 /**
@@ -394,6 +412,9 @@ function text(label: unknown, locale: string | undefined, fallback?: string): st
 }
 
 /** Create the dataset tools' executor over a host's service and metadata. */
+/** [#35707] What `list_datasets` says when the catalogue read throws. */
+const DATASET_CATALOGUE_UNREADABLE_WARNING = 'The dataset catalogue could not be read, so no dataset is listed.';
+
 export function createDatasetTools(deps: DatasetToolsDeps): DatasetTools {
   const maxRows = typeof deps.maxQueryLimit === 'number' && deps.maxQueryLimit > 0
     ? Math.floor(deps.maxQueryLimit)
@@ -419,6 +440,7 @@ export function createDatasetTools(deps: DatasetToolsDeps): DatasetTools {
     const items = Array.isArray(source) ? source : (source as { items?: readonly unknown[] }).items ?? [];
     const degraded = !Array.isArray(source) && (source as { partial?: unknown }).partial === true;
     const said = Array.isArray(source) ? undefined : (source as { warning?: unknown }).warning;
+    const untranslated = Array.isArray(source) ? undefined : (source as { translationWarning?: unknown }).translationWarning;
     const datasets: Dataset[] = [];
     const holdings: Array<LoadedDatasets['holdings'][number]> = [];
     for (const item of items) {
@@ -437,6 +459,7 @@ export function createDatasetTools(deps: DatasetToolsDeps): DatasetTools {
       holdings,
       partial: degraded,
       ...(degraded ? { warning: String(said ?? 'The dataset read was degraded.') } : typeof said === 'string' ? { warning: said } : {}),
+      ...(typeof untranslated === 'string' && untranslated.length > 0 ? { translationWarning: untranslated } : {}),
     };
   }
 
@@ -455,10 +478,13 @@ export function createDatasetTools(deps: DatasetToolsDeps): DatasetTools {
       const nextStep = terms !== undefined
         ? composeDatasetNextStep({ terms, datasets: [], candidates: [], partial: true, locales: sentence })
         : undefined;
+      // [#35707] The platform's client-facing failure text: a fixed sentence,
+      // the caught error's own text to the server log alone.
+      deps.logger?.warn(`[Analytics] list_datasets: the dataset catalogue could not be read: ${e instanceof Error ? e.message : String(e)}`);
       return {
         datasets: [],
         partial: true,
-        warning: `The dataset catalogue could not be read: ${e instanceof Error ? e.message : String(e)}`,
+        warning: DATASET_CATALOGUE_UNREADABLE_WARNING,
         ...(nextStep ? { nextStep } : {}),
       };
     }
@@ -507,6 +533,7 @@ export function createDatasetTools(deps: DatasetToolsDeps): DatasetTools {
 
     const warnings: string[] = [];
     if (loaded.warning) warnings.push(loaded.warning);
+    if (loaded.translationWarning) warnings.push(loaded.translationWarning);
     if (unresolved) {
       warnings.push('Some datasets or members could not be checked against this caller\'s permissions and are left out.');
     }
@@ -540,12 +567,18 @@ export function createDatasetTools(deps: DatasetToolsDeps): DatasetTools {
     try {
       loaded = await load(service, context);
     } catch (e) {
-      throw refusal(
+      // [#35707] The platform's client-facing failure text: a fixed sentence
+      // (the REST door's own for the same fault), the caught error on `cause`
+      // and in the server log alone.
+      deps.logger?.warn(`[Analytics] query_dataset: the dataset read failed for "${datasetName}": ${e instanceof Error ? e.message : String(e)}`);
+      const refused = refusal(
         'SERVICE_UNAVAILABLE',
         503,
-        `The dataset "${datasetName}" could not be resolved: the dataset read failed `
-          + `(${e instanceof Error ? e.message : String(e)}). This is a server-side fault, not a missing dataset.`,
+        `The dataset "${datasetName}" could not be resolved: the dataset read failed. `
+          + 'This is a server-side fault, not a missing dataset.',
       );
+      (refused as { cause?: unknown }).cause = e;
+      throw refused;
     }
     const notFound = () => refusal('NOT_FOUND', 404, `Dataset "${datasetName}" not found.`);
     // Admitted exactly as `list_datasets` lists it, holder by holder, BEFORE
@@ -638,6 +671,8 @@ export function createDatasetTools(deps: DatasetToolsDeps): DatasetTools {
       ...(narrowing?.narrowed && narrowing.statement
         ? { delegationNarrowed: true as const, warning: narrowing.statement }
         : {}),
+      // [#35707] The labels above were read through translations that failed: say so.
+      ...(loaded.translationWarning ? { translationWarning: loaded.translationWarning } : {}),
     } as QueryDatasetOutput;
   }
 

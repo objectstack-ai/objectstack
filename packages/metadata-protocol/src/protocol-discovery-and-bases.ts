@@ -1239,6 +1239,22 @@ export class ProtocolDiscoveryAndBasesFacet {
      * (`locale -> data`), or `undefined` when no service or no locale is
      * registered — the bundle the `/meta` read exits translate with
      * (`translationBundleOf` in `@objectstack/rest`, built the same way).
+     *
+     * [#35707] It has two readers, and neither may go on without it: the
+     * object SAVE (the echo restore above and
+     * {@link restoreInjectedColumnEchoes}) and the stored-row MIGRATION
+     * (`migrateStoredMetadata`'s translated-echo notices, read for every
+     * stored object row on the preview pass and the apply pass alike). So a
+     * service whose `getLocales` or `getTranslations` throws refuses either
+     * as a 503 ({@link translationsUnreadableError}) instead of answering
+     * `undefined` the way the read doors do: without the bundle neither can
+     * tell a label a translated read served back from one the author typed.
+     * The save would store the echo as the authored text — the "storing a
+     * body this door could not judge" the stored-row read refuses for the
+     * same reason — and the migration would count an echoed row `canonical`.
+     * The refusal is handed to the caller with a fixed sentence; the
+     * service's own error is logged here at `warn`, because the route doors
+     * do not log a declared refusal.
      */
     static registeredTranslationBundle(host: Pick<ProtocolHost, 'getServicesRegistry'>): TranslationBundle | undefined {
         const service: any = host.getServicesRegistry?.().get('i18n');
@@ -1246,9 +1262,15 @@ export class ProtocolDiscoveryAndBasesFacet {
             return undefined;
         }
         const bundle: Record<string, any> = {};
-        for (const locale of service.getLocales() as string[]) {
-            const data = service.getTranslations(locale);
-            if (data && typeof data === 'object') bundle[locale] = data;
+        try {
+            for (const locale of service.getLocales() as string[]) {
+                const data = service.getTranslations(locale);
+                if (data && typeof data === 'object') bundle[locale] = data;
+            }
+        } catch (error) {
+            const reason = error instanceof Error ? error.message : String(error);
+            console.warn(`[metadata] The translations could not be read (${reason}), so the object save or migration is refused.`);
+            throw translationsUnreadableError(error);
         }
         return Object.keys(bundle).length > 0 ? (bundle as TranslationBundle) : undefined;
     }
@@ -1297,4 +1319,40 @@ export class ProtocolDiscoveryAndBasesFacet {
         if (fromService.degraded) host.throwMetadataServiceUnavailable(fromService.errors);
         return undefined;
     }
+}
+
+/**
+ * [#35707] The one sentence {@link translationsUnreadableError} says, fixed
+ * and worded for both of its doors (the object save and the stored-row
+ * migration). The platform's client-facing failure text: the i18n service's
+ * own error is never quoted to the caller; it rides as `cause` and is
+ * logged where it is caught.
+ */
+const TRANSLATIONS_UNREADABLE_MESSAGE =
+    'The translations could not be read, so a label a translated read served back cannot be told from one '
+    + 'written by hand; nothing was saved or migrated. Retry once the translations can be read.';
+
+/**
+ * [#35707] The refusal an object save or a stored-row migration answers when
+ * the registered i18n service cannot read its translations
+ * ({@link ProtocolDiscoveryAndBasesFacet.registeredTranslationBundle}): 503
+ * `SERVICE_UNAVAILABLE`, the code the metadata store's own unavailable read
+ * answers (`metadataStoreUnavailableError`), with the service's error kept
+ * as `cause` alone. Declared a refusal (`refusal: true`), so the route error
+ * doors hand the caller {@link TRANSLATIONS_UNREADABLE_MESSAGE} rather than
+ * the generic 5xx sentence. Retrying once the translations read again saves
+ * the same body.
+ */
+function translationsUnreadableError(cause: unknown): Error {
+    const err = new Error(TRANSLATIONS_UNREADABLE_MESSAGE) as Error & {
+        code?: string;
+        status?: number;
+        refusal?: boolean;
+        cause?: unknown;
+    };
+    err.code = 'SERVICE_UNAVAILABLE';
+    err.status = 503;
+    err.refusal = true;
+    err.cause = cause;
+    return err;
 }

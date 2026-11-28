@@ -61,6 +61,12 @@ export interface DiagnosedObjectListing<T> {
   objects: T[];
   degraded: boolean;
   errors: string[];
+  /**
+   * [#35707] The sentence of a translation fault: the listing's labels and
+   * descriptions are served untranslated because the translations could not
+   * be read. Absent on a listing whose translations were read.
+   */
+  translationWarning?: string;
 }
 
 /**

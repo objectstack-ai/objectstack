@@ -711,12 +711,24 @@ function titleOf(value: unknown, recordId: string): string | undefined {
  * shape `translateObject` reads (the glue `RestServer.buildTranslationBundle`
  * and the analytics service's label pass build the same way); `undefined`
  * when it holds none.
+ *
+ * [#35707] A service whose `getLocales` or `getTranslations` throws is a
+ * translation fault, answered as `translationBundleOf` in `packages/rest`
+ * answers it: `undefined`, so the page's labels are served as declared, and
+ * one `warn` line on `logger` saying why (a functional degradation — the page
+ * still serves, in the authored language).
  */
-function translationBundleOf(i18n: UploadLinkLabelI18n): TranslationBundle | undefined {
+function translationBundleOf(i18n: UploadLinkLabelI18n, logger: RecordFileAccessDeps['logger']): TranslationBundle | undefined {
   const bundle: Record<string, unknown> = {};
-  for (const locale of i18n.getLocales()) {
-    const data = i18n.getTranslations(locale);
-    if (data && typeof data === 'object') bundle[locale] = data;
+  try {
+    for (const locale of i18n.getLocales()) {
+      const data = i18n.getTranslations(locale);
+      if (data && typeof data === 'object') bundle[locale] = data;
+    }
+  } catch (error) {
+    const reason = error instanceof Error ? error.message : String(error);
+    logger.warn(`[RecordFileAccess] The translations could not be read (${reason}), so the upload page's labels are served untranslated.`);
+    return undefined;
   }
   return Object.keys(bundle).length > 0 ? (bundle as TranslationBundle) : undefined;
 }
@@ -1341,7 +1353,7 @@ export class RecordFileAccess implements ICallerRecordFileService, UploadLinkDoo
       fields: field !== undefined ? { [field]: { name: field, ...(fieldLabel !== undefined ? { label: fieldLabel } : {}) } } : {},
     };
     const i18n = this.deps.getI18n?.();
-    const bundle = i18n ? translationBundleOf(i18n) : undefined;
+    const bundle = i18n ? translationBundleOf(i18n, this.deps.logger) : undefined;
     if (!i18n || !bundle) return { objectLabel, fieldLabel };
     const fallback = typeof i18n.getFallbackLocale === 'function' ? i18n.getFallbackLocale() : undefined;
     // [#33634] The authored language: the declared `sourceLocale`, else the

@@ -1136,9 +1136,17 @@ export function buildMcpBridge(
      * No locale, or a key the bundle does not carry, leaves the authored text;
      * names never change.
      */
-    const inCallerLocale = async (served: readonly any[]): Promise<any[]> => {
+    const inCallerLocale = async (served: readonly any[], reportTranslationFault?: (warning: string) => void): Promise<any[]> => {
         if (served.length === 0) return [...served];
-        const translated = await translateMetaList(metaTranslationSources(deps, context, getProtocol), 'object', [...served]);
+        const translated = await translateMetaList(
+            {
+                ...metaTranslationSources(deps, context, getProtocol),
+                // [#35707] Handed back to the tool that says the fault on its answer.
+                ...(reportTranslationFault ? { reportTranslationFault } : {}),
+            },
+            'object',
+            [...served],
+        );
         return Array.isArray(translated) ? translated : [...served];
     };
 
@@ -1148,7 +1156,7 @@ export function buildMcpBridge(
         return def ? await servedToCaller(def) : def;
     };
 
-    const listObjectSummaries = async (): Promise<any[]> => {
+    const listObjectSummaries = async (reportTranslationFault?: (warning: string) => void): Promise<any[]> => {
         const objs = await readServedObjects();
         const served: any[] = [];
         // [ADR-0106 D5(2)] Every listed object as this caller is served it,
@@ -1162,7 +1170,7 @@ export function buildMcpBridge(
         }
         const out: any[] = [];
         // [#34872] …in the caller's locale, the page translated in one call.
-        for (const o of await inCallerLocale(served)) {
+        for (const o of await inCallerLocale(served, reportTranslationFault)) {
             out.push({
                 name: o.name,
                 label: o.label ?? o.name,
@@ -1188,12 +1196,15 @@ export function buildMcpBridge(
         const def: any = declared ? await servedToCaller(declared) : declared;
         if (!def) return null;
         // `declared` is read for the `readonly` verdict alone, which no translation touches.
-        const [localized] = await inCallerLocale([def]);
-        return describeServedObject(localized, declared);
+        // [#35707] A translation fault is said on the answer, as `translationWarning`.
+        let translationWarning: string | undefined;
+        const [localized] = await inCallerLocale([def], (warning) => { translationWarning = warning; });
+        const described = describeServedObject(localized, declared);
+        return translationWarning === undefined ? described : { ...described, translationWarning };
     };
 
     const bridge = {
-        listObjects: listObjectSummaries,
+        listObjects: () => listObjectSummaries(),
         /**
          * [#6504] The HTTP transport's half of the `list_objects` completeness
          * fix — the stdio bridge (`packages/mcp/src/stdio-data-bridge.ts`)
@@ -1218,10 +1229,13 @@ export function buildMcpBridge(
          * that cannot manufacture a claim.
          */
         listObjectsDiagnosed: async () => {
-            const objects = await listObjectSummaries();
+            // [#35707] A translation fault rides the listing as `translationWarning`.
+            let translationWarning: string | undefined;
+            const objects = await listObjectSummaries((warning) => { translationWarning = warning; });
+            const said = translationWarning === undefined ? {} : { translationWarning };
             const meta: any = await getMeta();
             if (!meta || typeof meta.listDiagnosed !== 'function') {
-                return { objects, degraded: false, errors: [] };
+                return { objects, degraded: false, errors: [], ...said };
             }
             try {
                 const diagnosed: any = await meta.listDiagnosed('object');
@@ -1229,9 +1243,10 @@ export function buildMcpBridge(
                     objects,
                     degraded: diagnosed?.degraded === true,
                     errors: Array.isArray(diagnosed?.errors) ? diagnosed.errors : [],
+                    ...said,
                 };
             } catch {
-                return { objects, degraded: false, errors: [] };
+                return { objects, degraded: false, errors: [], ...said };
             }
         },
         // [#25120] Answered from the listing `list_objects` serves
@@ -1878,7 +1893,7 @@ function recordContextMembers(
  */
 export interface McpDatasetToolsService {
     datasetTools(deps: {
-        loadDatasets: (context: unknown) => Promise<readonly unknown[] | { items: readonly unknown[]; warning?: string }>;
+        loadDatasets: (context: unknown) => Promise<readonly unknown[] | { items: readonly unknown[]; warning?: string; translationWarning?: string }>;
         translationLocale?: (context: unknown) => Promise<string | undefined>;
         diagnoseDelegation?: (object: string, context: unknown) => Promise<{ narrowed: boolean; statement?: string } | undefined>;
         maxQueryLimit?: number;
@@ -2023,7 +2038,7 @@ function metaTranslationSources(
  *   the REST door localizes a saved dataset. A throwing read is left to throw:
  *   the executor answers it as a degraded read (`partial` / 503), never as an
  *   empty catalogue. [#34993] A translation fault is no failed read: the rows
- *   are handed over untranslated, with the fault's sentence as their `warning`.
+ *   are handed over untranslated, with the fault's sentence as their `translationWarning` (#35707).
  * - [#35083] `translationLocale` is the locale that translation read, so the
  *   executor's labels and its sentences speak one language.
  * - The narrowing probe is the bridge's own `diagnoseDelegation` read, asked
@@ -2050,7 +2065,7 @@ function datasetToolMembers(
             items,
         );
         const rows = Array.isArray(translated) ? translated : items;
-        return warning === undefined ? rows : { items: rows, warning };
+        return warning === undefined ? rows : { items: rows, translationWarning: warning };
     };
     const translationLocale = async () => {
         const sources = metaTranslationSources(deps, context, getProtocol);

@@ -385,6 +385,8 @@ const itemsOf = (data: any): any[] | undefined =>
 
 interface Boot {
     withI18n?: boolean;
+    /** [#35707] The i18n service in place of {@link i18nDouble}. */
+    i18n?: unknown;
     /** [#20478] A protocol with no layered read (`getMetaItemLayered` absent). */
     withoutLayered?: boolean;
 }
@@ -397,7 +399,7 @@ function bootDispatcher(callerName: CallerName, opts: Boot = {}) {
         protocol,
         security: securityFor(caller),
         metadata: endpointMatcher,
-        ...(opts.withI18n === false ? {} : { i18n: i18nDouble }),
+        ...(opts.withI18n === false ? {} : { i18n: opts.i18n ?? i18nDouble }),
     };
     const get = (n: string) => services[n] ?? null;
     const kernel: any = { context: { getService: get }, getService: get, getServiceAsync: async (n: string) => get(n) };
@@ -455,7 +457,7 @@ function bootRest(callerName: CallerName, opts: Boot = {}) {
     rest.securityServiceProvider = async () => securityFor(caller);
     rest.serviceExistsProvider = (name: string) => name !== 'tenancy';
     rest.metadataServiceProvider = async () => endpointMatcher;
-    if (opts.withI18n !== false) rest.i18nServiceProvider = async () => i18nDouble;
+    if (opts.withI18n !== false) rest.i18nServiceProvider = async () => opts.i18n ?? i18nDouble;
     rest.registerRoutes();
     const META = '/api/v1/meta';
     const routeOf = (path: string) => {
@@ -1389,5 +1391,49 @@ describe('[#20408] an undetermined field visibility (ADR-0106 D6 tier 2) serves 
                 expect(same ? [] : [mismatchOf('undetermined', dispatcher, rest)]).toEqual([]);
             });
         }
+    }
+});
+
+/**
+ * [#35707] A translation fault — an i18n service that resolves but whose
+ * `getLocales` throws — on the list and the by-name read: both transports
+ * answer 200 with the authored text and the same `translationWarning` beside
+ * the served documents. The control, over the readable double, carries no
+ * such member on either transport.
+ */
+describe('[#35707] a translation fault is said as translationWarning, the same on both transports', () => {
+    const faulting = { ...i18nDouble, getLocales: () => { throw new Error('bundle offline'); } };
+    const ZH = { 'accept-language': 'zh-CN' };
+    /**
+     * A booted transport whose list read answers the `{ type, items }`
+     * envelope the real protocol answers: the double's bare array has no
+     * member to carry the warning, and is answered as it came.
+     */
+    const enveloped = <T extends { protocol: any }>(boot: T): T => {
+        const bare = boot.protocol.getMetaItems.getMockImplementation();
+        boot.protocol.getMetaItems.mockImplementation(async (request: any) => ({ type: request.type, items: await bare(request) }));
+        return boot;
+    };
+    for (const path of ['/meta/object', '/meta/object/invoice']) {
+        it(`GET ${path} under zh-CN`, async () => {
+            const dispatcher = await enveloped(bootDispatcher('holder', { i18n: faulting })).read(path, {}, ZH);
+            const rest = await enveloped(bootRest('holder', { i18n: faulting })).read(path, {}, ZH);
+            const list = path === '/meta/object';
+            for (const answer of [dispatcher, rest]) {
+                expect(answer.status).toBe(200);
+                const doc = list ? answer.items?.find((o: any) => o?.name === 'invoice') : answer.item;
+                expect(doc?.label).toBe('Invoice');
+            }
+            const warningOf = (answer: Answer, onDispatcher: boolean) => (onDispatcher ? answer.body?.data : answer.body)?.translationWarning;
+            expect(warningOf(rest, false)).toBe('The translations could not be read, so labels and descriptions are served untranslated.');
+            expect(JSON.stringify(rest.body)).not.toContain('bundle offline');
+            expect(warningOf(dispatcher, true)).toBe(warningOf(rest, false));
+            // CONTROL — the readable double: translated, and no member on either transport.
+            const healthyDispatcher = await enveloped(bootDispatcher('holder')).read(path, {}, ZH);
+            const healthyRest = await enveloped(bootRest('holder')).read(path, {}, ZH);
+            expect(list ? healthyRest.items?.find((o: any) => o?.name === 'invoice')?.label : healthyRest.item?.label).toBe('发票');
+            expect(warningOf(healthyRest, false)).toBeUndefined();
+            expect(warningOf(healthyDispatcher, true)).toBeUndefined();
+        });
     }
 });

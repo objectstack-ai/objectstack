@@ -125,6 +125,8 @@ describe('#30892 — a record\'s files for a resolved caller: read one, attach o
   /** [#32712] The workspace's default locale, as the `localization` settings answer it; none unless a case sets one. */
   let workspaceLocale: string | undefined;
   const localizationChanged: Array<() => void> = [];
+  /** [#35707] The plugin's logger, so a case can read what a degradation said. */
+  const pluginLogger = silentLogger();
   const setWorkspaceLocale = (locale: string | undefined) => {
     workspaceLocale = locale;
     for (const fn of localizationChanged) fn();
@@ -159,7 +161,7 @@ describe('#30892 — a record\'s files for a resolved caller: read one, attach o
     const phases = new Map<string, Array<() => unknown>>();
     const mount = (m: string) => (path: string, handler: RouteHandler) => { routes.set(`${m}:${path}`, handler); };
     const ctx = {
-      logger: silentLogger(),
+      logger: pluginLogger,
       registerService: (name: string, svc: unknown) => { services.set(name, svc); },
       getService: <T>(name: string): T => {
         if (!services.has(name)) throw new Error(`service '${name}' not registered`);
@@ -1045,6 +1047,30 @@ describe('#30892 — a record\'s files for a resolved caller: read one, attach o
         const enHtml = String((await openIn(tokenOf(grant.path), EN))._sent);
         expect(enHtml).toContain(row(en.recordRow, en.recordTitled('Claim', TITLE)));
       });
+    });
+
+    it.each(['getLocales', 'getTranslations'] as const)('#35707: %s throwing — the page still serves, with the labels as declared, and the log says why', async (failing) => {
+      const id = await titledClaim();
+      const grant = await files.createUploadLinkAs('claim', id, { field: 'policy' }, OWNER as never);
+      const i18n = {
+        getLocales: () => {
+          if (failing === 'getLocales') throw new Error('bundle offline');
+          return ['zh-CN'];
+        },
+        getTranslations: (locale: string) => {
+          if (failing === 'getTranslations') throw new Error('bundle offline');
+          return locale === 'zh-CN' ? { objects: { claim: { label: '报销单', fields: { policy: { label: '保单' } } } } } : {};
+        },
+      };
+      pluginLogger.warn.mockClear();
+      await withServices({ i18n }, async () => {
+        const page = await openIn(tokenOf(grant.path), ZH);
+        expect(page._status).toBe(200);
+        expect(String(page._sent)).toContain(`${row(zh.recordRow, zh.recordTitled('Claim', TITLE))}${row(zh.goesIntoRow, zh.intoField('Policy'))}`);
+      });
+      const said = pluginLogger.warn.mock.calls.map((c) => String(c[0])).filter((m) => m.startsWith('[RecordFileAccess]'));
+      expect(said.length).toBeGreaterThan(0);
+      expect(said[0]).toContain('bundle offline');
     });
 
     it('#33634: with sourceLocale en declared over a zh-CN default, an English page names the inline labels and a Chinese one the pack', async () => {

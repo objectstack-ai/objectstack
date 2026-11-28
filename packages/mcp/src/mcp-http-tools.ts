@@ -3991,8 +3991,12 @@ export function registerObjectTools(
           const visible = allowSystem
             ? diagnosed.objects
             : await filterAsync(diagnosed.objects, async (o) => !isSystemObject(o.name) || await attestsAiRead(o.name));
+          // [#35707] A translation fault: the labels are untranslated, and the answer says why.
+          const untranslated = typeof diagnosed.translationWarning === 'string' && diagnosed.translationWarning.length > 0
+            ? { translationWarning: diagnosed.translationWarning }
+            : {};
           if (!diagnosed.degraded) {
-            return textResult({ objects: visible, totalCount: visible.length });
+            return textResult({ objects: visible, totalCount: visible.length, ...untranslated });
           }
           return textResult({
             objects: visible,
@@ -4001,6 +4005,7 @@ export function registerObjectTools(
             warning: metadataPartialListingSentence('objects', visible.length),
             code: METADATA_UNAVAILABLE_CODE,
             status: 503,
+            ...untranslated,
           });
         } catch (err) {
           return metaDoorErrorResult(err, 'list_objects', undefined, faultLogger);

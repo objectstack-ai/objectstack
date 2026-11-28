@@ -1173,13 +1173,28 @@ export class AnalyticsServicePlugin implements Plugin {
     // "translate a select option label" implementation: the actual lookup
     // stays exactly one function, `translateObject` below, imported rather
     // than reimplemented.
+    //
+    // [#35707] A service whose `getLocales` or `getTranslations` throws is a
+    // translation fault, answered as `translationBundleOf` (`packages/rest`)
+    // answers it: no bundle, so the option labels stay authored, and one
+    // `warn` line saying why (a functional degradation — the labels are
+    // served, untranslated). The dataset tools tell their caller through the
+    // same service's catalogue read (`translationWarning`).
     const buildTranslationBundle = (i18n: II18nService): TranslationBundle | undefined => {
-      const locales = i18n.getLocales();
-      if (!locales.length) return undefined;
       const bundle: TranslationBundle = {};
-      for (const locale of locales) {
-        const data = i18n.getTranslations(locale);
-        if (data && typeof data === 'object') (bundle as Record<string, unknown>)[locale] = data;
+      try {
+        const locales = i18n.getLocales();
+        if (!locales.length) return undefined;
+        for (const locale of locales) {
+          const data = i18n.getTranslations(locale);
+          if (data && typeof data === 'object') (bundle as Record<string, unknown>)[locale] = data;
+        }
+      } catch (error) {
+        const reason = error instanceof Error ? error.message : String(error);
+        ctx.logger.warn(
+          `[Analytics] The translations could not be read (${reason}), so dimension option labels are served untranslated.`,
+        );
+        return undefined;
       }
       return Object.keys(bundle).length ? bundle : undefined;
     };

@@ -240,11 +240,12 @@ describe('[ADR-0149 D2] stdio dataset tools when the i18n service resolves but i
     expect(answer.datasets.map((d) => [d.name, d.label])).toEqual([['opp_metrics', '商机指标']]);
   });
 
-  it.each(CASES)('$read throwing: list_datasets keeps the dataset untranslated, partial, naming the i18n error', async ({ read, message }) => {
+  it.each(CASES)('$read throwing: list_datasets keeps the dataset untranslated, partial, with the fixed sentence and no i18n error text', async ({ read, message }) => {
     const bridge = await bridgeOverRealExecutor(() => i18nWhoseReadThrows(read, message));
     const answer = await bridge.listDatasets!({ terms: TERMS });
     expect(answer.datasets.map((d) => [d.name, d.label])).toEqual([['opp_metrics', 'Opportunity Metrics']]);
-    expect(answer).toMatchObject({ partial: true, warning: expect.stringContaining(message) });
+    expect(answer).toMatchObject({ partial: true, warning: 'The translations could not be read, so labels and descriptions are served untranslated.' });
+    expect(JSON.stringify(answer)).not.toContain(message);
   });
 
   it.each(CASES)('$read throwing: query_dataset answers, in the authored labels', async ({ read, message }) => {
@@ -252,6 +253,17 @@ describe('[ADR-0149 D2] stdio dataset tools when the i18n service resolves but i
     const answer = await bridge.queryDataset!({ datasetName: 'opp_metrics', selection: { measures: ['total_amount'] } }, { maxRows: 10 });
     expect(answer.rowCount).toBe(1);
     expect(answer.provenance.dataset).toEqual({ name: 'opp_metrics', label: 'Opportunity Metrics' });
+    // [#35707] …and says why the labels are untranslated; `warning` stays the narrowing's alone.
+    expect(answer.translationWarning).toBe('The translations could not be read, so labels and descriptions are served untranslated.');
+    expect(JSON.stringify(answer)).not.toContain(message);
+    expect(answer).not.toHaveProperty('warning');
+  });
+
+  it('[#35707] control: query_dataset over reads that answer carries no translationWarning', async () => {
+    const bridge = await bridgeOverRealExecutor(() => i18nService('zh-CN'));
+    const answer = await bridge.queryDataset!({ datasetName: 'opp_metrics', selection: { measures: ['total_amount'] } }, { maxRows: 10 });
+    expect(answer.provenance.dataset).toEqual({ name: 'opp_metrics', label: '商机指标' });
+    expect(answer).not.toHaveProperty('translationWarning');
   });
 
   it.each(CASES)('$read throwing: the object tools serve the authored labels', async ({ read, message }) => {

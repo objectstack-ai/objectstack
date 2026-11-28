@@ -367,7 +367,7 @@ export interface StdioDataBridgeDeps {
  */
 export interface StdioDatasetToolsService {
   datasetTools(deps: {
-    loadDatasets: (context: unknown) => Promise<readonly unknown[] | { items: readonly unknown[]; warning?: string }>;
+    loadDatasets: (context: unknown) => Promise<readonly unknown[] | { items: readonly unknown[]; warning?: string; translationWarning?: string }>;
     translationLocale?: (context: unknown) => Promise<string | undefined>;
     diagnoseDelegation?: (object: string, context: unknown) => Promise<{ narrowed: boolean; statement?: string } | undefined>;
     maxQueryLimit?: number;
@@ -838,6 +838,12 @@ export interface ServedLocaleSources {
   i18n?: () => unknown;
   /** The `protocol` service: an object's packaged base and a declared override's pair translations. */
   protocol?: () => StdioProtocolObjectReads | undefined;
+  /**
+   * [#35707] Told the sentence of a translation fault (the read served the
+   * text untranslated), for a tool that says it on its answer. Optional: the
+   * server log says it either way.
+   */
+  reportTranslationFault?: (warning: string) => void;
 }
 
 /**
@@ -874,7 +880,10 @@ function defaultLocaleSources(i18n: (() => unknown) | undefined, resolveProtocol
 async function inServedLocale(sources: ServedLocaleSources, served: readonly ObjectDef[]): Promise<ObjectDef[]> {
   if (served.length === 0) return [...served];
   const translated = await translateMetaList(
-    defaultLocaleSources(sources.i18n, async () => sources.protocol?.()),
+    {
+      ...defaultLocaleSources(sources.i18n, async () => sources.protocol?.()),
+      ...(sources.reportTranslationFault ? { reportTranslationFault: sources.reportTranslationFault } : {}),
+    },
     'object',
     [...served],
   );
@@ -1546,6 +1555,21 @@ export function createStdioDataBridge(deps: StdioDataBridgeDeps): McpDataBridge 
   // from, through the wrapper `plugin.ts` puts on the view the
   // `objectstack://objects` resources read, so the two answer alike.
   const localizedView = servedLocaleObjectView(servedView, { i18n: deps.i18n, protocol });
+  /**
+   * [#35707] The same view for one tool call that says a translation fault on
+   * its answer: `report` is told the fault's sentence.
+   */
+  const localizedViewReporting = (report: (warning: string) => void) =>
+    servedLocaleObjectView(servedView, { i18n: deps.i18n, protocol, reportTranslationFault: report });
+
+  /** The `list_objects` summaries of `view`'s objects. */
+  const summariesOf = async (view: McpObjectView): Promise<McpObjectSummary[]> =>
+    ((await view.listObjects()) as ObjectDef[]).map((o) => ({
+      name: o.name,
+      label: o.label ?? o.name,
+      ...authoredDescription(o),
+      fieldCount: o.fields ? Object.keys(o.fields).length : undefined,
+    }));
 
   /**
    * `describe_object`'s answer for the principal: the object as they are
@@ -1559,13 +1583,17 @@ export function createStdioDataBridge(deps: StdioDataBridgeDeps): McpDataBridge 
    * exactly the ones this answer lists.
    */
   const describeForPrincipal = async (name: string): Promise<Record<string, unknown> | null> => {
-    const { served: def, declared } = await readObjectWithDeclaration(localizedView, name);
+    // [#35707] A translation fault is said on the answer, as `translationWarning`.
+    let translationWarning: string | undefined;
+    const view = localizedViewReporting((warning) => { translationWarning = warning; });
+    const { served: def, declared } = await readObjectWithDeclaration(view, name);
     if (!def) return null;
     // The field list is an ARRAY here, not the stored map: `validate_expression`
     // reads `Array.isArray(def.fields)` off this very value, and the HTTP
     // bridge projects the same shape. A map would type-check and silently
     // leave that tool with zero fields in scope.
-    return describeServedObject(def as ServedObjectDef, declared as ServedObjectDef);
+    const described = describeServedObject(def as ServedObjectDef, declared as ServedObjectDef);
+    return translationWarning === undefined ? described : { ...described, translationWarning };
   };
 
   const bridge: McpDataBridge = {
@@ -1575,12 +1603,7 @@ export function createStdioDataBridge(deps: StdioDataBridgeDeps): McpDataBridge 
       // fields that exist for them ({@link callerObjectView}).
       // [#34721] …and the object's authored `description`, as the HTTP twin serves it.
       // [#34872] …in the locale this transport speaks ({@link servedLocaleObjectView}).
-      return ((await localizedView.listObjects()) as ObjectDef[]).map((o) => ({
-        name: o.name,
-        label: o.label ?? o.name,
-        ...authoredDescription(o),
-        fieldCount: o.fields ? Object.keys(o.fields).length : undefined,
-      }));
+      return summariesOf(localizedView);
     },
 
     /**
@@ -1594,9 +1617,11 @@ export function createStdioDataBridge(deps: StdioDataBridgeDeps): McpDataBridge 
      * is the correct one.
      */
     async listObjectsDiagnosed(): Promise<DiagnosedObjectListing<McpObjectSummary>> {
-      const objects = await bridge.listObjects();
+      // [#35707] `listObjects`' summaries, with a translation fault said as `translationWarning`.
+      let translationWarning: string | undefined;
+      const objects = await summariesOf(localizedViewReporting((warning) => { translationWarning = warning; }));
       const { degraded, errors } = await diagnoseObjectListRead(metadataService);
-      return { objects, degraded, errors };
+      return { objects, degraded, errors, ...(translationWarning === undefined ? {} : { translationWarning }) };
     },
 
     // [#32442, ruling A] The read opt-in of a system object, judged by
@@ -1951,7 +1976,7 @@ export function createStdioDataBridge(deps: StdioDataBridgeDeps): McpDataBridge 
         items,
       );
       const rows = Array.isArray(translated) ? translated : items;
-      return warning === undefined ? rows : { items: rows, warning };
+      return warning === undefined ? rows : { items: rows, translationWarning: warning };
     };
     const translationLocale = async () => {
       const sources = defaultLocaleSources(deps.i18n, async () => undefined);
