@@ -81,7 +81,8 @@ import {
   offeredOptions,
   usePickerLoad,
 } from './loadState.js';
-import { createConsoleMetadataClient } from './metadataClientFactory.js';
+import type { MetadataClient } from '@object-ui/data-objectstack';
+import { useMetadataClient } from './useMetadata.js';
 import { readFields } from './previews/object-fields-io.js';
 
 /* -------------------------------------------------------------------------- */
@@ -1318,9 +1319,9 @@ const EMPTY_FIELD_SELECTOR_OPTIONS: FieldSelectorOption[] = [];
  * Fetch the bound object's field catalog for {@link FieldSelectorWidget}.
  *
  * The catalog is read off the object document the server mounts at
- * `GET /api/v1/meta/object/:name`, through a console metadata client
- * ({@link createConsoleMetadataClient}) and {@link readFields} — the read
- * `useObjectFields` makes for the other field pickers in this directory. One route serves an object's fields; this
+ * `GET /api/v1/meta/object/:name`, through the console's {@link MetadataClient}
+ * (`useMetadataClient`) and {@link readFields} — the read `useObjectFields`
+ * makes for the other field pickers in this directory. One route serves an object's fields; this
  * widget asks it rather than a path of its own that no server mounts.
  *
  * It reads the draft-overlaid object (`?preview=draft`) for the reason
@@ -1335,17 +1336,15 @@ const EMPTY_FIELD_SELECTOR_OPTIONS: FieldSelectorOption[] = [];
  *    list with no fields;
  *  - a served object answers its fields, possibly none.
  *
- * The client is built per read from the factory, so the load keys on the
- * object name alone; every console client shares one transport, so a read
- * already in flight for the same URL is still shared. That transport carries
- * the stored bearer token beside the session cookie, so a session held by its
- * token alone is read as itself.
+ * The console client's transport carries the stored bearer token beside the
+ * session cookie (`metadataClientFactory.ts`), so a session held by its token
+ * alone is read as itself.
  */
-async function fetchFieldSelectorOptions(objectName: string): Promise<FieldSelectorOption[] | null> {
-  const obj = await createConsoleMetadataClient({ previewDrafts: true }).get<Record<string, unknown>>(
-    'object',
-    objectName,
-  );
+async function fetchFieldSelectorOptions(
+  client: MetadataClient,
+  objectName: string,
+): Promise<FieldSelectorOption[] | null> {
+  const obj = await client.withPreviewDrafts(true).get<Record<string, unknown>>('object', objectName);
   if (!obj) return null;
   return readFields(obj.fields).entries.map((e) => ({
     name: e.name,
@@ -1375,8 +1374,17 @@ function FieldSelectorWidget({
   // directory landed for the other pickers (objectui#5170) and for the
   // References panel before them (objectui#5110). `null` while no object is
   // bound is the `idle` arm: a question never asked is not a failure.
+  //
+  // The load keys on the object name alone: the client is read through a ref
+  // when the load runs, because a re-minted client is the same transport, not
+  // a new question (ui/AGENTS.md #10 — no correctness rests on its identity).
+  const client = useMetadataClient();
+  const clientRef = React.useRef(client);
+  React.useLayoutEffect(() => {
+    clientRef.current = client;
+  }, [client]);
   const loadFields = React.useMemo(
-    () => (objectName ? () => fetchFieldSelectorOptions(objectName) : null),
+    () => (objectName ? () => fetchFieldSelectorOptions(clientRef.current, objectName) : null),
     [objectName],
   );
   const fieldsState = usePickerLoad<FieldSelectorOption[] | null>(loadFields);
