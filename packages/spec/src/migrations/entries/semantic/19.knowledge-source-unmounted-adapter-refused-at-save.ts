@@ -17,7 +17,9 @@ export const entry: SemanticMigration = {
     + 'deployment does not mount: a retired store such as `ragflow`, or a mistyped id',
   replacement:
     'An adapter id the deployment mounts (the refusal lists them), or no `adapter` at all, so the '
-    + 'deployment\'s store holds the source; or mount the named store before saving the source.',
+    + 'deployment\'s store holds the source (on a host that mounts several adapters and marks none the '
+    + 'deployment\'s, a source with no `adapter` is itself refused, so name one there); or mount the named '
+    + 'store before saving the source.',
   reason:
     'Such a source was stored, and then every index and search of it answered SERVICE_UNAVAILABLE (503) and '
     + 'the boot logged it at error. The save now refuses it, VALIDATION_ERROR (400), naming the source, the '

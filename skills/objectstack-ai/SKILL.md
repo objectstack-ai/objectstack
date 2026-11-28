@@ -255,7 +255,7 @@ object or field, when you may not search that object or query a field it reads.
 |:----|:--------|
 | `name` | Snake_case source name |
 | `label` / `description` | Display metadata |
-| `adapter` | Optional store id (`pgvector`, `turso`, `memory`). Omitted: the deployment's store (`pgvector` on PostgreSQL, `turso` otherwise), else the only one registered; several and none the deployment's is refused, naming them |
+| `adapter` | Store id (`pgvector`, `turso`, `memory`). Omitted: the deployment's store (`pgvector` on PostgreSQL, `turso` otherwise), else the only one registered; several and none the deployment's is refused, naming them. A run-time save naming one the deployment does not mount is refused (`400 VALIDATION_ERROR`, nothing written), naming the source, the adapter and the mounted ones: name a mounted one, or mount the store and save again |
 | `source.kind` | `'object'`, the one kind |
 | `source.object` | The object whose records are indexed |
 | `source.content` | Non-empty list of the fields whose text is indexed, in order. `'*'` is refused: it would also send fields added later. Meaningful text only, never ids or system fields |

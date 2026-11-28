@@ -1063,6 +1063,53 @@ describe('admitAuthoredSource — source admission at save, as the authoring pri
     });
   });
 
+  // The refusal offers "leave `adapter` out" only where an omitted adapter
+  // would be placed (`adapterIdFor`): one adapter mounted, or the deployment's
+  // own adapter mounted. Elsewhere that remedy is itself refused at the save.
+  it('the refusal offers leaving `adapter` out only where an omitted adapter would be placed', async () => {
+    const LEAVE_OUT = 'leave `adapter` out';
+    const refusedFor = async (svc: KnowledgeService, adapter: string): Promise<string> => {
+      const verdict = await svc.admitAuthoredSource({ ...item('ticket', ['body']), adapter }, MANAGER);
+      expect(verdict, adapter).toMatchObject({ admitted: false, code: 'VALIDATION_ERROR', status: 400 });
+      return (verdict as { message: string }).message;
+    };
+    const mounting = (ids: string[], deploymentAdapter?: string): KnowledgeService => {
+      const svc = new KnowledgeService({ dataEngine: makeEngine([TICKET]), ...(deploymentAdapter ? { deploymentAdapter } : {}) });
+      for (const id of ids) svc.registerAdapter(id, makeAdapter());
+      return svc;
+    };
+
+    // One adapter mounted: an omitted adapter lands on it.
+    const one = await refusedFor(mounting(['memory']), 'ragflow');
+    expect(one).toContain(LEAVE_OUT);
+    expect(one).toContain("mount the 'ragflow' store");
+    // Two mounted, one of them the deployment's: an omitted adapter lands on that one.
+    const marked = await refusedFor(mounting(['memory', 'turso'], 'turso'), 'ragflow');
+    expect(marked).toContain(LEAVE_OUT);
+    expect(marked).toContain("'memory', 'turso'");
+
+    // Two mounted and none the deployment's: an omitted adapter is refused, so it is not offered.
+    const unmarked = await refusedFor(mounting(['memory', 'turso']), 'ragflow');
+    expect(unmarked).not.toContain(LEAVE_OUT);
+    expect(unmarked).toContain("'memory', 'turso'");
+    expect(unmarked).toContain("mount the 'ragflow' store");
+    // The deployment's adapter is named and not itself mounted: the same.
+    expect(await refusedFor(mounting(['memory', 'turso'], 'pgvector'), 'ragflow')).not.toContain(LEAVE_OUT);
+    // None mounted: nothing holds an omitted adapter, and no mounted id is offered either.
+    const none = await refusedFor(mounting([]), 'ragflow');
+    expect(none).not.toContain(LEAVE_OUT);
+    expect(none).not.toContain('name one of');
+    expect(none).toContain("Mount the 'ragflow' store");
+
+    // CONTROL: what the clause promises holds. Where it is offered the omitted
+    // adapter is admitted; where it is withheld (several, none marked) it is refused.
+    const { adapter: _named, ...omitted } = item('ticket', ['body']);
+    expect(await mounting(['memory']).admitAuthoredSource(omitted, MANAGER)).toEqual({ admitted: true });
+    expect(await mounting(['memory', 'turso'], 'turso').admitAuthoredSource(omitted, MANAGER)).toEqual({ admitted: true });
+    expect(await mounting(['memory', 'turso']).admitAuthoredSource(omitted, MANAGER))
+      .toMatchObject({ admitted: false, code: 'VALIDATION_ERROR', status: 400 });
+  });
+
   it('CONTROL: a source naming a mounted adapter, and one that leaves `adapter` out, are admitted', async () => {
     const { svc } = setup({ sources: [] });
     svc.registerAdapter('turso', makeAdapter());
