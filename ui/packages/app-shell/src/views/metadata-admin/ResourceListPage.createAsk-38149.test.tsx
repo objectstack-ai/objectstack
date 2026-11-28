@@ -16,6 +16,7 @@
  *  - while the packages load: New is disabled;
  *  - Setup's catalog (the environment scope, decisions Q-a of topic
  *    objectstack#37424): New asks, and the create keeps the scope;
+ *  - Studio's cross-package leg (`/studio/~all/metadata/TYPE`): New asks;
  *  - Cancel opens nothing.
  */
 import { describe, it, expect, vi, afterEach, beforeEach } from 'vitest';
@@ -73,6 +74,7 @@ vi.mock('../studio-design/packages-io', async (importOriginal) => ({
 
 // Imported AFTER the mocks so the page picks them up.
 import { MetadataResourceListPage } from './ResourceListPage';
+import { MetadataAreaHostContext, type MetadataAreaHost } from './metadataAreaHost';
 import { t } from './i18n';
 
 beforeEach(() => {
@@ -194,5 +196,28 @@ describe('Setup catalog: a new permission set asks for its package (objectstack#
     fireEvent.click(alpha);
     fireEvent.click(within(dialog).getByTestId('package-create-ask-continue'));
     expect(await screen.findByTestId('create-opened')).toHaveTextContent(`?scope=environment&package=${PKG_A}`);
+  });
+});
+
+describe("Studio's cross-package leg: New asks for its package (objectstack#38149)", () => {
+  const ALL: MetadataAreaHost = { packageId: null, readOnly: false, basePath: '/studio/~all/metadata' };
+
+  it('New asks, and the create opens in the leg under the chosen package', async () => {
+    render(
+      <MetadataAreaHostContext.Provider value={ALL}>
+        <MemoryRouter initialEntries={[`/studio/~all/metadata/${TYPE}`]}>
+          <Routes>
+            <Route path="/studio/~all/metadata/:type" element={<MetadataResourceListPage type={TYPE} />} />
+            <Route path="/studio/~all/metadata/:type/new" element={<CreateProbe />} />
+          </Routes>
+        </MemoryRouter>
+      </MetadataAreaHostContext.Provider>,
+    );
+    fireEvent.click(await newButton());
+    const dialog = await ask();
+    expect(screen.queryByTestId('create-opened')).toBeNull();
+    fireEvent.click(await within(dialog).findByTestId(`package-create-ask-option-${PKG_A}`));
+    fireEvent.click(within(dialog).getByTestId('package-create-ask-continue'));
+    expect(await screen.findByTestId('create-opened')).toHaveTextContent(`?package=${PKG_A}`);
   });
 });

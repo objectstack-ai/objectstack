@@ -23,7 +23,7 @@
 import '@testing-library/jest-dom/vitest';
 import * as React from 'react';
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
-import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { MemoryRouter, Route, Routes, useLocation, useNavigate } from 'react-router-dom';
 
 const DRAFT = vi.hoisted(() => ({
@@ -80,7 +80,7 @@ vi.mock('../providers/MetadataProvider.js', () => ({
 
 /** The package doors `resolveRuntimeCreatePackage` asks: the listed packages, and the ensure door. */
 const doors = vi.hoisted(() => ({
-  listed: new Map<string, { writable: boolean }>(),
+  listed: new Map<string, { writable: boolean; manifest?: Record<string, unknown> }>(),
   ensure: vi.fn(async (_base: string): Promise<{ packageId: string; writable: boolean }> => {
     throw new Error('not asked');
   }),
@@ -93,6 +93,8 @@ vi.mock('./studio-design/packages-io.js', async (importOriginal) => ({
     return doors.listed;
   },
   ensureCustomizationPackage: (base: string) => doors.ensure(base),
+  // objectstack#38149 — the list the create ask offers.
+  fetchPackages: async () => [{ id: 'app.alpha', name: 'Alpha', writable: true, namespace: 'alpha' }],
 }));
 
 vi.mock('@object-ui/auth', async (importOriginal) => ({
@@ -361,6 +363,50 @@ describe("the app's own New saves into the app's package, as a new view does (ob
     expect(saveAndPublish).not.toHaveBeenCalled();
     expect(toastInfo).not.toHaveBeenCalled();
     expect(screen.getByTestId('where')).not.toHaveTextContent('/apps/crm/report/payment_analysis');
+  });
+
+  it('objectstack#38149: an app package the server does not list asks, and the report is saved where the person chose', async () => {
+    doors.listed = new Map();
+    mount();
+    fireEvent.click(screen.getByText('save'));
+    const dialog = await screen.findByTestId('package-create-ask');
+    expect(client.save).not.toHaveBeenCalled();
+    fireEvent.click(await within(dialog).findByTestId('package-create-ask-option-app.alpha'));
+    fireEvent.click(within(dialog).getByTestId('package-create-ask-continue'));
+    await waitFor(() => expect(screen.getByTestId('where')).toHaveTextContent('/apps/crm/report/payment_analysis'));
+    expect(client.save).toHaveBeenCalledWith(
+      'report',
+      'payment_analysis',
+      { ...DRAFT, name: 'payment_analysis' },
+      { mode: 'draft', ifNoneMatch: '*', packageId: 'app.alpha' },
+    );
+    expect(saveAndPublish).not.toHaveBeenCalled();
+  });
+
+  it('objectstack#38149: a cancelled ask writes nothing and says nothing', async () => {
+    doors.listed = new Map();
+    mount();
+    fireEvent.click(screen.getByText('save'));
+    fireEvent.click(within(await screen.findByTestId('package-create-ask')).getByTestId('package-create-ask-cancel'));
+    await waitFor(() => expect(screen.queryByTestId('package-create-ask')).toBeNull());
+    expect(client.save).not.toHaveBeenCalled();
+    expect(saveAndPublish).not.toHaveBeenCalled();
+    expect(toastError).not.toHaveBeenCalled();
+    expect(screen.getByTestId('builder')).toBeInTheDocument();
+  });
+
+  it('objectstack#38149 (Q-b, C): in a system app the report is refused with the reason, and the ensure door is never asked', async () => {
+    doors.listed = new Map([[PKG, { writable: false, manifest: { id: PKG, scope: 'system' } }]]);
+    mount();
+    fireEvent.click(screen.getByText('save'));
+    await waitFor(() => expect(toastError).toHaveBeenCalledTimes(1));
+    expect(toastError).toHaveBeenCalledWith('form.saveError', {
+      description: expect.stringContaining('Create the report in one of your business apps instead.'),
+    });
+    expect(doors.ensure).not.toHaveBeenCalled();
+    expect(client.save).not.toHaveBeenCalled();
+    expect(saveAndPublish).not.toHaveBeenCalled();
+    expect(screen.queryByTestId('package-create-ask')).toBeNull();
   });
 });
 
