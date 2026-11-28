@@ -12,6 +12,17 @@ import { mapCollection, renameKey } from '../../walk.js';
  * fingerprint, computed over values, stay as they are: the rename starts no
  * rebuild (K6 item 4).
  *
+ * **One exception: an `id` that begins with an underscore.** `renameKey` copies
+ * the value as it is, so `id: '_faq'` becomes `name: '_faq'`, and the parse
+ * then refuses that `name` (`ROUTER_ADDRESSABLE_NAME_PATTERN`; its message says
+ * to rename the item without the underscore). The conversion does not choose
+ * the new name: only the author knows it. Such a source takes a new name, is
+ * built again under it, and its old index is dropped with `dropSource`, which
+ * the author runs — nothing drops it automatically. That is what the `id`
+ * tombstone and the D3 entry `knowledge-source-registration-governed` (which
+ * judges this conversion's edits, `conversionIds`) teach, and `summary` says
+ * the same.
+ *
  * **Retired from the load path**: `KnowledgeSourceSchema` tombstones `id` with
  * the rename, so a live parse refuses it at every door, the registration in
  * code included. No stored row carries the key, because a source was never
@@ -27,7 +38,10 @@ const knowledgeSourceIdToName: MetadataConversion = {
   surface: 'knowledge_source.id',
   summary:
     "knowledge source key 'id' → 'name' (a knowledge source is a metadata type from this major, and a metadata "
-    + 'item is identified by its name; the value is unchanged, so no index is rebuilt)',
+    + 'item is identified by its name; the value is unchanged, so no index is rebuilt, except for an id that '
+    + 'begins with an underscore: `name` refuses the underscore, so that source takes a new name, is built again '
+    + 'under it, and its old index is dropped with `dropSource`, which the author runs; the upgrade entry '
+    + '`knowledge-source-registration-governed` says how)',
   apply(stack, emit) {
     return mapCollection(stack, 'knowledgeSources', (source, path) => {
       const renamed = renameKey(source, 'id', 'name');
@@ -44,15 +58,20 @@ const knowledgeSourceIdToName: MetadataConversion = {
         { id: 'support_articles', adapter: 'memory', source: { kind: 'object', object: 'article', content: ['title', 'body'] } },
         // A source already on `name` keeps its identity (copy-on-write).
         { name: 'policy_clauses', adapter: 'memory', source: { kind: 'object', object: 'clause', content: ['text'] } },
+        // The exception: an underscore-led id is copied as it is, to a `name`
+        // the parse refuses — the author picks the new name and drops the old
+        // index (see the jsdoc above).
+        { id: '_legacy_faq', adapter: 'memory', source: { kind: 'object', object: 'faq', content: ['answer'] } },
       ],
     },
     after: {
       knowledgeSources: [
         { name: 'support_articles', adapter: 'memory', source: { kind: 'object', object: 'article', content: ['title', 'body'] } },
         { name: 'policy_clauses', adapter: 'memory', source: { kind: 'object', object: 'clause', content: ['text'] } },
+        { name: '_legacy_faq', adapter: 'memory', source: { kind: 'object', object: 'faq', content: ['answer'] } },
       ],
     },
-    expectedNotices: 1,
+    expectedNotices: 2,
   },
 };
 
