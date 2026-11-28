@@ -953,6 +953,12 @@ export function physicalDefaultLiteral(raw: unknown): PhysicalDefault {
 }
 
 /**
+ * [#37434] The field types whose column is a boolean (`table.boolean`), the
+ * set the schema sync's DEFAULT renderer reads a boolean literal for.
+ */
+const BOOLEAN_COLUMN_TYPES: ReadonlySet<string> = new Set(['boolean', 'toggle']);
+
+/**
  * [#36245] Does a physical literal DEFAULT already say what `declared` says?
  * Answers `true` / `false`, or `null` when this module cannot judge the pair
  * (a temporal literal, whose physical spelling is the dialect's own rendering
@@ -960,8 +966,19 @@ export function physicalDefaultLiteral(raw: unknown): PhysicalDefault {
  *
  * Numbers compare by value (`'42'`, `42`, `42.000…` are one default), booleans
  * by truth (`'1'`, `true`, `1`), everything else as text.
+ *
+ * [#37434] On a boolean column the strings `'true'` / `'false'` are read as
+ * the booleans they spell: the writer stores them as the boolean's own
+ * physical spelling (`'1'` / `'0'` on SQLite, knex's boolean formatter on the
+ * local face and `sqliteDeclaredColumnDefaultSql` on the Turso remote face),
+ * so compared as text they never matched, and restating the DEFAULT wrote the
+ * same bytes again. Only those two exact spellings: the writer reads every
+ * other string by its JavaScript truth, which is not a reading to adopt here.
  */
 export function physicalLiteralMatches(text: string, declared: string | number | boolean, fieldType: string | undefined): boolean | null {
+  if (typeof declared === 'string' && BOOLEAN_COLUMN_TYPES.has(String(fieldType ?? '')) && (declared === 'true' || declared === 'false')) {
+    declared = declared === 'true';
+  }
   if (typeof declared === 'boolean') {
     const t = text.toLowerCase();
     if (t === '1' || t === 'true' || t === 't') return declared === true;
