@@ -678,7 +678,8 @@
         "!coverage/**",
         "!.turbo/**",
         "!**/node_modules/**",
-        "$TURBO_ROOT$/packages/connectors/connector-rest/src/**"
+        "$TURBO_ROOT$/packages/connectors/connector-rest/src/**",
+        "$TURBO_ROOT$/packages/spec/src/automation/flow-bound-variable-name.ts"
       ]
     },
     "@objectstack/metadata-protocol#test": {
