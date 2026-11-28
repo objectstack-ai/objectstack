@@ -8019,7 +8019,8 @@ export class ObjectStackClient {
      *
      * Speaks the path-param dialect (`/translations/:locale`) — the shape
      * `plugin-rest-api.zod.ts` declares and the ONLY shape any serving surface
-     * mounts (service-i18n's autonomous routes, the dispatcher's HTTP mounts).
+     * mounts (the runtime HTTP dispatcher's `/i18n` domain; service-i18n's own
+     * routes were retired by #23347).
      * The `?locale=` query form this used to send matched no route anywhere
      * and 404'd on the wire; the dispatcher's domain body accepts it, but
      * nothing ever routes a bare `/translations` to that body (#3636).
