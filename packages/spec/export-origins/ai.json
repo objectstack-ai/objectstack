@@ -313,6 +313,7 @@
     "getDatasetToolJsonSchemas": "src/ai/dataset-tools.zod.ts#getDatasetToolJsonSchemas (function)",
     "getRecordContextToolJsonSchemas": "src/ai/record-context-tools.zod.ts#getRecordContextToolJsonSchemas (function)",
     "headingsOf": "src/ai/record-body-anchor.ts#headingsOf (function)",
+    "knowledgeSourceForm": "src/ai/knowledge-source.metadata-form.ts#knowledgeSourceForm (const)",
     "parseAskQuestionEnvelope": "src/ai/ask-question.zod.ts#parseAskQuestionEnvelope (function)",
     "scopesToAgentPermissionSets": "src/ai/mcp.zod.ts#scopesToAgentPermissionSets (function)",
     "skillBindsRecordContextTool": "src/ai/skill.zod.ts#skillBindsRecordContextTool (function)",

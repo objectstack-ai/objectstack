@@ -316,6 +316,7 @@
     "getDatasetToolJsonSchemas (function)",
     "getRecordContextToolJsonSchemas (function)",
     "headingsOf (function)",
+    "knowledgeSourceForm (const)",
     "parseAskQuestionEnvelope (function)",
     "scopesToAgentPermissionSets (function)",
     "skillBindsRecordContextTool (function)",
