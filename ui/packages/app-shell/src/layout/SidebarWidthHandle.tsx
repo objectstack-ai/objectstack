@@ -1,8 +1,9 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 /**
- * SidebarWidthHandle — the docked console sidebar's right edge, which resizes
- * it (objectstack#36227, as Attio): dragged with the pointer between
+ * SidebarWidthHandle — the docked console sidebar's page-facing edge (its
+ * right edge, or its left edge in a right-to-left language, objectstack#37914),
+ * which resizes it (objectstack#36227, as Attio): dragged with the pointer between
  * {@link CONSOLE_SIDEBAR_MIN_WIDTH} and {@link CONSOLE_SIDEBAR_MAX_WIDTH}, or
  * moved with ← → (Home / End to either end). A double-click comes back to
  * {@link CONSOLE_EXPANDED_SIDEBAR_WIDTH}. `onPreview` follows a drag;
@@ -17,6 +18,7 @@ import {
   CONSOLE_SIDEBAR_MAX_WIDTH,
   CONSOLE_SIDEBAR_MIN_WIDTH,
   clampConsoleSidebarWidth,
+  isRightToLeft,
 } from './consoleSidebarRail.js';
 
 /** How far one arrow-key press moves the sidebar's edge, in CSS pixels. */
@@ -33,7 +35,9 @@ export interface SidebarWidthHandleProps {
 
 export function SidebarWidthHandle({ width, onPreview, onCommit }: SidebarWidthHandleProps) {
   const { t } = useObjectTranslation();
-  const drag = React.useRef<{ x: number; width: number; last: number } | null>(null);
+  // `toward` is +1 when a move to the right widens the sidebar (left to right),
+  // -1 when it narrows it (right to left, where the sidebar sits on the right).
+  const drag = React.useRef<{ x: number; width: number; last: number; toward: 1 | -1 } | null>(null);
 
   const end = (commit: boolean) => {
     const start = drag.current;
@@ -73,19 +77,24 @@ export function SidebarWidthHandle({ width, onPreview, onCommit }: SidebarWidthH
       aria-valuemax={CONSOLE_SIDEBAR_MAX_WIDTH}
       tabIndex={0}
       data-testid="console-sidebar-resize"
-      className="group/resize absolute inset-y-0 -right-1 z-20 flex w-2 cursor-col-resize touch-none justify-center focus-visible:outline-none"
+      className="group/resize absolute inset-y-0 -end-1 z-20 flex w-2 cursor-col-resize touch-none justify-center focus-visible:outline-none"
       onPointerDown={(event) => {
         if (event.button !== 0) return;
         event.preventDefault();
         event.currentTarget.setPointerCapture?.(event.pointerId);
-        drag.current = { x: event.clientX, width, last: width };
+        drag.current = {
+          x: event.clientX,
+          width,
+          last: width,
+          toward: isRightToLeft(event.currentTarget) ? -1 : 1,
+        };
         document.body.style.setProperty('cursor', 'col-resize');
         document.body.style.setProperty('user-select', 'none');
       }}
       onPointerMove={(event) => {
         const start = drag.current;
         if (!start) return;
-        start.last = clampConsoleSidebarWidth(start.width + event.clientX - start.x);
+        start.last = clampConsoleSidebarWidth(start.width + start.toward * (event.clientX - start.x));
         onPreview(start.last);
       }}
       onPointerUp={(event) => {
@@ -98,9 +107,12 @@ export function SidebarWidthHandle({ width, onPreview, onCommit }: SidebarWidthH
         onCommit(CONSOLE_EXPANDED_SIDEBAR_WIDTH);
       }}
       onKeyDown={(event) => {
+        // The arrow toward the page widens the sidebar: → in a left-to-right
+        // language, ← in a right-to-left one, where the edge faces left.
+        const step = isRightToLeft(event.currentTarget) ? -SIDEBAR_WIDTH_KEY_STEP : SIDEBAR_WIDTH_KEY_STEP;
         const next =
-          event.key === 'ArrowLeft' ? width - SIDEBAR_WIDTH_KEY_STEP
-          : event.key === 'ArrowRight' ? width + SIDEBAR_WIDTH_KEY_STEP
+          event.key === 'ArrowLeft' ? width - step
+          : event.key === 'ArrowRight' ? width + step
           : event.key === 'Home' ? CONSOLE_SIDEBAR_MIN_WIDTH
           : event.key === 'End' ? CONSOLE_SIDEBAR_MAX_WIDTH
           : null;
