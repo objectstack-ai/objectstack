@@ -111,8 +111,11 @@
  * in the caller's locale) and `{{field}}` (its API name). A few are filled from
  * the refusing door's message-only parameters, which name a fact of the
  * platform rather than a constraint of the field and are never shipped on the
- * error (`{{firstYear}}` / `{{lastYear}}` above). An unknown placeholder is
- * left verbatim so a broken override is visible rather than silently blank.
+ * error (`{{firstYear}}` / `{{lastYear}}` above). Whitespace inside the braces
+ * is allowed (`{{ label }}`), as the Console's i18next and the server `t()`
+ * read the same translation string, so a deployment override renders the same
+ * on both sides. An unknown placeholder is left exactly as written (spaces
+ * included) so a broken override is visible rather than silently blank.
  */
 
 import { resolveBundleLocale } from './i18n-resolver';
@@ -380,16 +383,19 @@ export const BUILTIN_VALIDATION_MESSAGES: Record<string, Record<string, string>>
 export const VALIDATION_MESSAGE_FALLBACK_LOCALE = 'en';
 
 /**
- * Fill `{{name}}` placeholders from `params`. An unresolved placeholder is left
- * verbatim (`{{min}}`) rather than blanked, so a malformed override or a missing
- * param is visible in the message instead of producing "must be ≥ .".
+ * Fill `{{name}}` placeholders from `params`. Whitespace inside the braces is
+ * allowed (`{{ name }}`), matching the Console's i18next and the server `t()`;
+ * single braces (`{name}`) are not a placeholder. An unresolved placeholder is
+ * left exactly as written (`{{min}}`, `{{ min }}`) rather than blanked, so a
+ * malformed override or a missing param is visible in the message instead of
+ * producing "must be ≥ .".
  */
 export function interpolateValidationMessage(
   template: string,
   params: Record<string, unknown> | undefined,
 ): string {
   if (!params) return template;
-  return template.replace(/\{\{(\w+)\}\}/g, (whole, name: string) => {
+  return template.replace(/\{\{\s*(\w+)\s*\}\}/g, (whole, name: string) => {
     const value = params[name];
     return value === undefined || value === null ? whole : String(value);
   });
