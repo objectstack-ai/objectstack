@@ -14,7 +14,7 @@
  * - The page's regions are named by their labels: the right column, the 动态
  *   panel (Activity) and a related panel (Task). They were the Details and
  *   Related tabs until objectstack#27524 laid every width out as columns.
- * - A declared `record_header` action is named by its label (Log a Call).
+ * - A declared `record_page` action is named by its label (Log a Call).
  * - A collapsible field group's header is a button named by its label
  *   (Lead Information) that toggles `aria-expanded` — the half the card found
  *   really broken (`DetailSection`'s header was a div with no role).
@@ -73,7 +73,7 @@ const headerAction = (name: string, label: string) => ({
   label,
   type: 'api',
   target: '/api/v1/noop',
-  locations: ['record_header'],
+  locations: ['record_page'],
 });
 
 const LEAD = {

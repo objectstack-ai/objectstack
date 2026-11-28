@@ -54,7 +54,7 @@ const REMOVE_TEAM_MEMBER = {
   name: 'remove_team_member',
   label: 'Remove from Team',
   type: 'api',
-  locations: ['list_item'],
+  locations: ['record_row'],
   target: '/api/v1/auth/organization/remove-team-member',
   params: [
     { name: 'teamId', field: 'team_id', required: true, defaultFromRow: true },
@@ -121,7 +121,7 @@ describe('ObjectGrid — `$select` carries what a row action READS off the row (
     );
     cleanup();
     expect(
-      await selectFor({ bulkActionDefs: [{ ...REMOVE_TEAM_MEMBER, locations: ['list_toolbar'] }] }),
+      await selectFor({ bulkActionDefs: [{ ...REMOVE_TEAM_MEMBER, locations: ['list'] }] }),
     ).toEqual(expect.arrayContaining(['team_id', 'user_id']));
   });
 
@@ -131,7 +131,7 @@ describe('ObjectGrid — `$select` carries what a row action READS off the row (
         name: 'remove_member',
         label: 'Remove',
         type: 'api',
-        locations: ['list_item'],
+        locations: ['record_row'],
         target: '/api/v1/teams/{team_id}/members/{user_id}',
       }],
     });

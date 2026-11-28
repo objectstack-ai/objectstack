@@ -17,15 +17,15 @@
  * ## The composition rule this file pins
  *
  *   - `actions` ABSENT → the host bridge's actions render exactly as before:
- *     the child object's `list_toolbar` actions as header buttons and its
- *     `list_item` actions in each row's menu, in registration order. No
+ *     the child object's `list` actions as header buttons and its
+ *     `record_row` actions in each row's menu, in registration order. No
  *     metadata lookup is made for the key at all.
  *   - `actions` AUTHORED → the authored list is what renders, IN AUTHORED
  *     ORDER. Each id resolves against the child object's registered `actions`
  *     — the same `useMetadataItem` + `resolveDeclaredActionIds` lookup
  *     `record:quick_actions.actionNames` resolves through — and is placed by
- *     its own `locations`, with the bridge's rule: `list_toolbar` → header
- *     button, `list_item` → row menu. Running it stays the host's (the
+ *     its own `locations`, with the bridge's rule: `list` → header
+ *     button, `record_row` → row menu. Running it stays the host's (the
  *     bridge's `onToolbarAction` / `onRowAction`).
  *   - `actions: []` → the author's choice of NO actions, the built-in New
  *     included (#26182): the list offers no generic create form, whatever the
@@ -74,11 +74,11 @@ beforeAll(() => {
  * echoing the registry.
  */
 const CHILD_ACTIONS = [
-  { name: 'send_welcome', label: 'Send Welcome', type: 'api', locations: ['list_item'] },
-  { name: 'deactivate', label: 'Deactivate', type: 'api', locations: ['list_item'] },
-  { name: 'invite', label: 'Invite', type: 'api', locations: ['list_toolbar'] },
-  { name: 'export_csv', label: 'Export CSV', type: 'api', locations: ['list_toolbar'] },
-  { name: 'header_only', label: 'Header Only', type: 'api', locations: ['record_header'] },
+  { name: 'send_welcome', label: 'Send Welcome', type: 'api', locations: ['record_row'] },
+  { name: 'deactivate', label: 'Deactivate', type: 'api', locations: ['record_row'] },
+  { name: 'invite', label: 'Invite', type: 'api', locations: ['list'] },
+  { name: 'export_csv', label: 'Export CSV', type: 'api', locations: ['list'] },
+  { name: 'header_only', label: 'Header Only', type: 'api', locations: ['record_page'] },
 ];
 const CHILD = { name: 'contact', label: 'Contact', actions: CHILD_ACTIONS };
 
@@ -125,9 +125,9 @@ const HOST: RelatedRecordActionsValue = {
       ? {
           onView: () => {},
           onCreate,
-          rowActions: derive('list_item'),
+          rowActions: derive('record_row'),
           onRowAction,
-          toolbarActions: derive('list_toolbar'),
+          toolbarActions: derive('list'),
           onToolbarAction,
         }
       : {},
@@ -215,7 +215,7 @@ describe('record:related_list.actions — AUTHORED: the authored list is what re
     mount(['export_csv', 'invite']);
     await waitForRow();
     await waitFor(() => expect(toolbarNames()).toEqual(['export_csv', 'invite']));
-    // No `list_item` action was authored, so no row menu is offered at all.
+    // No `record_row` action was authored, so no row menu is offered at all.
     expect(rowTriggers()).toHaveLength(0);
     expect(refusal()).toBeNull();
   });
@@ -228,7 +228,7 @@ describe('record:related_list.actions — AUTHORED: the authored list is what re
     expect(rowTriggers()).toHaveLength(0);
   });
 
-  it('row actions render in each row’s menu in AUTHORED order, placed by their own `list_item` location', async () => {
+  it('row actions render in each row’s menu in AUTHORED order, placed by their own `record_row` location', async () => {
     mount(['deactivate', 'send_welcome']);
     await waitForRow();
     await waitFor(() => expect(rowTriggers()).toHaveLength(ROWS.length));
@@ -319,14 +319,14 @@ describe('record:related_list.actions — an id that cannot be placed is REFUSED
     await waitForRow();
     await waitFor(() => expect(refusal()).not.toBeNull());
     expect(refusal()).toHaveTextContent('header_only');
-    expect(refusal()).toHaveTextContent(/list_item/);
-    expect(refusal()).toHaveTextContent(/list_toolbar/);
+    expect(refusal()).toHaveTextContent(/record_row/);
+    expect(refusal()).toHaveTextContent(/list/);
     expect(toolbarNames()).toEqual(['invite']);
     expect(screen.queryByText('Header Only')).toBeNull();
   });
 
   it('an array that is not all action ids is refused whole, and draws none of its entries', async () => {
-    mount([{ name: 'invite', label: 'Invite', locations: ['list_toolbar'] }]);
+    mount([{ name: 'invite', label: 'Invite', locations: ['list'] }]);
     await waitForRow();
     await waitFor(() => expect(refusal()).not.toBeNull());
     expect(refusal()).toHaveAttribute('role', 'status');

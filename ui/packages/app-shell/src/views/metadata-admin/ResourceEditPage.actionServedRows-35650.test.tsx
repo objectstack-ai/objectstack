@@ -49,7 +49,7 @@ const STORED = {
   label: 'Sign contract',
   objectName: 'contract',
   type: 'script',
-  locations: ['record_header'],
+  locations: ['record_page'],
   body: { language: 'js', source: "throw { code: 'SIGN_IN_REQUIRED' };" },
   refusals: { SIGN_IN_REQUIRED: { message: 'Sign in first.', status: 401 } },
   texts: { email_subject: { message: 'Contract signed' } },

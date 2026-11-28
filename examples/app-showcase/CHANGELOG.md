@@ -1,5 +1,44 @@
 # @objectstack/example-showcase
 
+## 0.3.29-next.2
+
+### Patch Changes
+
+- Updated dependencies [34f7078]
+- Updated dependencies [0b539b6]
+- Updated dependencies [ab04434]
+- Updated dependencies [c23e556]
+- Updated dependencies [b4c99b8]
+- Updated dependencies [27ee984]
+- Updated dependencies [dbe0716]
+- Updated dependencies [73d0240]
+- Updated dependencies [724d6f3]
+- Updated dependencies [58be677]
+- Updated dependencies [3c53b85]
+- Updated dependencies [0b87f12]
+- Updated dependencies [b316afa]
+- Updated dependencies [8b47659]
+- Updated dependencies [ecd10e9]
+- Updated dependencies [8d598aa]
+- Updated dependencies [a145e24]
+- Updated dependencies [6e2a8f2]
+- Updated dependencies [0ea3093]
+  - @objectstack/spec@19.0.0-next.2
+  - @objectstack/service-knowledge@19.0.0-next.2
+  - @objectstack/runtime@19.0.0-next.2
+  - @objectstack/cloud-connection@19.0.0-next.2
+  - @objectstack/connector-mcp@19.0.0-next.2
+  - @objectstack/connector-openapi@19.0.0-next.2
+  - @objectstack/connector-rest@19.0.0-next.2
+  - @objectstack/connector-slack@19.0.0-next.2
+  - @objectstack/driver-sql@19.0.0-next.2
+  - @objectstack/knowledge-memory@19.0.0-next.2
+  - @objectstack/organizations@19.0.0-next.2
+  - @objectstack/service-datasource@19.0.0-next.2
+  - @objectstack/service-i18n@19.0.0-next.2
+  - @objectstack/service-print@19.0.0-next.2
+  - @objectstack/service-record-context@19.0.0-next.2
+
 ## 0.3.29-next.1
 
 ### Patch Changes

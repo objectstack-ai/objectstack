@@ -5,9 +5,9 @@ import { definePage } from '@objectstack/spec/ui';
 /**
  * Task Detail — a record page that exercises the record-layout component set
  * beyond the basics:
- *   • `page:header`        — the record title bar: the task's `record_header`
- *                            actions inline and its `record_more` actions
- *                            under the ⋯ overflow (see the node below).
+ *   • `page:header`        — the record title bar: the task's `record_page`
+ *                            actions inline and its folded ones
+ *                            (`component: 'action:menu'`) under the ⋯ overflow (see the node below).
  *   • `record:path`        — Salesforce-style status stepper across the task
  *                            lifecycle (Backlog → … → Done).
  *   • `record:alert`       — a conditional banner shown only while the task is
@@ -38,20 +38,20 @@ export const TaskDetailPage = definePage({
       components: [
         // The title bar, composed explicitly. A `kind: 'full'` page renders
         // exactly the nodes it declares, and the header is one of them: with
-        // no `page:header` node the page has no title bar, so neither the
-        // `record_header` nor the `record_more` location has a surface here.
+        // no `page:header` node the page has no title bar, so the
+        // `record_page` location, inline or folded, has no surface here.
         // The synthesized default page (and a `kind: 'slotted'` page that
         // leaves the `header` slot alone) gets one automatically; this page
         // does not.
         //
         // `actions` are action IDS, resolved against `showcase_task`'s own
         // metadata, and the header still places each by its `locations`:
-        // `record_header` actions render as inline buttons, and an action
-        // declaring `record_more` without `record_header` always goes under
-        // the ⋯ overflow. The list is the object's whole `record_header` /
-        // `record_more` set, which is what the synthesized header would carry,
-        // less the actions the section bar below draws (they declare
-        // `record_more` only for the standard page a phone or the side drawer
+        // `record_page` actions render as inline buttons, and one folded with
+        // `component: 'action:menu'` (formerly `record_more`) always goes
+        // under the ⋯ overflow. The list is the object's whole `record_page`
+        // set, which is what the synthesized header would carry, less the
+        // actions the section bar below draws (they declare a folded
+        // `record_page` only for the standard page a phone or the side drawer
         // shows, objectstack#36150); `test/record-action-location-hosts.test.ts`
         // holds the two equal.
         // The host still appends its own Edit / Share / Delete after these.
@@ -60,13 +60,13 @@ export const TaskDetailPage = definePage({
           type: 'page:header',
           properties: {
             actions: [
-              // record_header — inline buttons.
+              // record_page — inline buttons.
               'showcase_mark_done',
               'showcase_log_time',
               // ask_ai — opens the in-app assistant on this task (ADR-0160 D7).
               'showcase_ask_about_task',
               'showcase_archive_task',
-              // record_more only — the ⋯ overflow (url, api).
+              // record_page folded (action:menu) — the ⋯ overflow (url, api).
               'showcase_open_docs',
               'showcase_recalc_selection',
             ],

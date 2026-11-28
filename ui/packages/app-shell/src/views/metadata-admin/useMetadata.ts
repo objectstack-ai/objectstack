@@ -52,7 +52,7 @@ export interface MetadataTypeAction {
   icon?: string;
   /** Button visual variant. */
   variant?: 'primary' | 'secondary' | 'danger' | 'ghost' | 'link';
-  /** Locations where this action is visible (list_toolbar, record_header, …). */
+  /** Locations where this action is visible (list, record_page, …). */
   locations?: string[];
   /** Confirmation prompt shown before execution. */
   confirmText?: string;

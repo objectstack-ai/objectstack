@@ -19,7 +19,7 @@
  *   context: { record, user },
  * });
  *
- * const toolbarActions = getActionsForLocation('list_toolbar');
+ * const toolbarActions = getActionsForLocation('list');
  * ```
  */
 

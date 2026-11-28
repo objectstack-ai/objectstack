@@ -15,6 +15,8 @@
 import { describe, expect, it } from 'vitest';
 import { assertEngineDeleteDispatch, assertEngineUpdateDispatch, assertEngineFindOnePredicate, type EngineFindOneQueryInput } from '@objectstack/metadata-core';
 import { ObjectStackProtocolImplementation } from './protocol.js';
+// Paid at collection, not inside a clocked case (check:test-source-alias).
+import '@objectstack/lint';
 
 /** The engine surface the repository write path touches (as the container-issue-descent harness). */
 function makeProtocol() {
@@ -52,7 +54,7 @@ async function rejection(promise: Promise<unknown>): Promise<any> {
     throw new Error('expected the save to be rejected, but it resolved');
 }
 
-const act = (name: string, label: string) => ({ name, label, type: 'script', target: 'noop', locations: ['record_header'] });
+const act = (name: string, label: string) => ({ name, label, type: 'script', target: 'noop', locations: ['record_page'] });
 
 const itemWith = (actions: unknown[]) => ({
     name: 'dup_item',

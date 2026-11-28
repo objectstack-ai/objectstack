@@ -50,7 +50,7 @@ export type SingleRecordEntry =
   | { kind: 'delete'; key: 'delete' };
 
 /**
- * ONE record's actions as one list: the declared `list_item` actions (primaries
+ * ONE record's actions as one list: the declared `record_row` actions (primaries
  * first), the built-in Edit, the legacy names, and Delete last — the order its
  * row menu draws them.
  */

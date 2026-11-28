@@ -131,7 +131,7 @@ function refuseRecordlessAskAi(
     message:
       "A dashboard header action cannot be `actionType: 'ask_ai'`: that type focuses the in-app assistant on "
       + 'the one record an action runs on, and a dashboard header runs on none. Put an `ask_ai` action on the '
-      + "object (`locations: ['record_header']` or `['record_more']`), where it runs on the record shown.",
+      + "object (`locations: ['record_page']` or `['record']`), where it runs on the record shown.",
   });
 }
 

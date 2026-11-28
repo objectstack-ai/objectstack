@@ -26,7 +26,7 @@ const placed = () => ({
       name: 'crm_convert_lead',
       label: 'Convert',
       type: 'script',
-      locations: ['record_header'],
+      locations: ['record_page'],
     },
   ],
 });

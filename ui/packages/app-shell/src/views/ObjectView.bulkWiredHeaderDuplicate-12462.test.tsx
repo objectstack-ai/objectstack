@@ -8,11 +8,11 @@
 
 /**
  * objectui#12462 (ruling A-narrow) — the list page's header does not draw a
- * duplicate of a `list_toolbar` action that the ACTIVE view wires to its
+ * duplicate of a `list` action that the ACTIVE view wires to its
  * selection bar AND that is record-scoped.
  *
  * Measured on HotCRM's Leads list: `create_campaign` ("Add to Campaign",
- * `locations: ['list_toolbar', 'list_item']`) is wired by the `all_leads`
+ * `locations: ['list', 'record_row']`) is wired by the `all_leads`
  * view's `bulkActions`, so the selection bar already carried it with rows
  * ticked while the header also drew it at every selection. The selection bar is
  * the list toolbar in its selection mode, so the action stays at its declared
@@ -93,17 +93,17 @@ const CREATE_CAMPAIGN = {
   label: 'Add to Campaign',
   objectName: 'crm_lead',
   type: 'script',
-  locations: ['list_toolbar', 'list_item'],
+  locations: ['list', 'record_row'],
   params: [{ name: 'campaign', type: 'text', label: 'Campaign', required: true }],
 };
 
-/** A plain `list_toolbar` action: object-level, it runs with nothing selected. */
+/** A plain `list` action: object-level, it runs with nothing selected. */
 const REFRESH_SCORES = {
   name: 'refresh_scores',
   label: 'Refresh Scores',
   objectName: 'crm_lead',
   type: 'script',
-  locations: ['list_toolbar'],
+  locations: ['list'],
 };
 
 const LIST_VIEWS = {
@@ -222,7 +222,7 @@ async function tickRows(n: number): Promise<void> {
 
 const addToCampaignIn = (el: HTMLElement) => within(el).queryByRole('button', { name: /Add to Campaign/ });
 
-describe('objectui#12462 — a bulk-wired, record-scoped list_toolbar action leaves the header for the selection bar', () => {
+describe('objectui#12462 — a bulk-wired, record-scoped list action leaves the header for the selection bar', () => {
   it('the view wires it in `bulkActions`: the plain action stays in the header, Add to Campaign is only in the bar', async () => {
     mountLeads('all_leads');
     const header = await headerWithToolbar();

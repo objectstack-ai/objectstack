@@ -963,11 +963,11 @@ function DefaultMetadataList({ type, appName }: { type: string; appName?: string
     </span>
   ));
   // Declarative type-level actions (GAP-1) scoped to the list toolbar.
-  // Per-row (`list_item`) actions are not surfaced here yet — they need the
+  // Per-row (`record_row`) actions are not surfaced here yet — they need the
   // row's recordId from the grid.
   const typeActions = (
     <>
-      <MetadataTypeActions entry={entry} location="list_toolbar" onAfter={refresh} />
+      <MetadataTypeActions entry={entry} location="list" onAfter={refresh} />
       {authoredObject && (
         <Button asChild size="sm" variant="outline" data-testid="catalog-authored-object-link">
           <Link to={`/apps/${encodeURIComponent(appName ?? 'setup')}/${authoredObject}`}>

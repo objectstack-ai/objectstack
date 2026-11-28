@@ -72,7 +72,7 @@ describe('PageHeaderRenderer — actions slot', () => {
       type: 'page:header',
       title: 'Lead',
       actions: [
-        { name: 'convert', locations: ['record_header'], label: 'Convert Lead', type: 'flow' },
+        { name: 'convert', locations: ['record_page'], label: 'Convert Lead', type: 'flow' },
       ],
     });
     expect(screen.getByRole('button', { name: /Convert Lead/i })).toBeTruthy();
@@ -84,19 +84,19 @@ describe('PageHeaderRenderer — actions slot', () => {
       properties: {
         title: 'Lead',
         actions: [
-          { name: 'convert', locations: ['record_header'], label: 'Convert Lead', type: 'flow' },
+          { name: 'convert', locations: ['record_page'], label: 'Convert Lead', type: 'flow' },
         ],
       },
     });
     expect(screen.getByRole('button', { name: /Convert Lead/i })).toBeTruthy();
   });
 
-  it('skips actions whose locations exclude record_header', () => {
+  it('skips actions whose locations exclude record_page', () => {
     renderHeader({
       type: 'page:header',
       actions: [
-        { name: 'a', label: 'Header Action', locations: ['record_header'] },
-        { name: 'b', label: 'List Only', locations: ['list_item'] },
+        { name: 'a', label: 'Header Action', locations: ['record_page'] },
+        { name: 'b', label: 'List Only', locations: ['record_row'] },
       ],
     });
     expect(screen.getByRole('button', { name: /Header Action/i })).toBeTruthy();
@@ -107,13 +107,13 @@ describe('PageHeaderRenderer — actions slot', () => {
   // render an undeclared one, alone among the surfaces that draw the same
   // record's actions (RecordDetailView pre-filters strictly, and the
   // synthesizer's own contract already said "must include
-  // `locations: ['record_header']` to render"). Host-injected chrome is
+  // `locations: ['record_page']` to render"). Host-injected chrome is
   // exempt, which the next test pins.
   it('skips an authored action that declares no placement', () => {
     renderHeader({
       type: 'page:header',
       actions: [
-        { name: 'declared', label: 'Declared Action', locations: ['record_header'] },
+        { name: 'declared', label: 'Declared Action', locations: ['record_page'] },
         { name: 'undeclared', label: 'Undeclared Action' },
         { name: 'empty', label: 'Empty Placement', locations: [] },
       ],
@@ -150,7 +150,7 @@ describe('PageHeaderRenderer — actions slot', () => {
         actions: [
           {
             name: 'convert',
-            locations: ['record_header'],
+            locations: ['record_page'],
             label: 'Convert Lead',
             visible: 'record.status == "qualified"',
           },
@@ -168,7 +168,7 @@ describe('PageHeaderRenderer — actions slot', () => {
         actions: [
           {
             name: 'convert',
-            locations: ['record_header'],
+            locations: ['record_page'],
             label: 'Convert Lead',
             visible: 'record.status == "qualified"',
           },
@@ -186,7 +186,7 @@ describe('PageHeaderRenderer — actions slot', () => {
         actions: [
           {
             name: 'convert',
-            locations: ['record_header'],
+            locations: ['record_page'],
             label: 'Convert Lead',
             visible: { dialect: 'cel', source: 'record.status == "qualified"' },
           },
@@ -201,8 +201,8 @@ describe('PageHeaderRenderer — actions slot', () => {
     renderHeader({
       type: 'page:header',
       actions: [
-        { name: 'shown', locations: ['record_header'], label: 'Shown' },
-        { name: 'gone', locations: ['record_header'], label: 'Hidden Action', hidden: true },
+        { name: 'shown', locations: ['record_page'], label: 'Shown' },
+        { name: 'gone', locations: ['record_page'], label: 'Hidden Action', hidden: true },
       ],
     });
     expect(screen.getByRole('button', { name: /Shown/i })).toBeTruthy();
@@ -212,7 +212,7 @@ describe('PageHeaderRenderer — actions slot', () => {
   it('emits a toolbar role with aria-label when actions render', () => {
     renderHeader({
       type: 'page:header',
-      actions: [{ name: 'a', locations: ['record_header'], label: 'A' }],
+      actions: [{ name: 'a', locations: ['record_page'], label: 'A' }],
     });
     const bar = screen.getByRole('toolbar', { name: /Page header actions/i });
     expect(bar).toBeTruthy();
@@ -231,7 +231,7 @@ describe('PageHeaderRenderer — actions slot', () => {
     const onClick = vi.fn();
     renderHeader({
       type: 'page:header',
-      actions: [{ name: 'a', locations: ['record_header'], label: 'Click Me', onClick }],
+      actions: [{ name: 'a', locations: ['record_page'], label: 'Click Me', onClick }],
     });
     fireEvent.click(screen.getByRole('button', { name: /Click Me/i }));
     expect(onClick).toHaveBeenCalledTimes(1);
@@ -241,7 +241,7 @@ describe('PageHeaderRenderer — actions slot', () => {
     renderHeader(
       {
         type: 'page:header',
-        actions: [{ name: 'biz', locations: ['record_header'], label: 'Convert Lead' }],
+        actions: [{ name: 'biz', locations: ['record_page'], label: 'Convert Lead' }],
       },
       {
         record: { id: '1' },
@@ -265,7 +265,7 @@ describe('PageHeaderRenderer — actions slot', () => {
     renderHeader(
       {
         type: 'page:header',
-        actions: [{ name: 'sys_edit', locations: ['record_header'], label: 'Authored Edit' }],
+        actions: [{ name: 'sys_edit', locations: ['record_page'], label: 'Authored Edit' }],
       },
       {
         record: { id: '1' },
@@ -319,7 +319,7 @@ describe('PageHeaderRenderer — inline-edit session gate (objectui#2572)', () =
     );
   }
 
-  const editCta = { name: 'sys_edit', locations: ['record_header'], label: 'Edit', disableDuringInlineEdit: true };
+  const editCta = { name: 'sys_edit', locations: ['record_page'], label: 'Edit', disableDuringInlineEdit: true };
 
   it('disables a `disableDuringInlineEdit` action while the session is active', () => {
     renderWithInlineEdit({ editing: true, actions: [editCta] });
@@ -334,7 +334,7 @@ describe('PageHeaderRenderer — inline-edit session gate (objectui#2572)', () =
   it('leaves unflagged actions alone during the session', () => {
     renderWithInlineEdit({
       editing: true,
-      actions: [editCta, { name: 'convert', locations: ['record_header'], label: 'Convert' }],
+      actions: [editCta, { name: 'convert', locations: ['record_page'], label: 'Convert' }],
     });
     expect(screen.getByRole('button', { name: /Edit/i })).toBeDisabled();
     expect(screen.getByRole('button', { name: /Convert/i })).toBeEnabled();
@@ -346,9 +346,9 @@ describe('PageHeaderRenderer — inline/overflow split (objectui#2361)', () => {
     renderHeader({
       type: 'page:header',
       actions: [
-        { name: 'convert', locations: ['record_header'], label: 'Convert Lead' },
-        { name: 'assign', locations: ['record_header'], label: 'Assign' },
-        { name: 'return', locations: ['record_header'], label: 'Return' },
+        { name: 'convert', locations: ['record_page'], label: 'Convert Lead' },
+        { name: 'assign', locations: ['record_page'], label: 'Assign' },
+        { name: 'return', locations: ['record_page'], label: 'Return' },
       ],
     });
     expect(screen.getByRole('button', { name: /Convert Lead/i })).toBeTruthy();
@@ -361,10 +361,10 @@ describe('PageHeaderRenderer — inline/overflow split (objectui#2361)', () => {
     renderHeader({
       type: 'page:header',
       actions: [
-        { name: 'a', locations: ['record_header'], label: 'Action A' },
-        { name: 'b', locations: ['record_header'], label: 'Action B' },
-        { name: 'c', locations: ['record_header'], label: 'Action C' },
-        { name: 'd', locations: ['record_header'], label: 'Action D' },
+        { name: 'a', locations: ['record_page'], label: 'Action A' },
+        { name: 'b', locations: ['record_page'], label: 'Action B' },
+        { name: 'c', locations: ['record_page'], label: 'Action C' },
+        { name: 'd', locations: ['record_page'], label: 'Action D' },
       ],
     });
     expect(screen.getByRole('button', { name: /Action C/i })).toBeTruthy();
@@ -377,8 +377,8 @@ describe('PageHeaderRenderer — inline/overflow split (objectui#2361)', () => {
       type: 'page:header',
       maxVisible: 1,
       actions: [
-        { name: 'a', locations: ['record_header'], label: 'Action A' },
-        { name: 'b', locations: ['record_header'], label: 'Action B' },
+        { name: 'a', locations: ['record_page'], label: 'Action A' },
+        { name: 'b', locations: ['record_page'], label: 'Action B' },
       ],
     });
     expect(screen.getByRole('button', { name: /Action A/i })).toBeTruthy();
@@ -392,10 +392,10 @@ describe('PageHeaderRenderer — inline/overflow split (objectui#2361)', () => {
       properties: {
         maxVisible: 4,
         actions: [
-          { name: 'a', locations: ['record_header'], label: 'Action A' },
-          { name: 'b', locations: ['record_header'], label: 'Action B' },
-          { name: 'c', locations: ['record_header'], label: 'Action C' },
-          { name: 'd', locations: ['record_header'], label: 'Action D' },
+          { name: 'a', locations: ['record_page'], label: 'Action A' },
+          { name: 'b', locations: ['record_page'], label: 'Action B' },
+          { name: 'c', locations: ['record_page'], label: 'Action C' },
+          { name: 'd', locations: ['record_page'], label: 'Action D' },
         ],
       },
     });
@@ -408,8 +408,8 @@ describe('PageHeaderRenderer — inline/overflow split (objectui#2361)', () => {
       type: 'page:header',
       maxVisible: 1,
       actions: [
-        { name: 'a', locations: ['record_header'], label: 'Action A' },
-        { name: 'b', locations: ['record_header'], label: 'Action B', order: -1 },
+        { name: 'a', locations: ['record_page'], label: 'Action A' },
+        { name: 'b', locations: ['record_page'], label: 'Action B', order: -1 },
       ],
     });
     expect(screen.getByRole('button', { name: /Action B/i })).toBeTruthy();
@@ -421,8 +421,8 @@ describe('PageHeaderRenderer — inline/overflow split (objectui#2361)', () => {
       type: 'page:header',
       maxVisible: 1,
       actions: [
-        { name: 'a', locations: ['record_header'], label: 'Action A' },
-        { name: 'b', locations: ['record_header'], label: 'Action B', variant: 'primary' },
+        { name: 'a', locations: ['record_page'], label: 'Action A' },
+        { name: 'b', locations: ['record_page'], label: 'Action B', variant: 'primary' },
       ],
     });
     expect(screen.getByRole('button', { name: /Action B/i })).toBeTruthy();
@@ -433,8 +433,8 @@ describe('PageHeaderRenderer — inline/overflow split (objectui#2361)', () => {
     renderHeader({
       type: 'page:header',
       actions: [
-        { name: 'convert', locations: ['record_header'], label: 'Convert Lead' },
-        { name: 'sys_delete', locations: ['record_header'], label: 'Delete', component: 'action:menu' },
+        { name: 'convert', locations: ['record_page'], label: 'Convert Lead' },
+        { name: 'sys_delete', locations: ['record_page'], label: 'Delete', component: 'action:menu' },
       ],
     });
     expect(screen.getByRole('button', { name: /Convert Lead/i })).toBeTruthy();
@@ -472,10 +472,10 @@ describe('PageHeaderRenderer — inline/overflow split (objectui#2361)', () => {
 // unrelated reader (provider config).
 describe('PageHeaderRenderer — maxVisible contract domain (objectui#5006)', () => {
   const fourActions = [
-    { name: 'a', locations: ['record_header'], label: 'Action A' },
-    { name: 'b', locations: ['record_header'], label: 'Action B' },
-    { name: 'c', locations: ['record_header'], label: 'Action C' },
-    { name: 'd', locations: ['record_header'], label: 'Action D' },
+    { name: 'a', locations: ['record_page'], label: 'Action A' },
+    { name: 'b', locations: ['record_page'], label: 'Action B' },
+    { name: 'c', locations: ['record_page'], label: 'Action C' },
+    { name: 'd', locations: ['record_page'], label: 'Action D' },
   ];
 
   // Asserts the DEFAULT-3 split: A/B/C inline, D folded into the overflow menu.
@@ -544,14 +544,14 @@ describe('PageHeaderRenderer — maxVisible contract domain (objectui#5006)', ()
   });
 });
 
-// objectui#3391 — record dispatch shape. A `record_header` / `record_more`
+// objectui#3391 — record dispatch shape. A `record` / `record_page`
 // action must reach the runtime in the SAME shape ObjectGrid row actions and
 // DeclaredActionsBar dispatch: the record stashed under `params._rowRecord`
 // (the api handler's `{field}` URL-interpolation + record-id source) and a
 // spec-shaped `params` ARRAY surfaced as `actionParams`. Before this, a
 // `type:'api'` header action targeting `/api/v1/data/:object/{id}` was sent
 // with the literal `{id}` (`%7Bid%7D` on the wire) while the same declaration
-// interpolated fine from `list_item`.
+// interpolated fine from `record_row`.
 describe('PageHeaderRenderer — record dispatch shape (objectui#3391)', () => {
   function renderWithApiHandler(opts: {
     action: any;
@@ -591,7 +591,7 @@ describe('PageHeaderRenderer — record dispatch shape (objectui#3391)', () => {
       name: 'copy_plan_row_3391',
       type: 'api',
       method: 'PATCH',
-      locations: ['record_header'],
+      locations: ['record_page'],
       label: 'Copy Plan',
       target: '/api/v1/data/os_plan/{id}',
     };
@@ -620,7 +620,7 @@ describe('PageHeaderRenderer — record dispatch shape (objectui#3391)', () => {
     const action = {
       name: 'copy_plan_params_3391',
       type: 'api',
-      locations: ['record_header'],
+      locations: ['record_page'],
       label: 'Copy With Params',
       target: '/api/v1/data/os_plan/{id}',
       params: paramDefs,
@@ -645,7 +645,7 @@ describe('PageHeaderRenderer — record dispatch shape (objectui#3391)', () => {
     const action = {
       name: 'object_params_3391',
       type: 'api',
-      locations: ['record_header'],
+      locations: ['record_page'],
       label: 'Object Params',
       target: '/api/v1/data/os_plan/{id}',
       params: { channel: 'header' },
@@ -662,7 +662,7 @@ describe('PageHeaderRenderer — record dispatch shape (objectui#3391)', () => {
     const action = {
       name: 'no_record_3391',
       type: 'api',
-      locations: ['record_header'],
+      locations: ['record_page'],
       label: 'No Record',
       target: '/api/v1/misc/ping',
     };
@@ -687,7 +687,7 @@ describe('PageHeaderRenderer — record dispatch shape (objectui#3391)', () => {
     expect(action).toStrictEqual({
       name: 'no_record_3391',
       type: 'api',
-      locations: ['record_header'],
+      locations: ['record_page'],
       label: 'No Record',
       target: '/api/v1/misc/ping',
     });
@@ -698,31 +698,31 @@ describe('PageHeaderRenderer — record dispatch shape (objectui#3391)', () => {
 // per (action name, predicate) pair via a module-level Set, so every test
 // below uses unique action names/predicates to stay independent.
 describe('PageHeaderRenderer — #2358 action visibility traps', () => {
-  describe('trap 2: record_more routes to the ⋯ overflow menu', () => {
-    it('renders a record_more-only action in the overflow, never inline', () => {
+  describe('trap 2: a folded action (action:menu) routes to the ⋯ overflow menu', () => {
+    it('renders a folded action in the overflow, never inline', () => {
       renderHeader(
         {
           type: 'page:header',
           actions: [
-            { name: 'convert2358', locations: ['record_header'], label: 'Convert Lead' },
-            { name: 'export_pdf_2358', label: 'Export PDF', locations: ['record_more'] },
+            { name: 'convert2358', locations: ['record_page'], label: 'Convert Lead' },
+            { name: 'export_pdf_2358', label: 'Export PDF', locations: ['record_page'], component: 'action:menu' },
           ],
         },
         { record: { id: '1' } },
       );
-      // The plain action stays inline; the record_more action must NOT get
+      // The plain action stays inline; the folded action must NOT get
       // an inline button — it lives inside the ⋯ dropdown (trigger present).
       expect(screen.getByRole('button', { name: /Convert Lead/i })).toBeTruthy();
       expect(screen.queryByRole('button', { name: /Export PDF/i })).toBeNull();
       expect(screen.getByRole('button', { name: /More actions/i })).toBeTruthy();
     });
 
-    it('renders the ⋯ menu even when a record_more action is the ONLY action', () => {
+    it('renders the ⋯ menu even when a folded action is the ONLY action', () => {
       renderHeader(
         {
           type: 'page:header',
           actions: [
-            { name: 'archive_2358', label: 'Archive Record', locations: ['record_more'] },
+            { name: 'archive_2358', label: 'Archive Record', locations: ['record_page'], component: 'action:menu' },
           ],
         },
         { record: { id: '1' } },
@@ -731,12 +731,12 @@ describe('PageHeaderRenderer — #2358 action visibility traps', () => {
       expect(screen.getByRole('button', { name: /More actions/i })).toBeTruthy();
     });
 
-    it('still excludes locations that are neither record_header nor record_more', () => {
+    it('still excludes locations that are neither record nor record_page', () => {
       renderHeader(
         {
           type: 'page:header',
           actions: [
-            { name: 'list_only_2358', label: 'List Only', locations: ['list_item'] },
+            { name: 'list_only_2358', label: 'List Only', locations: ['record_row'] },
           ],
         },
         { record: { id: '1' } },
@@ -754,7 +754,7 @@ describe('PageHeaderRenderer — #2358 action visibility traps', () => {
           actions: [
             {
               name: 'admin_gate_2358',
-              locations: ['record_header'],
+              locations: ['record_page'],
               label: 'Admin Gate',
               visible: 'os.user.role == "admin"',
             },
@@ -772,7 +772,7 @@ describe('PageHeaderRenderer — #2358 action visibility traps', () => {
           actions: [
             {
               name: 'admin_gate_no_match_2358',
-              locations: ['record_header'],
+              locations: ['record_page'],
               label: 'Admin Gate',
               visible: 'os.user.role == "admin"',
             },
@@ -793,7 +793,7 @@ describe('PageHeaderRenderer — #2358 action visibility traps', () => {
           actions: [
             {
               name: 'bad_scope_2358',
-              locations: ['record_header'],
+              locations: ['record_page'],
               label: 'Bad Scope',
               visible: 'undeclared_var_2358 == 1',
             },
@@ -832,7 +832,7 @@ describe('PageHeaderRenderer — #2358 action visibility traps', () => {
             actions: [
               {
                 name: 'hidden_field_gate_2358',
-                locations: ['record_header'],
+                locations: ['record_page'],
                 label: 'Hidden Field Gate',
                 visible: 'record.secret_level_2358 == "high"',
               },
@@ -872,7 +872,7 @@ describe('PageHeaderRenderer — #2358 action visibility traps', () => {
             actions: [
               {
                 name: 'null_field_gate_2358',
-                locations: ['record_header'],
+                locations: ['record_page'],
                 label: 'Null Field Gate',
                 visible: 'record.approver_2358 == "u1"',
               },
@@ -900,7 +900,7 @@ describe('PageHeaderRenderer — in-flight header action (objectstack#34933)', (
     const promise = new Promise<T>((res, rej) => { resolve = res; reject = rej; });
     return { promise, resolve, reject };
   }
-  const convert = { name: 'convert', locations: ['record_header'], label: 'Convert Lead', type: 'flow', icon: 'ArrowRightCircle' };
+  const convert = { name: 'convert', locations: ['record_page'], label: 'Convert Lead', type: 'flow', icon: 'ArrowRightCircle' };
   const record = { id: 'lead-1', name: 'Mira Costa' };
 
   function renderWithFlow(flow: (action: ActionDef, ctx: ActionContext) => Promise<ActionResult>) {
@@ -1064,7 +1064,7 @@ describe('PageHeaderRenderer — in-flight header action (objectstack#34933)', (
               schema={{
                 type: 'page:header',
                 title: 'Lead',
-                actions: [{ name: 'qualify', type: 'api', target: '/api/v1/qualify', confirmText: 'Qualify this lead?', locations: ['record_header'], label: 'Qualify' }],
+                actions: [{ name: 'qualify', type: 'api', target: '/api/v1/qualify', confirmText: 'Qualify this lead?', locations: ['record_page'], label: 'Qualify' }],
               }}
             />
           </RecordContextProvider>

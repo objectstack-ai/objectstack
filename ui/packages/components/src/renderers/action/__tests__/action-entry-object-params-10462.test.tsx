@@ -96,7 +96,7 @@ function nodeFor(surface: Surface, entry: Record<string, unknown>): { type: stri
     default:
       return {
         type: 'page:header',
-        schema: { title: 'Plan', actions: [{ ...entry, locations: ['record_header'] }] },
+        schema: { title: 'Plan', actions: [{ ...entry, locations: ['record_page'] }] },
       };
   }
 }
