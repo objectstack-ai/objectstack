@@ -193,6 +193,24 @@ export function stripLegacyApiMethods(
 }
 
 /**
+ * Where a retired key that promised history sends the author for FIELD
+ * history — the `enable.trash` and `versioning` tombstones share it, so the
+ * two prescriptions cannot drift apart. It states the model
+ * `resolveFieldHistory` (`field-history-default.ts`) enforces: values show by
+ * default except for the `FIELD_HISTORY_DEFAULT_OFF_TYPES` (media and
+ * structured JSON), which opt in with `fieldHistory: true`; the object's off
+ * switch is `enable.fieldHistory: false`, a field's is its own
+ * `fieldHistory: false`. ⛔ Never `trackHistory` here: on a field it
+ * only opts a media or structured-JSON type in, and `false` is not an off
+ * switch; on the object it opens the history ledger, not the values.
+ */
+const FIELD_HISTORY_PRESCRIPTION =
+  'Field history is on by default: a changed field\'s old → new values show on the record ' +
+  'activity timeline, except a media or structured-JSON field, which opts in with ' +
+  '`fieldHistory: true`. `enable.fieldHistory: false` turns them off for the object, and a ' +
+  'field opts out with its own `fieldHistory: false`.';
+
+/**
  * Tombstones for RETIRED capability flags — same doctrine as the tenancy
  * block and the top-level `UNKNOWN_KEY_GUIDANCE` map below: a retired
  * key's rejection must carry the upgrade prescription, because the parse
@@ -209,8 +227,8 @@ const CAPABILITIES_RETIRED_KEY_GUIDANCE: Record<string, string> = {
     'soft-delete that never ran). Delete the key. The recycle bin that shipped ' +
     'later (ADR-0148) has no flag: it takes every by-id delete of a business ' +
     'object, and none of a platform object (`sys_`, `cloud_`, `ai_`), whose ' +
-    'deletes stay permanent. For history use per-field `trackHistory` (audit ' +
-    'trail), and for retention a `lifecycle` policy. ' +
+    'deletes stay permanent. ' + FIELD_HISTORY_PRESCRIPTION + ' For retention, ' +
+    'a `lifecycle` policy. ' +
     'This edit left `os migrate meta` with the protocol-16.x conversions: apply it by hand, or run the tool on a release that still carries the conversion — https://objectstack.ai/docs/protocol-upgrade.',
   mru:
     '`enable.mru` was removed from @objectstack/spec in the 16.x line (' +
@@ -1959,9 +1977,9 @@ const UNKNOWN_KEY_GUIDANCE: Record<string, string> = {
     'deletes are permanent.',
   versioning:
     '`versioning` was removed from the spec in 16.0 (ADR-0049) — no ' +
-    'record-versioning engine ever read it (it snapshotted no history). Use ' +
-    'per-field `Field.trackHistory` for field-level history, or a data ' +
-    'lifecycle policy (`lifecycle`) for retention.',
+    'record-versioning engine ever read it (it snapshotted no history). ' +
+    FIELD_HISTORY_PRESCRIPTION + ' For retention, use a data lifecycle ' +
+    'policy (`lifecycle`).',
   search:
     '`search` (the SearchConfig block) was removed from the spec in 16.0 ' +
     '(ADR-0049) — no search-engine config was consumed. Declare the ' +
@@ -4699,8 +4717,9 @@ const ObjectSchemaBase = strictObject(
   /**
    * Declarative semantic activity milestones (ADR-0052 §5b.2). When a watched
    * field transitions INTO `value`, the platform emits a templated activity-row
-   * on the record timeline — no `*.hook.ts` / `*.flow.ts`. Complements field-level
-   * `trackHistory` (which renders raw "Field: old → new"): use milestones for
+   * on the record timeline — no `*.hook.ts` / `*.flow.ts`. Complements the
+   * field-change rows (raw "Field: old → new", shown by default; off with
+   * `enable.fieldHistory: false` or a field's `fieldHistory: false`): use milestones for
    * business-meaningful events ("Deal won", "Task completed"). `summary` supports
    * `{field}` tokens interpolated from the record; the milestone summary takes
    * precedence over the field-change summary for the same update. Consumed by

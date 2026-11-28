@@ -17,14 +17,14 @@
     "test": "vitest run"
   },
   "dependencies": {
-    "@objectstack/spec": "19.0.0-next.1",
-    "@objectstack/runtime": "19.0.0-next.1",
-    "@objectstack/plugin-hono-server": "19.0.0-next.1"
+    "@objectstack/spec": "19.0.0-next.2",
+    "@objectstack/runtime": "19.0.0-next.2",
+    "@objectstack/plugin-hono-server": "19.0.0-next.2"
   },
   "devDependencies": {
-    "@objectstack/cli": "19.0.0-next.1",
-    "@objectstack/skills": "19.0.0-next.1",
-    "@objectstack/verify": "19.0.0-next.1",
+    "@objectstack/cli": "19.0.0-next.2",
+    "@objectstack/skills": "19.0.0-next.2",
+    "@objectstack/verify": "19.0.0-next.2",
     "typescript": "^5.3.0",
     "vitest": "~4.1.12"
   },

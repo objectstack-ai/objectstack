@@ -1162,8 +1162,13 @@ later for a new object gets its hooks when it arrives.
   every object that already carries a per-row hook (the audit plugin's, for
   one): over it the write is refused and nothing is written.
 - **A recycle-bin restore** runs no hooks (a restore is not a create, ADR-0148
-  D2), so on such a kernel a restored row is not re-indexed by itself; a
-  `reindexSource` brings it back.
+  D2), so the plugin also registers one engine middleware that hears the
+  `restore` operation: once a restore has answered, each row it wrote back is
+  synced, the master first, through the same seams (the queue, or the deferral
+  above, so a restore inside a unit that rolls back indexes nothing). A restore
+  that refuses or fails syncs nothing; one that landed with a stale roll-up
+  (`ERR_SUMMARY_RECOMPUTE`) syncs its rows. A restored row is re-read under each
+  source's `where`, as a write's is.
 
 The inline sync is in-process: a sync that has not finished when the process
 stops is lost, and the next reconcile or `reindexSource` repairs it. Through the

@@ -4605,6 +4605,25 @@ const ko = {
     recordCitations: {
       title: '레코드에서 인용',
     },
+    // The drafts an ask turn saved, with their verdicts and Studio review links.
+    draftReview: {
+      title: '이번 턴에 저장된 초안',
+      hint: '아직 게시된 것은 없습니다. Studio에서 초안을 검토하고 게시하세요.',
+      package: '패키지 {{name}}',
+      reviewAndPublish: '검토 및 게시',
+      reviewAndPublishAria: 'Studio에서 패키지 {{name}}의 초안 검토 및 게시',
+      review: '검토',
+      reviewAria: 'Studio에서 초안 {{name}} 검토',
+      willPublish: '게시 가능',
+      verdictWithheld: '판정을 볼 수 없음',
+      checkedAtSave: '저장 시 판정',
+      problems: '문제 {{count}}개',
+      problems_one: '문제 {{count}}개',
+      problems_other: '문제 {{count}}개',
+      more: '외 {{count}}개',
+      more_one: '외 {{count}}개',
+      more_other: '외 {{count}}개',
+    },
     questionCard: {
       aiAsks: 'AI 질문:',
       progress: '질문 {{current}}/{{total}}',

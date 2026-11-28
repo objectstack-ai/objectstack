@@ -1,5 +1,11 @@
 # @objectstack/metadata-fs
 
+## 19.0.0-next.2
+
+### Patch Changes
+
+- @objectstack/metadata-core@19.0.0-next.2
+
 ## 19.0.0-next.1
 
 ### Patch Changes

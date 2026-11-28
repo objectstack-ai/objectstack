@@ -84,7 +84,7 @@ import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 import { z } from 'zod';
 
-import { retirementTombstone } from '../zod/tombstone.zod';
+import { handlerKeyRefusal, retirementTombstone } from '../zod/tombstone.zod';
 // objectui#6576 — the first handler arm on an `objectql` mirror, ledgered here
 // like the 58 it joins.
 // objectui#7804 added the second pair on this mirror: the `object-kanban` face
@@ -501,6 +501,14 @@ const RETIRED: readonly Site[] = [
 
 const ALL_SITES: readonly Site[] = [...RUNTIME_SLOT, ...RETIRED];
 
+/** Retired keys that carry their OWN remedy (`handlerKeyRefusal`'s
+ *  `retirement` argument) in place of the node-type one, with the spellings
+ *  that remedy must name. A key retired with a host-supplied save path has a
+ *  successor, and the node-type remedy would point its author at a toast. */
+const OWN_RETIREMENT_REMEDY: Readonly<Record<string, readonly string[]>> = {
+  onBatchSave: ['`onBatchSave` → `onRowSave` on `object-grid`', '`GridCellSelectionProvider`', 'Delete the key.'],
+};
+
 /** The nine mirror files the census covers; `base.zod.ts` is not among them —
  *  it declares no named handler key. The record-valued `EventHandlersSchema`
  *  that once stood there was never one either, and objectui#6910 retired it;
@@ -666,9 +674,16 @@ describe('a JSON author is refused BY NAME and pointed at the node-type spelling
     expect(issue!.path).toEqual([key]);
     expect(issue!.message).toContain(`\`${key}\``);
     expect(issue!.message).not.toContain('expected function');
-    // The remedy: the node-type spelling PR #6498 established (Q1, option C).
-    expect(issue!.message).toContain('"type"');
-    expect(issue!.message).toContain('action:button');
+    const own = OWN_RETIREMENT_REMEDY[key];
+    if (own) {
+      // A retirement's own FROM → TO, and not the node-type remedy beside it.
+      for (const spelling of own) expect(issue!.message).toContain(spelling);
+      expect(issue!.message).not.toContain('action:button');
+    } else {
+      // The remedy: the node-type spelling PR #6498 established (Q1, option C).
+      expect(issue!.message).toContain('"type"');
+      expect(issue!.message).toContain('action:button');
+    }
     // BOTH channels, one string — the runtime message and the `.describe()`
     // metadata cannot drift apart (the `retirementTombstone()` invariant).
     expect(issue!.message).toBe(describeOf(mirror, key));
@@ -706,6 +721,34 @@ describe('a JSON author is refused BY NAME and pointed at the node-type spelling
     expect(ButtonZod.safeParse({ type: 'button', label: 'Save' }).success).toBe(true);
     expect(ToastZod.safeParse({ type: 'toast', title: 'Saved' }).success).toBe(true);
     expect(DialogZod.safeParse({ type: 'dialog', title: 'Confirm' }).success).toBe(true);
+  });
+});
+
+describe('a retired key\'s own remedy replaces the node-type one, and only where it is passed', () => {
+  it('every key with its own remedy is a retired site of the ledger', () => {
+    const retiredKeys = new Set(RETIRED.map(([, , key]) => key));
+    for (const key of Object.keys(OWN_RETIREMENT_REMEDY)) expect(retiredKeys.has(key), key).toBe(true);
+  });
+
+  it('without the argument the message is the node-type remedy, byte for byte as before', () => {
+    const generic = handlerKeyRefusal('onExample', 'retired', 'Example handler').description;
+    expect(generic).toBe(
+      'Example handler — `onExample` is RETIRED (objectui#6124, ADR-0049): JSON has no function value, and no '
+        + 'renderer reads this key, so nothing could ever run it. Author behaviour as a NODE TYPE instead — e.g. '
+        + '{ "type": "toast", ... } or an action:button node with a declared action, the spelling PR #6498 established.',
+    );
+  });
+
+  it('with it, the remedy is the retirement\'s sentence and the node-type sentence is gone', () => {
+    const own = handlerKeyRefusal('onExample', 'retired', 'Example handler', '`onExample` → `onOther`. Delete the key.').description;
+    expect(own).toBe(
+      'Example handler — `onExample` is RETIRED (objectui#6124, ADR-0049): JSON has no function value, and no '
+        + 'renderer reads this key, so nothing could ever run it. `onExample` → `onOther`. Delete the key.',
+    );
+  });
+
+  it('a runtime slot refuses a retirement remedy at declaration', () => {
+    expect(() => handlerKeyRefusal('onExample', 'runtime-slot', 'Example handler', 'x')).toThrow(/'retired' key/);
   });
 });
 

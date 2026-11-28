@@ -110,7 +110,10 @@
  *     its one spelling, a key a secret can be derived with
  *     (`advisoryReadKeyFailure` in `ops.mjs`), refused here before any
  *     request; a refusal names the key, the byte count and what the value
- *     failed to be, ⛔ never the value. Any other key — a `summary`, a
+ *     failed to be, ⛔ never the value. It may name `page` (1 to
+ *     `ADVISORY_READ_MAX_PAGES`, a quiet integer: a refusal never echoes it),
+ *     the one page of the answer its stroke seals (`ops.mjs`, "One page a
+ *     stroke"). Any other key — a `summary`, a
  *     `private_key`, a `state` — is refused by name. The fences on the READ —
  *     readable, the one named, a sender the gate admits — are the executor's,
  *     on its own GET (`ADVISORY_READ_FENCES` in `ops.mjs`);
@@ -331,8 +334,19 @@ import {
   advisoryReadFenceFailures,
   advisoryReadFenceText,
   advisoryReadKeyFailure,
-  advisoryReadLandedText,
-  advisoryReadOverCapText,
+  ADVISORY_READ_LANDED,
+  ADVISORY_READ_MAX_PAGES,
+  ADVISORY_READ_OVER_CAP,
+  ADVISORY_READ_PAGE_BYTES,
+  ADVISORY_READ_PAGE_CHUNK_BYTES,
+  ADVISORY_READ_PAGE_HEADER_BYTES,
+  ADVISORY_READ_PAGES_DISAGREE,
+  ADVISORY_READ_PAGES_MISSING,
+  ADVISORY_READ_PAGES_TORN,
+  advisoryReadAssemble,
+  advisoryReadPage,
+  advisoryReadPageOf,
+  advisoryReadPageSpans,
   advisoryReadParts,
   advisoryReadPlaintext,
   openAdvisoryRead,
@@ -425,7 +439,10 @@ export function readEventPayload(env = process.env, read = (p) => readFileSync(p
 export function validateField(name, value, spec, where) {
   const at = `${where}.${name}`;
   if (spec.kind === 'int') {
-    if (typeof value !== 'number' || !Number.isInteger(value) || value <= 0) return `${at} must be a positive integer (a JSON number), got ${quote(value)}`;
+    // ⛔ A quiet int never echoes the value (`FIELDS`): it is described by its type and size. `max` caps it (a read's page).
+    const got = spec.quiet ? `${describeQuietly(value)} — not echoed` : quote(value);
+    if (typeof value !== 'number' || !Number.isInteger(value) || value <= 0) return `${at} must be a positive integer (a JSON number), got ${got}`;
+    if (spec.max !== undefined && value > spec.max) return `${at} must be at most ${spec.max}, got ${got}`;
     return null;
   }
   if (spec.kind === 'str') {
@@ -1992,7 +2009,7 @@ export async function selfTest() {
     /** A second release line of the same package — a package may take one entry per line it was fixed on. */
     const LINE_17 = Object.freeze({ package: '@objectstack/rest', vulnerable_version_range: '>= 17.0.0, < 17.9.4', patched_versions: '17.9.4' });
     // The rows and their requests.
-    t('the rows: report takes summary and description, optionally severity and cwe_ids; the draft the same plus packages; the other three take ghsa_id with collaborators, versions — optionally drop — or advisory_state, the read ghsa_id with public_key, the listing public_key alone, the note and the rewrite ghsa_id with sealed_note, and the severity ghsa_id with severity; all ten spend repository-advisories alone — the eight that write at write, the two that read at read — travel alone, reach no second repository and close no inputs', ADVISORY_OPS.map((op) => [OPS[op].required, OPS[op].optional, OPS[op].permission, OPS[op].grant ?? null, OPS[op].alsoSpends ?? null, OPS[op].alone, OPS[op].secondRepo ?? null, OPS[op].closedInputs ?? null]), [[['summary', 'description'], ['severity', 'cwe_ids'], 'repository-advisories', null, null, true, null, null], [['summary', 'description', 'packages'], ['severity', 'cwe_ids'], 'repository-advisories', null, null, true, null, null], [['ghsa_id', 'collaborators'], [], 'repository-advisories', null, null, true, null, null], [['ghsa_id', 'versions'], ['drop'], 'repository-advisories', null, null, true, null, null], [['ghsa_id', 'advisory_state'], [], 'repository-advisories', null, null, true, null, null], [['ghsa_id', 'public_key'], [], 'repository-advisories', 'read', null, true, null, null], [['public_key'], [], 'repository-advisories', 'read', null, true, null, null], [['ghsa_id', 'sealed_note'], [], 'repository-advisories', null, null, true, null, null], [['ghsa_id', 'sealed_note'], [], 'repository-advisories', null, null, true, null, null], [['ghsa_id', 'severity'], [], 'repository-advisories', null, null, true, null, null]]);
+    t('the rows: report takes summary and description, optionally severity and cwe_ids; the draft the same plus packages; the other three take ghsa_id with collaborators, versions — optionally drop — or advisory_state, the read ghsa_id with public_key — optionally page — the listing public_key alone, the note and the rewrite ghsa_id with sealed_note, and the severity ghsa_id with severity; all ten spend repository-advisories alone — the eight that write at write, the two that read at read — travel alone, reach no second repository and close no inputs', ADVISORY_OPS.map((op) => [OPS[op].required, OPS[op].optional, OPS[op].permission, OPS[op].grant ?? null, OPS[op].alsoSpends ?? null, OPS[op].alone, OPS[op].secondRepo ?? null, OPS[op].closedInputs ?? null]), [[['summary', 'description'], ['severity', 'cwe_ids'], 'repository-advisories', null, null, true, null, null], [['summary', 'description', 'packages'], ['severity', 'cwe_ids'], 'repository-advisories', null, null, true, null, null], [['ghsa_id', 'collaborators'], [], 'repository-advisories', null, null, true, null, null], [['ghsa_id', 'versions'], ['drop'], 'repository-advisories', null, null, true, null, null], [['ghsa_id', 'advisory_state'], [], 'repository-advisories', null, null, true, null, null], [['ghsa_id', 'public_key'], ['page'], 'repository-advisories', 'read', null, true, null, null], [['public_key'], [], 'repository-advisories', 'read', null, true, null, null], [['ghsa_id', 'sealed_note'], [], 'repository-advisories', null, null, true, null, null], [['ghsa_id', 'sealed_note'], [], 'repository-advisories', null, null, true, null, null], [['ghsa_id', 'severity'], [], 'repository-advisories', null, null, true, null, null]]);
     t('the fields: summary and description byte-capped strings — 1024 and the body cap; severity GitHub\'s four, quiet; cwe_ids a quiet capped list of CWE ids; ghsa_id its own kind; collaborators a quiet login list capped like assignees; advisory_state a quiet enum of draft, closed and published — by the maintainer\'s ruling no state is refused by name any more', [FIELDS.summary, FIELDS.description.max === FIELDS.body.max, [...FIELDS.severity.values], FIELDS.severity.quiet, [FIELDS.cwe_ids.kind, FIELDS.cwe_ids.max, FIELDS.cwe_ids.shape === CWE_ID_SHAPE, FIELDS.cwe_ids.quiet], FIELDS.ghsa_id, [FIELDS.collaborators.max === FIELDS.assignees.max, FIELDS.collaborators.itemMax === FIELDS.assignees.itemMax, FIELDS.collaborators.shape === LOGIN_SHAPE, FIELDS.collaborators.quiet], [[...FIELDS.advisory_state.values], FIELDS.advisory_state.quiet, Object.keys(FIELDS.advisory_state.named)]], [{ kind: 'str', max: MAX_ADVISORY_SUMMARY_BYTES }, true, ['critical', 'high', 'medium', 'low'], true, ['list', 10, true, true], { kind: 'ghsa' }, [true, true, true, true], [['draft', 'closed', 'published'], true, []]]);
     const filed = OPS.advisory_report.requests(report(), REPO);
     const filedFull = OPS.advisory_report.requests(report({ severity: 'high', cwe_ids: ['CWE-79', 'CWE-352'] }), REPO);
@@ -2267,10 +2284,13 @@ export async function selfTest() {
     const derOf = (raw) => Buffer.concat([Buffer.from('302a300506032b656e032100', 'hex'), raw]).toString('base64');
     const PREFIX = 'MCowBQYDK2VuAyEA';
     // The row, its fields and its one request.
-    t('the row: ghsa_id and public_key, nothing optional; it spends repository-advisories at READ (its grant), travels alone, widens nothing else; public_key is its own kind and ghsa_id the existing one', [OPS.advisory_read.required, OPS.advisory_read.optional, OPS.advisory_read.permission, OPS.advisory_read.grant, OPS.advisory_read.alone, OPS.advisory_read.alsoSpends ?? null, OPS.advisory_read.secondRepo ?? null, FIELDS.public_key, FIELDS.ghsa_id], [['ghsa_id', 'public_key'], [], 'repository-advisories', 'read', true, null, null, { kind: 'x25519' }, { kind: 'ghsa' }]);
+    t('the row: ghsa_id and public_key, and page alone optional; it spends repository-advisories at READ (its grant), travels alone, widens nothing else; public_key is its own kind, ghsa_id the existing one, and page a quiet integer capped at the page count', [OPS.advisory_read.required, OPS.advisory_read.optional, OPS.advisory_read.permission, OPS.advisory_read.grant, OPS.advisory_read.alone, OPS.advisory_read.alsoSpends ?? null, OPS.advisory_read.secondRepo ?? null, FIELDS.public_key, FIELDS.ghsa_id, FIELDS.page], [['ghsa_id', 'public_key'], ['page'], 'repository-advisories', 'read', true, null, null, { kind: 'x25519' }, { kind: 'ghsa' }, { kind: 'int', max: ADVISORY_READ_MAX_PAGES, quiet: true }]);
     t("⚖ the sender gate, by the maintainer's ruling: ONE setting, target-write — write, maintain or admin on the target, the gate every other row keeps — on advisory_read and advisory_list, the two rows carrying one, whose grant stays read", [Object.keys(ADVISORY_READ_SENDER_GATES), OPS.advisory_read.senderGate, OP_NAMES.filter((op) => OPS[op].senderGate !== undefined), OPS.advisory_read.grant], [['target-write'], 'target-write', ['advisory_read', 'advisory_list'], 'read']);
     const asked = OPS.advisory_read.requests(read(), REPO);
-    t("its one request is a GET of one advisory's path — no body, no write — carrying the id and the key to the executor, and reaching no refused family", [asked.length, asked[0].verb, asked[0].path, 'body' in asked[0], asked[0].advisoryRead, ADVISORY_PATH_SHAPE.test(asked[0].path), REFUSED_PATH_FAMILIES.filter((re) => re.test(asked[0].path)).length], [1, 'GET', `/repos/${REPO}/security-advisories/${GHSA}`, false, { ghsaId: GHSA, publicKey: READER.spki }, true, 0]);
+    t("its one request is a GET of one advisory's path — no body, no write — carrying the id and the key to the executor, and reaching no refused family", [asked.length, asked[0].verb, asked[0].path, 'body' in asked[0], asked[0].advisoryRead, ADVISORY_PATH_SHAPE.test(asked[0].path), REFUSED_PATH_FAMILIES.filter((re) => re.test(asked[0].path)).length, OPS.advisory_read.requests(read({ page: 3 }), REPO)[0].advisoryRead.page], [1, 'GET', `/repos/${REPO}/security-advisories/${GHSA}`, false, { ghsaId: GHSA, publicKey: READER.spki, page: 1 }, true, 0, 3]);
+    // The page: a quiet integer, 1..ADVISORY_READ_MAX_PAGES — judged before any request, ⛔ never echoed.
+    const pageRefusals = [0, -1, 1.5, ADVISORY_READ_MAX_PAGES + 1, '2', null, [2], PROSE].map((page) => errorsOf(read({ page })));
+    t('⛔ a page that is not 1..ADVISORY_READ_MAX_PAGES is refused before any request — zero, negative, a fraction, one past the cap, a string, null, an array and prose — and NO refusal echoes the value; 1, 2 and the cap itself are accepted', [pageRefusals.map((e) => e.length === 1 && e[0].startsWith('actions[0].page must be')), pageRefusals.flat().filter((e) => e.includes(PROSE) || e.includes(`${ADVISORY_READ_MAX_PAGES + 1}`) || e.includes('1.5')), [1, 2, ADVISORY_READ_MAX_PAGES].map((page) => validatePayload(one(read({ page }))).ok)], [pageRefusals.map(() => true), [], [true, true, true]]);
     // The key: its one spelling, judged before any request.
     t('the key: X25519, 60 base64 characters of SPKI DER in one shape — and twenty fresh key pairs, as the seat makes them, each pass the whole judgment', [ADVISORY_READ_KEY_TYPE, ADVISORY_READ_PUBLIC_KEY_CHARS, READER.spki.length, ADVISORY_READ_PUBLIC_KEY_SHAPE.test(READER.spki), READER.spki.startsWith(PREFIX), Array.from({ length: 20 }, () => advisoryReadKeyFailure(keyPair().spki)).filter((why) => why !== null)], ['x25519', 60, 60, true, true, []]);
     const accepted = validatePayload(one(read()));
@@ -2291,7 +2311,7 @@ export async function selfTest() {
     t('⛔ …and NO refusal echoes the value, in whole or in part — it is described by its type and byte count, and what it failed to be', [echoes.length, errorsOf(read({ public_key: PROSE })), errorsOf(read({ public_key: 17 }))], [0, [`${KEY_REFUSAL}, base64 SPKI DER of exactly 60 characters — got a string of ${Buffer.byteLength(PROSE)} byte(s) that is not 60 characters long; it is refused here, before any request, and never echoed`], [`${KEY_REFUSAL}, base64 SPKI DER of exactly 60 characters — got number that is not a string; it is refused here, before any request, and never echoed`]]);
     const malformedIds = ['ghsa-abcd-2345-wxyz', 'GHSA-ABCD-2345-WXYZ', 'GHSA-abcd-2345', `${GHSA}/cve`, `../${GHSA}`, '', 17, null, PROSE];
     t("⛔ a malformed ghsa_id beside a valid key is refused before any request, naming the shape, and never echoed", [malformedIds.filter((ghsa_id) => !refuses(one(read({ ghsa_id })), "actions[0].ghsa_id must be one repository advisory's id")).length, errorsOf(read({ ghsa_id: PROSE })).some((e) => e.includes('ADVISORY PROSE'))], [0, false]);
-    const takes = `is not a key \`advisory_read\` takes (it takes ghsa_id, public_key)`;
+    const takes = `is not a key \`advisory_read\` takes (it takes ghsa_id, public_key, page)`;
     t('⛔ refused BY NAME beside a read: a private key, a key, the fields it would read, the keys of the other advisory rows, a state, a body and an issue — an id and a key, and nothing else', ['private_key', 'key', 'fields', 'summary', 'description', 'vulnerabilities', 'collaborators', 'advisory_state', 'state', 'body', 'issue', 'reveal'].filter((key) => !refuses(one(read({ [key]: key === 'issue' ? 7 : 'x' })), `actions[0].${key} ${takes}`)), []);
     t('⛔ refused: either required key missing — a key is never defaulted, nor an id', [refuses(one({ op: 'advisory_read', ghsa_id: GHSA }), 'actions[0].public_key is required'), refuses(one({ op: 'advisory_read', public_key: READER.spki }), 'actions[0].ghsa_id is required')], [true, true]);
     // Alone in its stroke, and the grant.
@@ -2354,7 +2374,34 @@ export async function selfTest() {
     const leaky = advisoryReadFenceFailures({ ghsaId: GHSA, answer: answer(advisory({ ghsa_id: 'GHSA-wxyz-2345-abcd', state: PROSE })), gate: PROSE });
     const leakyText = advisoryReadFenceText(leaky);
     t("⛔ a read's fence sentence names no advisory id — neither the one asked for nor the one answered — no state and no prose: another advisory is said to be one, and a gate that is prose is said to be unknown, never echoed", [leaky.map((f) => f.fence), [GHSA, 'GHSA-wxyz-2345-abcd', 'ADVISORY PROSE', 'draft'].filter((needle) => leakyText.includes(needle)), leakyText], [['advisory', 'sender'], [], 'fence `advisory`: the answer names another advisory, and the relay seals only for the advisory the action names, by its ghsa_id; fence `sender`: the row names no sender gate the table knows, so no read is sealed, and the relay seals only for a sender gate the table names']);
-    t("⛔ the call, the landed row and the over-cap sentence print counts and the id's placeholder — never an id", [advisoryReadCall(REPO), advisoryReadLandedText({ plaintextBytes: 812, sealedChars: 1164, parts: 1 }), advisoryReadOverCapText({ plaintextBytes: 31000, sealedChars: 41415 })], [`GET /repos/${REPO}/security-advisories/{ghsa_id}`, "sealed 812 byte(s) of the answer to the seat's one-time key — 1164 character(s) in 1 notice part(s), which only that seat's process opens", "the sealed answer is 41415 character(s) (31000 byte(s) of the answer), over the 40000 the run's notices carry (10 of 4000) — nothing was emitted; ⛔ the text never leaves another way, put the reading to the maintainer"]);
+    t("⛔ the call, the landed row and the over-cap sentence: the id's placeholder, and ONE sentence each — no count of the answer, no page number, never an id", [advisoryReadCall(REPO), ADVISORY_READ_LANDED, ADVISORY_READ_OVER_CAP, /\d/.test(ADVISORY_READ_LANDED.replace(`${ADVISORY_READ_MAX_SEALED_CHARS}`, '').replace(`${ADVISORY_READ_MAX_PARTS}`, '')), typeof ADVISORY_READ_LANDED, typeof ADVISORY_READ_OVER_CAP], [`GET /repos/${REPO}/security-advisories/{ghsa_id}`, "sealed one page of the answer to the seat's one-time key — 40000 character(s) in 10 notice part(s), which only that seat's process opens", `the answer needs more than the 64 pages a read is cut into (${ADVISORY_READ_PAGE_CHUNK_BYTES} bytes of it a page) — nothing was emitted; ⛔ the text never leaves another way, put the reading to the maintainer`, false, 'string', 'string']);
+    // ── One page a stroke: the page, the one length class, the join ──
+    const answerOf = (n) => JSON.stringify({ ghsa_id: GHSA, description: `${PROSE} 漢字🎉 ${'é—x'.repeat(n)}` });
+    const sizes = [answerOf(1), answerOf(9_000), answerOf(30_000), answerOf(200_000)];
+    const pageSets = sizes.map((text) => {
+      const spans = advisoryReadPageSpans(text);
+      return spans.map((_, k) => advisoryReadPage(text, k + 1));
+    });
+    t('the page: exactly the listing\'s 29,939 bytes — one header of fixed width, then its span, then spaces — and the chunk is what is left of it', [ADVISORY_READ_PAGE_BYTES, ADVISORY_READ_PAGE_BYTES === ADVISORY_LIST_PADDED_BYTES, ADVISORY_READ_PAGE_HEADER_BYTES, ADVISORY_READ_PAGE_CHUNK_BYTES, ADVISORY_READ_MAX_PAGES], [29939, true, 157, 29782, 64]);
+    t('⭐ ONE sealed length class: every page of an answer of any size — 1, 2, 7 and 41 pages — and a page past the last are each exactly 29,939 bytes and seal to exactly 40,000 characters in ten parts', [pageSets.map((set) => set.length), [...pageSets.flat(), advisoryReadPage(sizes[0], 2)].every((page) => Buffer.byteLength(page, 'utf8') === ADVISORY_READ_PAGE_BYTES && advisoryReadParts(sealAdvisoryRead({ plaintext: page, publicKey: READER.spki, aad }))?.length === ADVISORY_READ_MAX_PARTS)], [[1, 2, 7, 41], true]);
+    const spanned = sizes.map((text) => advisoryReadPageSpans(text));
+    t('the spans: contiguous from 0 to the end, none over the chunk, and none splitting a character — so every page is UTF-8 on its own', [spanned.every((spans, i) => spans[0].offset === 0 && spans.every((x, k) => k === 0 || x.offset === spans[k - 1].offset + spans[k - 1].length) && spans.at(-1).offset + spans.at(-1).length === Buffer.byteLength(sizes[i], 'utf8') && spans.every((x) => x.length > 0 && x.length <= ADVISORY_READ_PAGE_CHUNK_BYTES)), spanned[2].some((x) => x.length < ADVISORY_READ_PAGE_CHUNK_BYTES - 0 && x !== spanned[2].at(-1))], [true, true]);
+    const rejoined = pageSets.map((set) => advisoryReadAssemble(set.map(advisoryReadPageOf)).plaintext);
+    t('⭐ the join: each answer\'s pages, read back and joined, are the answer BYTE FOR BYTE — the 41-page one, CJK and an emoji among it, included — and in any order', [rejoined.map((x, i) => x === sizes[i]), advisoryReadAssemble([...pageSets[2]].reverse().map(advisoryReadPageOf)).plaintext === sizes[2]], [[true, true, true, true], true]);
+    const past = advisoryReadPageOf(advisoryReadPage(sizes[1], 5));
+    t('a page past the last is the header and the pad alone — length 0 at the end of the answer — and lands like any other', [past?.page, past?.pages, past?.length, past?.offset === Buffer.byteLength(sizes[1], 'utf8'), past?.chunk.length], [5, 2, 0, true, 0]);
+    const p2 = pageSets[1].map(advisoryReadPageOf);
+    const other = advisoryReadPageOf(advisoryReadPage(answerOf(9_001), 2));
+    t('⛔ the join refuses what is not one answer: a page missing, a page twice, a page of another answer (the advisory changed between strokes), and an empty set', [advisoryReadAssemble([p2[0]]).why, advisoryReadAssemble([p2[0], p2[0]]).why, advisoryReadAssemble([p2[0], other]).why, advisoryReadAssemble([]).why], [ADVISORY_READ_PAGES_MISSING, ADVISORY_READ_PAGES_MISSING, ADVISORY_READ_PAGES_DISAGREE, ADVISORY_READ_PAGES_MISSING]);
+    const page1 = pageSets[1][0];
+    const forge = (text) => advisoryReadPageOf(text);
+    t('⛔ a page is one shape: a byte short, a byte long, a pad that is not spaces, a header out of shape, a page past the cap and a span past the answer are each no page', [forge(page1.slice(0, -1)), forge(`${page1} `), forge(`${page1.slice(0, -1)}x`), forge(page1.replace('fleet-write advisory_read page=', 'fleet-write advisory_read page:')), forge(page1.replace('page=001/002', 'page=065/065')), forge(page1.replace(/bytes=\d{9}/, 'bytes=000000001'))], [null, null, null, null, null, null]);
+    const opsHeader = readFileSync(new URL('./ops.mjs', import.meta.url), 'utf8');
+    const headerEnd = opsHeader.indexOf('\n */\n');
+    t("⛔ the ONE place the length class does not hold is stated in the row's header and pinned here: each page is its own run, so the run list counts an answer's pages — and the header names the measured caps it chose pages by, with their sources", ['⛔ The length class holds on every LINE, not on the run list', 'a reader\n * of the run list can count an answer\'s pages', '`_maxCountPerIssueType = 10`', '`docs/problem-matchers.md`: 50 annotations a job', 'the platform\'s largest advisory answer is UNVERIFIED'].map((needle) => { const at = opsHeader.indexOf(needle); return at > 0 && at < headerEnd; }), [true, true, true, true, true]);
+    const huge = JSON.stringify({ description: 'x'.repeat(ADVISORY_READ_MAX_PAGES * ADVISORY_READ_PAGE_CHUNK_BYTES) });
+    const edge = 'x'.repeat(ADVISORY_READ_MAX_PAGES * ADVISORY_READ_PAGE_CHUNK_BYTES);
+    t('⛔ the over-cap edge: an answer of exactly 64 full pages is read; one byte over, and every page of it is refused — no page is cut from an answer over the limit', [advisoryReadPageSpans(edge).length, advisoryReadPage(edge, ADVISORY_READ_MAX_PAGES) !== null, advisoryReadPage(`${edge}x`, 1), advisoryReadPage(huge, 1), advisoryReadPage(huge, ADVISORY_READ_MAX_PAGES), advisoryReadPage(sizes[0], 0), advisoryReadPage(sizes[0], ADVISORY_READ_MAX_PAGES + 1)], [64, true, null, null, null, null, null]);
     // Positive control for the key refusals: the public half of a real pair parses back to the same key.
     t('…positive control: the key a seat sends is the public half of its pair, byte for byte', createPublicKey({ key: Buffer.from(READER.spki, 'base64'), format: 'der', type: 'spki' }).export({ format: 'der', type: 'spki' }).toString('base64'), READER.spki);
   }

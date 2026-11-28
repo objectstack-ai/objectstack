@@ -44,6 +44,7 @@ import { describe, it, expect } from 'vitest';
 
 import { METADATA_FORM_REGISTRY } from './metadata-form-registry';
 import { ActionRefusalSchema, ActionTextSchema } from '../ui/action.zod';
+import { HookSchema } from '../data/hook.zod';
 
 type FormEntry = {
   field?: string;
@@ -337,5 +338,103 @@ describe('action.refusals and action.texts are key-only records beside the scrip
     expect(row.visibleWhen).toEqual(body.visibleWhen);
     expect(indexOf('texts')).toBeGreaterThan(indexOf('body'));
     expect(indexOf('texts'), 'beside the body, before the param dialog rows').toBeLessThan(indexOf('params'));
+  });
+});
+
+/**
+ * **hook.refusals and hook.texts are shown where `HookSchema` accepts them.**
+ *
+ * `HookSchema` refuses both keys unless the hook has code that can throw a code
+ * or ask for a text: a `js` body, or no body and a non-empty handler. The form
+ * used to offer both rows on every hook, so an author writing an `expression`
+ * hook was handed two sections that could only make the save fail. Each row
+ * now carries the schema's own test as its `visibleWhen`; this pin reads the
+ * two served predicates and holds them equal to the schema's verdict on each
+ * draft shape the form can produce.
+ *
+ * The predicate is read by {@link evalFormPredicate}, a reader of exactly the
+ * subset the predicate is written in (`||` over `&&` over `path ==|!= literal`,
+ * no grouping, the Studio form evaluator's precedence and its loose
+ * `null == undefined`). Any other shape throws, so a rewrite this reader does
+ * not know fails the pin instead of being read as some verdict.
+ */
+describe('hook.refusals and hook.texts are shown exactly where HookSchema accepts them', () => {
+  const SOURCE = "data.body.language == 'js' || data.body == null && data.handler != null && data.handler != ''";
+  const base = { name: 'credit_guard', object: 'order', events: ['beforeInsert'] };
+  const DRAFTS: Array<[string, Record<string, unknown>]> = [
+    ['an expression body', { body: { language: 'expression', source: 'record.amount > 0' } }],
+    ['a js body', { body: { language: 'js', source: 'return;' } }],
+    ['a handler and no body', { handler: 'creditGuard' }],
+    ['neither a body nor a handler', {}],
+    ['an empty handler and no body', { handler: '' }],
+  ];
+  const DECLARED = {
+    refusals: { CREDIT_LIMIT: { message: 'This order exceeds the customer credit limit.' } },
+    texts: { follow_up_subject: { message: 'Follow up' } },
+  } as const;
+
+  const sourceOf = (p: FormEntry['visibleWhen']) => (typeof p === 'string' ? p : p?.source);
+
+  function readPath(path: string, data: Record<string, unknown>): unknown {
+    const [root, ...segs] = path.split('.');
+    if (root !== 'data' || segs.length === 0) throw new Error(`unknown path shape: ${path}`);
+    let cur: unknown = data;
+    for (const seg of segs) {
+      if (cur == null) return undefined;
+      cur = (cur as Record<string, unknown>)[seg];
+    }
+    return cur;
+  }
+
+  function readLiteral(raw: string): unknown {
+    if (raw === 'null') return null;
+    const quoted = /^'([^']*)'$/.exec(raw);
+    if (quoted) return quoted[1];
+    throw new Error(`unknown literal shape: ${raw}`);
+  }
+
+  /** Read `source` against `{ data }`; throws on any shape outside the subset above. */
+  function evalFormPredicate(source: string, data: Record<string, unknown>): boolean {
+    if (/[()]/.test(source)) throw new Error(`grouping is outside the subset: ${source}`);
+    return source.split(' || ').some((conj) =>
+      conj.split(' && ').every((atom) => {
+        const m = /^(data(?:\.[A-Za-z_]+)+) (==|!=) (null|'[^']*')$/.exec(atom.trim());
+        if (!m) throw new Error(`unknown atom shape: ${atom}`);
+        const left = readPath(m[1]!, data);
+        const right = readLiteral(m[3]!);
+        const equal = left == null && right == null ? true : left === right;
+        return m[2] === '==' ? equal : !equal;
+      }),
+    );
+  }
+
+  const refusedAt = (key: 'refusals' | 'texts', draft: Record<string, unknown>) => {
+    const parsed = HookSchema.safeParse({ ...base, ...draft, [key]: DECLARED[key] });
+    return !parsed.success && parsed.error.issues.some((i) => i.path.length === 1 && i.path[0] === key);
+  };
+
+  it('CONTROLS: the reader refuses a shape it does not know, and the schema cut is real', () => {
+    expect(() => evalFormPredicate(`(${SOURCE})`, {}), 'dark control: a grouped rewrite is not read').toThrow(
+      /grouping/,
+    );
+    expect(() => evalFormPredicate("data.body.language in ['js']", {})).toThrow(/atom/);
+    const verdicts = DRAFTS.map(([, draft]) => refusedAt('refusals', draft));
+    expect(verdicts, 'the schema refuses the key on some drafts and accepts it on others').toContain(true);
+    expect(verdicts).toContain(false);
+  });
+
+  it.each(['refusals', 'texts'] as const)('%s carries the schema\'s own test as its visibleWhen', (key) => {
+    const [row, ...extra] = rowFor('hook', key);
+    expect(row, `\`${key}\` is declared by HookSchema; the hook form must offer it`).toBeDefined();
+    expect(extra, 'one row only').toEqual([]);
+    expect(row!.visibleWhen).toEqual({ dialect: 'cel', source: SOURCE });
+  });
+
+  it.each(
+    (['refusals', 'texts'] as const).flatMap((key) => DRAFTS.map(([what, draft]) => [key, what, draft] as const)),
+  )('%s is shown on %s exactly when HookSchema accepts it there', (key, _what, draft) => {
+    const [row] = rowFor('hook', key);
+    const shown = evalFormPredicate(sourceOf(row!.visibleWhen) ?? '', draft);
+    expect(shown).toBe(!refusedAt(key, draft));
   });
 });
