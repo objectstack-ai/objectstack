@@ -69,6 +69,7 @@ vi.mock('./metadata-admin/useMetadata', async (importOriginal) => ({
 import '@objectstack/lint';
 import { ObjectDataPage } from './ObjectDataPage';
 import { useRecordPageReturn } from './recordDrawerStack';
+import { RECORD_PREVIEW_DEFAULT_WIDTH, RECORD_PREVIEW_WIDTH_KEY } from './recordDrawerContext';
 import { isRecordPagePushed } from './recordPagePush';
 import { ExpressionProvider } from '../providers/ExpressionProvider';
 import { ChatDockControlProvider, type ChatDockControl } from '../layout/chatDockControl';
@@ -692,5 +693,40 @@ describe('objectstack#36577 — moving straight from one object\'s data page to 
     }
     expect(screen.queryByTestId('search-active-keyword')).toBeNull();
     expect(addressParams().has('uf__search')).toBe(false);
+  });
+});
+
+/**
+ * objectstack#36730 — the data page's side drawer opens at the `auto` default
+ * the `navigation.size` help text states, the side preview's 460, and keeps a
+ * dragged width under the preview's shared key, as the object list's drawer
+ * does (objectstack#36149). The page has no view, so nothing authors a size.
+ */
+describe('objectstack#36730 — the data page\'s side drawer opens at the side preview\'s width', () => {
+  const drawerWidth = () =>
+    (document.querySelector('[data-record-drawer-card]') as HTMLElement | null)?.style.getPropertyValue('--ov-w').trim();
+
+  async function openDrawer(text: string, id: string): Promise<HTMLElement> {
+    fireEvent.click(within(rowOf(text)).getByTestId('record-open-in-panel'));
+    await waitFor(() => expect(new URLSearchParams(search() ?? '').get('recordId')).toBe(id));
+    return screen.findByRole('dialog', undefined, { timeout: 5000 });
+  }
+
+  beforeEach(() => window.localStorage.clear());
+  afterEach(() => window.localStorage.clear());
+
+  it('with no width dragged, the drawer opens at 460, not at the overlay\'s own 42rem', async () => {
+    await mountDataPage();
+    await openDrawer('Acme', 'a1');
+    expect(drawerWidth()).toBe(RECORD_PREVIEW_DEFAULT_WIDTH);
+  });
+
+  it('a width dragged in the object list\'s preview is the width the data page\'s drawer opens at', async () => {
+    window.localStorage.setItem(`ov:${RECORD_PREVIEW_WIDTH_KEY}`, '640');
+    await mountDataPage();
+    const drawer = await openDrawer('Globex', 'a2');
+    expect(drawerWidth()).toBe('640px');
+    // The edge is draggable, as on the object list's drawer.
+    expect(within(drawer).getByRole('separator', { name: 'Resize drawer' })).toBeTruthy();
   });
 });

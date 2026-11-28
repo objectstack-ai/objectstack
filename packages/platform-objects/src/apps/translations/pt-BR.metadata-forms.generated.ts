@@ -1645,7 +1645,7 @@ export const ptBRMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       },
       "navigation.size": {
         label: "Tamanho",
-        helpText: "Faixa de tamanho da sobreposição para o detalhe no painel lateral: 'auto' (padrão — o renderizador deriva da quantidade de campos + viewport; a IA não grava nada) ou uma substituição aproximada sm/md/lg/xl/full. Prefira isto à `width` em pixels; o modo page o ignora."
+        helpText: "Faixa de largura do painel lateral do registro: 'auto' (padrão) mantém a largura padrão fixa do host, a mesma para todo objeto, qualquer que seja a quantidade de campos (o painel lateral de registros do console abre com 460px), ou uma substituição aproximada sm/md/lg/xl/full (um limite de 480/720/960/1200/1600px, sempre restrito ao viewport). Uma largura que o leitor arrasta prevalece sobre ambas. Prefira isto à `width` em pixels; não tem efeito onde o registro abre como página (no console, todo registro em um celular), nem em uma tela da largura de um celular, que o painel preenche."
       },
       "navigation.width": {
         label: "Largura",

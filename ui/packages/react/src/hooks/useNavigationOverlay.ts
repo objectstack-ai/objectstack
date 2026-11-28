@@ -151,9 +151,8 @@ export type NavigationConfig = SpecAuthoredInput<typeof NavigationConfigSchema>;
 
 /**
  * Pixel cap per overlay `size` bucket, clamped to the viewport at render —
- * mirrors `plugin-view/src/recordSurface.ts` (`OVERLAY_SIZE_PX`), which owns
- * the `size: 'auto'` field-count derivation this layer cannot perform (no
- * object schema here). Kept in lockstep by the spec-parity test.
+ * mirrors `plugin-view/src/recordSurface.ts` (`OVERLAY_SIZE_PX`). Kept in
+ * lockstep by the spec-parity test.
  *
  * Before #2942 this hook only read the deprecated `width`, so an authored
  * `size` bucket was silently ignored by every host except app-shell (which
@@ -170,9 +169,10 @@ const OVERLAY_SIZE_WIDTHS: Record<'sm' | 'md' | 'lg' | 'xl' | 'full', string> = 
 /**
  * Resolve the overlay width from a NavigationConfig: an explicit `width` wins
  * (app-shell pre-resolves `size` into it); otherwise a declared bucket maps
- * through {@link OVERLAY_SIZE_WIDTHS}. `'auto'`/absent stays `undefined` — the
- * host's default width — because deriving `auto` needs the object's field
- * count, which only schema-aware hosts have. Exported for the parity test.
+ * through {@link OVERLAY_SIZE_WIDTHS}. `'auto'`/absent stays `undefined`: the
+ * host's own default width, which is what `auto` means (the console's record
+ * hosts pass the side preview's fixed width as `width`, whatever the object's
+ * field count). Exported for the parity test.
  */
 export function resolveOverlayWidth(navigation: NavigationConfig | undefined): string | number | undefined {
   if (!navigation) return undefined;

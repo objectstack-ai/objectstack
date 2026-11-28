@@ -195,7 +195,8 @@ describe('全部类型 All types: the directory lists every type of the six grou
     );
     expect(await screen.findByTestId('metadata-list-create')).toBeInTheDocument();
     // The header's New and the empty list's own: the package holds none yet.
-    expect(screen.getAllByRole('button', { name: t('engine.list.create', 'en-US') }).length).toBeGreaterThan(0);
+    // objectstack#37918 — "New X" in the Studio area.
+    expect(screen.getAllByRole('button', { name: new RegExp(`^${t('engine.list.create', 'en-US')}\\b`) }).length).toBeGreaterThan(0);
   });
 
   it('CONTROL: a type outside the six groups and a hidden type are never listed', async () => {

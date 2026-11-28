@@ -213,6 +213,12 @@ describe('os package publish — a failed publish shows the server’s reason', 
     const printed = output.join('\n');
     expect(printed).toContain('HTTP 500');
     expect(printed).not.toContain('[object');
-    expect(printed).not.toContain('undefined');
+    // `undefined` is judged on what the command printed, not on a Node process
+    // warning (`(node:PID) …`) that lands on the same console. Run without a
+    // config root, oclif roots the config at `@oclif/core` itself and warns that
+    // its dev plugins are missing; from 5.1.12 that warning inspects its plugin
+    // options, `ignoreManifest: undefined` among them.
+    const commandOutput = output.filter((line) => !line.startsWith('(node:')).join('\n');
+    expect(commandOutput).not.toContain('undefined');
   });
 });

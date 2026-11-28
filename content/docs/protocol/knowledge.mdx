@@ -333,8 +333,9 @@ system-context read per source of only the records about to be answered
 `where` since it was indexed, or whose document hash computed now differs
 from the hit's `docHash`, is not answered, and the next record moves up (at
 most three rounds; a hit still unchecked after them is not answered). Its
-document is repaired in the background, through the event sync's path, once
-until its hash matches again — except in a source with
+document is repaired in the background — a record-sync message with reason
+`freshness` [through the queue](#through-the-queue), or the inline sync
+without one — once until its hash matches again — except in a source with
 `refresh.onRecordChange: false`, whose index an external indexer owns: the
 service writes nothing there, and the hit is only not answered. A hit whose
 adapter stores no hash is checked for membership only. Record granularity
@@ -992,21 +993,88 @@ when the source has no `where`).
   builds the document from the event's `after`, and a source with `where` is
   not synced, which the service logs once per source as a warning.
 
-A delete removes the document named by the event's required `recordId`. Syncs
-of one document run one after another in the process, so two events for the
-same row cannot interleave: each re-reads after the previous one finished, and
-the last leaves the index agreeing with the database. Because the sync is
-inline, a write's sync can wait behind an earlier in-flight sync of the same
-document (on a single-connection pool, up to the pool's acquire timeout); the
-index still ends consistent.
+A delete removes the row's document: through the queue, by the same re-read
+(no row comes back); inline, by the event's required `recordId`. Syncs of one
+document run one after another in the process, so two syncs of the same row
+cannot interleave: each re-reads after the previous one finished, and the last
+leaves the index agreeing with the database.
 
-**When the sync runs.** The engine publishes `data.record.created` and
-`data.record.updated` from inside the write, after its `after*` hooks — before
-any unit of work around the write commits (the write's own unit, opened when a
-metadata hook can abort it, or a caller's `engine.transaction(…)`). The
-in-process realtime service awaits each subscriber, so the re-read runs inside
-the same open transaction and sees the row the write just made. If that unit
-then rolls back, the index is wrong in one of two ways:
+### Through the queue
+
+Where the kernel composes a durable `queue` service — the platform's
+`QueueServicePlugin` over a data engine, whose database adapter keeps messages
+in `sys_job_queue` — and a data engine is bound, the sync runs through that
+queue (ADR-0161 K1). The standard runtime mounts `queue` on every preset but `minimal`.
+
+- **A save publishes; it does not sync.** For each source that indexes the
+  written object on record change, either trigger (the realtime subscription,
+  or the after-write hooks [below](#without-a-realtime-service-the-after-write-hooks))
+  publishes one message to the `knowledge-record-sync` queue: the source's
+  index key, the object, the record id, and why (`event`, or `freshness` for
+  the repair a search starts). Never a field value: `sys_job_queue` is an
+  object an administrator can list, and a record body there would be a copy of
+  the row outside its permissions. The save does not wait for the re-read, the
+  split, the embedding call or the store write.
+- **After the commit, and never for a rollback.** The message is published
+  through the engine's `runAfterOpenUnitsCommit`: once the unit of work open
+  at the write commits (the write's own unit, or a caller's
+  `engine.transaction(…)`), and not at all when it rolls back. So nothing is
+  processed before the write commits, and a write that rolls back leaves the
+  index as it was. With no unit open the message is published at once. A
+  publish that fails is logged at `error`; the document is stale until the
+  record's next save, a search that finds it stale, or the reconcile.
+- **The worker** subscribes in `kernel:ready`, resolves the source by its
+  index key when it processes the message, and re-reads the row as above: a
+  row comes back → its document is written; none → its document is deleted.
+- **Retries.** A failure a retry can change — the re-read, the split, the
+  embedding call, the store write — is thrown to the queue, which retries it
+  with backoff: eight attempts, 5 s doubling to a 2 min cap, so a provider
+  outage of six and a half minutes is ridden out (the plugin's
+  `recordSyncRetry` option). Then the message is a dead letter the queue lists
+  (`listFailed`), naming the source and the record in its metadata, and the
+  plugin says so once at `error`. The [reconcile](#reconcile-keeping-the-index-correct)
+  repairs what a dead letter names.
+- **Not retried**, because a retry cannot change them, and completed with no
+  write: a source no longer registered, or no longer indexing the object on
+  record change. A `whole` document over the embedder's budget is removed from
+  the index and reported at `error`, as on every path. A source whose adapter
+  is not mounted is retried like a failure, so a store that registers late is
+  met by a later attempt, and one that never does leaves a dead letter.
+- **A burst of saves.** Every save publishes its own message — one queue row
+  per source per save; completed rows are kept for `sys_job_queue`'s declared
+  retention (7 days). No message is keyed by its document: the queue
+  suppresses a keyed publish while a message with the key is pending **or
+  running**, and for a day after it completed, so a save made while a sync of
+  the record runs would be lost, and a completed sync would block the record's
+  later saves. Each message re-reads the row as it is when it is processed, so
+  the last one leaves the last committed version.
+- **A delete** leaves the index when its message is processed. Until then a
+  member's search (each hit re-read as the member) and a `granularity:
+  'record'` search (each hit checked against its record) do not answer it: the
+  record no longer exists. A system-identity search at chunk granularity
+  re-reads nothing, so it can answer the deleted record's chunks until the
+  message is processed.
+- **A restart** loses nothing published: messages wait in `sys_job_queue` and
+  are processed after it.
+
+### Without a durable queue
+
+With only the kernel's built-in fallback queue (synchronous, in-process, no
+durability, no retry; it labels itself `degraded`), a queue with no dead-letter
+surface (`listFailed` — the in-memory `MemoryQueueAdapter` has none), or no data
+engine bound, the sync runs inline and the plugin says so once at boot, at `warn`. A
+host that mounts the service by hand adds `QueueServicePlugin` over the
+ObjectQL engine to get the queued sync.
+
+**When the inline sync runs.** On the realtime trigger the engine publishes
+`data.record.created` and `data.record.updated` from inside the write, after
+its `after*` hooks — before any unit of work around the write commits (the
+write's own unit, opened when a metadata hook can abort it, or a caller's
+`engine.transaction(…)`). The in-process realtime service awaits each
+subscriber, so the save waits for the embedder, the re-read runs inside the
+same open transaction and sees the row the write just made, and a failed sync
+is logged and not retried. If that unit then rolls back, the index is wrong in
+one of two ways:
 
 - **The uncommitted row matched** — the document stays built from a row that
   never committed.
@@ -1016,16 +1084,13 @@ then rolls back, the index is wrong in one of two ways:
 The row's next event or a `reindexSource` repairs a row that still exists. A
 document built from an **insert** that rolled back has no row left to repair it
 from; it stays until a complete reindex purges it (below) — at the latest, the
-next [reconcile](#reconcile-keeping-the-index-correct).
+next [reconcile](#reconcile-keeping-the-index-correct). Inline, a write's sync
+can also wait behind an earlier in-flight sync of the same document (on a
+single-connection pool, up to the pool's acquire timeout); the index still ends
+consistent.
 
 `data.record.restored` is
 published after the restore's own unit has committed.
-
-- **MVP (Phase 1):** synchronous, inline with the originating mutation.
-  Fast for low-volume dev / demo. Indexing failures are logged but do
-  not block the originating write.
-- **Phase 2:** async via `service-queue` for batching, retries, and
-  back-pressure.
 
 <Callout type="warn">
   **A predicate write leaves the index stale until its reconcile.** A
@@ -1050,10 +1115,12 @@ A kernel that composes no `realtime` service publishes no `data.record.*`
 event (the ObjectQL plugin bridges that same service to the engine). There,
 `KnowledgeServicePlugin` registers the data engine's `afterInsert`,
 `afterUpdate` and `afterDelete` hooks on every object a source with
-`refresh.onRecordChange` not `false` indexes, and each hook calls the same
-`handleRecordUpsert` / `handleRecordDelete` the subscription calls — the
-re-read under `where`, the field rules and the per-document ordering above all
-apply. The plugin takes exactly one of the two triggers, chosen at
+`refresh.onRecordChange` not `false` indexes, and each hook does what the
+subscription does: [through the queue](#through-the-queue) it publishes the
+record's message on the same commit, and without one it calls the same
+`handleRecordUpsert` / `handleRecordDelete` — the re-read under `where`, the
+field rules and the per-document ordering above all apply. The points below
+describe that inline sync. The plugin takes exactly one of the two triggers, chosen at
 `kernel:ready`, so a write is never synced twice. A source registered or loaded
 later for a new object gets its hooks when it arrives.
 
@@ -1079,8 +1146,9 @@ later for a new object gets its hooks when it arrives.
   D2), so on such a kernel a restored row is not re-indexed by itself; a
   `reindexSource` brings it back.
 
-The sync is in-process: a sync that has not finished when the process stops is
-lost, and the next `reindexSource` repairs it.
+The inline sync is in-process: a sync that has not finished when the process
+stops is lost, and the next reconcile or `reindexSource` repairs it. Through the
+queue, a message survives the restart.
 
 ### Reindex: skip and purge
 
@@ -1149,8 +1217,9 @@ de-indexed too.
 - **Batching** is the sweep's: 500 rows per batch, 20 batches per sweep, the
   backlog draining across sweeps.
 - **Opt-out.** `refresh.onRecordChange: false` on a source — or
-  `enableEventSync: false` on the plugin — turns off inline index sync in both
-  directions, event subscription and reap-time de-index alike. An index an
+  `enableEventSync: false` on the plugin — turns off the record sync in both
+  directions, the record-change sync (queued or inline: nothing is published,
+  nothing subscribed) and reap-time de-index alike. An index an
   external indexer owns is never a reason to hold up another package's
   retention.
 
@@ -1228,9 +1297,8 @@ followed (§4.1, §4.2) are the adapters to run in production.
 | `knowledge-memory` | ✅ | In-process; deterministic fake embedder |
 | `knowledge-ragflow` | retired | Shipped in Phase 1; its requests did not match the RAGFlow HTTP API, and the package was removed. Use `knowledge-pgvector`, `knowledge-turso` or an adapter of your own |
 | `search_knowledge` AI tool | ✅ | Threads `ToolExecutionContext` |
-| Event-driven sync | ✅ (sync) | MVP synchronous; queue in Phase 2 |
+| Event-driven sync | ✅ | Through the queue service when one is durable (retries, dead letters); inline otherwise |
 | Console source-management UI | ⏳ Phase 2 |  |
-| Async indexer (queue) | ⏳ Phase 2 |  |
 | Audit + metrics | ⏳ Phase 2 |  |
 | `knowledge-llamaindex` | ⏳ Phase 2 |  |
 | `knowledge-dify` | ⏳ Phase 3 / community |  |

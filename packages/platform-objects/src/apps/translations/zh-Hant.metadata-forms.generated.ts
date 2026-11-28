@@ -1645,7 +1645,7 @@ export const zhHantMetadataForms: NonNullable<TranslationData['metadataForms']> 
       },
       "navigation.size": {
         label: "尺寸",
-        helpText: "抽屜詳細資料的浮層尺寸檔位：'auto'（預設——呈現器依欄位數與視口推導，AI 無需填寫），或粗粒度覆寫 sm/md/lg/xl/full。優先使用它而非像素 `width`；page 模式會忽略它。"
+        helpText: "記錄抽屜的寬度檔位：'auto'（預設）沿用宿主固定的預設寬度，每個物件都一樣，與欄位數無關（主控台的記錄側邊面板以 460px 開啟）；或粗粒度覆寫 sm/md/lg/xl/full（上限分別為 480/720/960/1200/1600px，始終受視口限制）。讀者拖動出的寬度優先於兩者。優先使用它而非像素 `width`；記錄以整頁開啟時它不起作用（主控台在手機上一律以整頁開啟記錄），在手機寬度的螢幕上也不起作用，那裡抽屜佔滿螢幕。"
       },
       "navigation.width": {
         label: "寬度",
