@@ -27,7 +27,7 @@
  * spec's `lowerRequiresFeature` / `lowerRequiresMembershipReach` order.
  *
  * API Keys is the page that offers NO create action — `sys_api_key` declares
- * no `list_toolbar` action and leaves `create` at the bucket default (off);
+ * no `list` action and leaves `create` at the bucket default (off);
  * keys are minted elsewhere. So it keeps the identity copy, and it is the
  * negative control for the first defect. The single-org Invitations case is
  * the other control: the same object, its Invite User hidden by its own gate,
@@ -92,6 +92,8 @@ vi.mock('./metadata-admin/useMetadata', async (importOriginal) => ({
 
 import { ObjectView } from './ObjectView';
 import { ExpressionProvider } from '../providers/ExpressionProvider';
+// Paid at collection, not inside a clocked case (check:test-source-alias).
+import '@objectstack/lint';
 
 // ── The served objects (abridged to the keys this page reads) ──────────────
 
@@ -115,7 +117,7 @@ const SYS_INVITATION = {
       name: 'invite_user',
       label: 'Invite User',
       variant: 'primary',
-      locations: ['list_toolbar'],
+      locations: ['list'],
       type: 'api',
       target: '/api/v1/auth/organization/invite-member',
       visible: { dialect: 'cel', source: INVITE_MEMBER_GATE },
@@ -124,7 +126,7 @@ const SYS_INVITATION = {
       name: 'cancel_invitation',
       label: 'Cancel Invitation',
       mode: 'delete',
-      locations: ['list_item'],
+      locations: ['record_row'],
       type: 'api',
       target: '/api/v1/auth/organization/cancel-invitation',
     },
@@ -156,7 +158,7 @@ const SYS_API_KEY = {
       name: 'revoke_api_key',
       label: 'Revoke API Key',
       mode: 'custom',
-      locations: ['list_item'],
+      locations: ['record_row'],
       type: 'api',
       method: 'PATCH',
       target: '/api/v1/data/sys_api_key/{id}',
@@ -182,7 +184,7 @@ const SYS_OAUTH_APPLICATION = {
       name: 'create_oauth_application',
       label: 'Register OAuth Application',
       mode: 'create',
-      locations: ['list_toolbar'],
+      locations: ['list'],
       type: 'api',
       target: '/api/v1/auth/oauth2/create-client',
       // `requiresFeature: 'oidcProvider'`, lowered (a default-on flag).

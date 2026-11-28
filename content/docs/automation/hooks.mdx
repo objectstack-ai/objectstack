@@ -345,9 +345,13 @@ the rollback. Keep the objects a `before*` hook
 writes on the default datasource; on MongoDB, run it as a replica set, which
 any unit needs. On a standalone MongoDB server every write the unit carries is
 refused, the hook's own `ctx.api` write first, even when nothing in the write
-fails: the server answers "This MongoDB deployment does not support retryable
-writes", and adding `retryWrites=false` to the connection string does not
-change that answer. Writes to an object that opens no unit are unaffected.
+fails, with `NOT_IMPLEMENTED` (501) "This MongoDB server is a standalone
+mongod, and MongoDB runs transactions only on a replica set member or through
+mongos…", and the driver says so once when it connects. A single-node replica
+set is enough. Adding `retryWrites=false` to the connection string, which the
+MongoDB client's own message suggests, does not help: what is missing is
+transactions, not retryable writes. Writes to an object that opens no unit are
+unaffected.
 
 On PostgreSQL and on a MongoDB replica set, a statement that fails at the
 database aborts the whole unit, and the unit takes no savepoint around a

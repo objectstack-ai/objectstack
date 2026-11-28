@@ -55,6 +55,8 @@ import {
   assertSingleTenantPosture,
   assertObjectsNotTenantScoped,
 } from './mongodb-tenancy-guard.js';
+import { isStandaloneHello, refusalForUnitFault, standaloneStoreWarning } from './mongodb-standalone-unit.js';
+import { createLogger, type Logger } from '@objectstack/core';
 
 const DEFAULT_ID_LENGTH = 16;
 
@@ -251,6 +253,9 @@ export class MongoDBDriver implements IDataDriver {
    */
   private valueShapes = new Map<string, Map<string, ValueShapeFieldDef>>();
 
+  /** Where {@link connect} reports a store that carries no transactions. */
+  private logger: Logger = createLogger({ level: 'info', format: 'pretty' });
+
   constructor(config: MongoDBDriverConfig) {
     // Refuse to even EXIST in a multi-tenant deployment (#3724). The check is
     // repeated in `connect()`; construction just fails earliest, before a host
@@ -285,6 +290,42 @@ export class MongoDBDriver implements IDataDriver {
     await this.client.connect();
     const dbName = this.config.database || this.extractDatabaseName(this.config.url);
     this.db = this.client.db(dbName);
+    await this.reportStandaloneStore(dbName);
+  }
+
+  /**
+   * Say once, at boot, that this store carries no transactions, when the
+   * server is a standalone `mongod` (`mongodb-standalone-unit.ts` says what
+   * that refuses and why the refusal is not moved to `beginTransaction`).
+   * Probing costs one `hello`; a probe that fails says nothing about the
+   * topology, so it reports nothing and leaves the boot to the commands that
+   * follow, which reach the same server.
+   */
+  private async reportStandaloneStore(database: string): Promise<void> {
+    let hello: unknown;
+    try {
+      hello = await this.db.command({ hello: 1 });
+    } catch (error) {
+      this.logger.debug('MongoDB topology probe (hello) failed; transaction support not reported', {
+        database,
+        error: error instanceof Error ? error.message : String(error),
+      });
+      return;
+    }
+    if (isStandaloneHello(hello)) this.logger.warn(standaloneStoreWarning(database), { database });
+  }
+
+  /**
+   * The `catch` for a command sent under `session`: a standalone server's
+   * refusal of the unit becomes {@link refusalForUnitFault}'s, every other
+   * error passes through unchanged. Without a session nothing is mapped —
+   * the command ran in no unit, so that refusal would name a cause it does
+   * not have.
+   */
+  private unitFault(session: ClientSession | undefined): (error: unknown) => never {
+    return (error: unknown) => {
+      throw session ? refusalForUnitFault(error) : error;
+    };
   }
 
   async disconnect(): Promise<void> {
@@ -312,7 +353,7 @@ export class MongoDBDriver implements IDataDriver {
   async execute(command: unknown, _parameters?: unknown[], options?: DriverOptions): Promise<unknown> {
     const session = this.getSession(options);
     if (typeof command === 'object' && command !== null) {
-      return await this.db.command(command as Document, { session });
+      return await this.db.command(command as Document, { session }).catch(this.unitFault(session));
     }
     return command;
   }
@@ -411,7 +452,7 @@ export class MongoDBDriver implements IDataDriver {
     const findOptions = this.buildFindOptions(query, session);
 
     const cursor = collection.find(filter, findOptions);
-    const results = await cursor.toArray();
+    const results = await cursor.toArray().catch(this.unitFault(session));
     return results as Record<string, unknown>[];
   }
 
@@ -435,7 +476,7 @@ export class MongoDBDriver implements IDataDriver {
     const result = await collection.findOne(
       filter,
       this.buildFindOptions(query, session, { singleRowLookup: true }),
-    );
+    ).catch(this.unitFault(session));
 
     return result as Record<string, unknown> | null;
   }
@@ -464,7 +505,7 @@ export class MongoDBDriver implements IDataDriver {
     if (toInsert.created_at === undefined) toInsert.created_at = now;
     if (toInsert.updated_at === undefined) toInsert.updated_at = now;
 
-    await collection.insertOne(toInsert as Document, { session });
+    await collection.insertOne(toInsert as Document, { session }).catch(this.unitFault(session));
 
     // Return without _id
     const { _id: insertedId, ...result } = toInsert as any;
@@ -510,12 +551,12 @@ export class MongoDBDriver implements IDataDriver {
       { id: String(id) },
       { $set: updateData },
       { session },
-    );
+    ).catch(this.unitFault(session));
 
     const updated = await collection.findOne(
       { id: String(id) },
       { session, projection: { _id: 0 } },
-    );
+    ).catch(this.unitFault(session));
 
     return (updated as Record<string, unknown> | null) ?? null;
   }
@@ -550,12 +591,12 @@ export class MongoDBDriver implements IDataDriver {
         $setOnInsert: { created_at: now },
       },
       { upsert: true, session },
-    );
+    ).catch(this.unitFault(session));
 
     const result = await collection.findOne(
       { id: toUpsert.id },
       { session, projection: { _id: 0 } },
-    );
+    ).catch(this.unitFault(session));
 
     return (result as Record<string, unknown>) || withoutUndefinedOwnKeys(toUpsert);
   }
@@ -564,7 +605,7 @@ export class MongoDBDriver implements IDataDriver {
     const collection = this.getCollection(object);
     const session = this.getSession(options);
 
-    const result = await collection.deleteOne({ id: String(id) }, { session });
+    const result = await collection.deleteOne({ id: String(id) }, { session }).catch(this.unitFault(session));
     return result.deletedCount > 0;
   }
 
@@ -573,7 +614,7 @@ export class MongoDBDriver implements IDataDriver {
     const session = this.getSession(options);
 
     const filter = query?.where ? translateFilter(query.where, this.temporalKindFor(object), this.valueShapeFor(object)) : {};
-    return await collection.countDocuments(filter, { session });
+    return await collection.countDocuments(filter, { session }).catch(this.unitFault(session));
   }
 
   // ===========================================================================
@@ -594,7 +635,7 @@ export class MongoDBDriver implements IDataDriver {
       return doc;
     });
 
-    await collection.insertMany(docs as Document[], { session });
+    await collection.insertMany(docs as Document[], { session }).catch(this.unitFault(session));
 
     // Return without _id
     return docs.map(({ _id, ...rest }) => rest as Record<string, unknown>);
@@ -617,14 +658,14 @@ export class MongoDBDriver implements IDataDriver {
       };
     });
 
-    await collection.bulkWrite(bulkOps, { session });
+    await collection.bulkWrite(bulkOps, { session }).catch(this.unitFault(session));
 
     // Fetch updated docs
     const ids = updates.map((u) => String(u.id));
     const results = await collection.find(
       { id: { $in: ids } },
       { session, projection: { _id: 0 } },
-    ).toArray();
+    ).toArray().catch(this.unitFault(session));
 
     return results as Record<string, unknown>[];
   }
@@ -636,7 +677,7 @@ export class MongoDBDriver implements IDataDriver {
     await collection.deleteMany(
       { id: { $in: ids.map(String) } },
       { session },
-    );
+    ).catch(this.unitFault(session));
   }
 
   async updateMany(object: string, query: DriverQuery, data: Record<string, unknown>, options?: DriverOptions): Promise<number> {
@@ -652,7 +693,7 @@ export class MongoDBDriver implements IDataDriver {
       filter,
       { $set: updateData },
       { session },
-    );
+    ).catch(this.unitFault(session));
 
     return result.modifiedCount;
   }
@@ -662,7 +703,7 @@ export class MongoDBDriver implements IDataDriver {
     const session = this.getSession(options);
 
     const filter = translateFilter(query.where, this.temporalKindFor(object), this.valueShapeFor(object));
-    const result = await collection.deleteMany(filter, { session });
+    const result = await collection.deleteMany(filter, { session }).catch(this.unitFault(session));
     return result.deletedCount;
   }
 
@@ -706,7 +747,7 @@ export class MongoDBDriver implements IDataDriver {
       valueShape: this.valueShapeFor(object),
     });
 
-    const results = await collection.aggregate(pipeline, { session }).toArray();
+    const results = await collection.aggregate(pipeline, { session }).toArray().catch(this.unitFault(session));
     return postProcessAggregation(results, aggregations) as Record<string, unknown>[];
   }
 

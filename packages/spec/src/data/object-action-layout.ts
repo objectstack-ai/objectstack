@@ -14,10 +14,10 @@ import { strictObject } from '../shared/strict-object';
  * one scope:
  *
  * - `list`: the actions that act on no record, drawn on the object's list
- *   page toolbar (placed at `list_toolbar`), with the list page's built-ins
+ *   page toolbar (placed at `list`), with the list page's built-ins
  *   `$import` and `$export`.
  * - `record`: the actions that act on one record, drawn in the record page's
- *   header (placed at `record_header` or `record_more`). The same arm orders
+ *   header (placed at `record` or `record_page`). The same arm orders
  *   every surface that draws that header: the record page, the side preview
  *   and a phone's bottom action bar. It also orders the actions a grid row
  *   already offers, adding none: the row's ⋮ menu, its right-click menu and,
@@ -200,14 +200,14 @@ export const OBJECT_ACTION_LAYOUT_SCHEMA = strictObject(
     list: layoutArm('list')
       .optional()
       .describe(
-        "The list scope's arrangement: actions of the object placed at `list_toolbar`, as drawn on the list page " +
+        "The list scope's arrangement: actions of the object placed at `list`, as drawn on the list page " +
           'toolbar, and `$import` / `$export` as pinned buttons (not pinned, they stay in the page\'s own Import / ' +
           'Export menu). Omit to draw it as before.',
       ),
     record: layoutArm('record')
       .optional()
       .describe(
-        "The record scope's arrangement: actions of the object placed at `record_header` or `record_more`, as " +
+        "The record scope's arrangement: actions of the object placed at `record` or `record_page`, as " +
           "drawn in the record header (record page, side preview, a phone's bottom bar). The same order leads the " +
           "actions a grid row already offers, adding none: the row's ⋮ menu, its right-click menu and, on a list " +
           "page, the selection bar's actions for one selected record (`pinned` names first, then `more` names, then " +

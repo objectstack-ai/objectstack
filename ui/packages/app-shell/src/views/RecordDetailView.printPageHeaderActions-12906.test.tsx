@@ -11,8 +11,8 @@
  * header actions in the print page's screen-only chrome, beside Print.
  *
  * A page that declares `print` may hold only the printable component types,
- * and `page:header` (the one block that draws a record's `record_header` /
- * `record_more` actions and the system Edit / Share / Delete) is not one of
+ * and `page:header` (the one block that draws a record's `record_page` /
+ * folded (`component: 'action:menu'`) actions and the system Edit / Share / Delete) is not one of
  * them. So the record view draws the same row, through `PageHeaderActions`
  * (the resolver `page:header` itself draws with), in the chrome row that holds
  * the Print button, outside the print page's root, where the print stylesheet
@@ -105,7 +105,7 @@ const OBJECTS = [
         type: 'api',
         method: 'POST',
         target: SUBMIT_TARGET,
-        locations: ['record_header'],
+        locations: ['record_page'],
       },
     ],
   },
@@ -224,7 +224,7 @@ afterEach(() => {
 });
 
 describe('RecordDetailView — a print page draws the record’s header actions in its screen-only chrome beside Print (objectui#12906)', () => {
-  it('(a) the declared record_header action and Edit / Share / Delete are drawn in the chrome beside Print', async () => {
+  it('(a) the declared record_page action and Edit / Share / Delete are drawn in the chrome beside Print', async () => {
     const { onEdit } = await mountRecordPage([PRINT_PAGE]);
     const chrome = document.querySelector('[data-record-print-chrome]') as HTMLElement;
     expect(chrome).not.toBeNull();

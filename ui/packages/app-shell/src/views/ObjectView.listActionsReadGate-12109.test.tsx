@@ -14,7 +14,7 @@
  * no read on `crm_opportunity` was shown "Update Stage" over the opportunity
  * list's "You don't have access". That entry is not a navigation item: it is
  * HotCRM's `MassUpdateStageAction` (`objectName: 'crm_opportunity'`,
- * `locations: ['list_toolbar']`), drawn by THIS page's schema-driven toolbar.
+ * `locations: ['list']`), drawn by THIS page's schema-driven toolbar.
  * The fixture carries the keys of that declaration this toolbar reads.
  *
  * The verdict is the REAL `MePermissionsProvider`'s, holding the caller's
@@ -100,7 +100,7 @@ const UPDATE_STAGE = {
   label: 'Update Stage',
   objectName: OBJECT_NAME,
   type: 'script',
-  locations: ['list_toolbar'],
+  locations: ['list'],
 };
 
 const OBJECTS = [

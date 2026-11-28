@@ -15,14 +15,14 @@
  * every embedded host (the right-side drawer a list opens, the split pane,
  * an interface page's preview) the record draws the platform's standard page,
  * built from the object's own metadata: its field groups and order, field
- * permissions and visibility, its `record_header` / `record_more` actions,
+ * permissions and visibility, its `record` / `record_page` actions,
  * one tab per child table, the stage and the approval state. "Open full
  * page" from the drawer lands on the full page, so on the authored page.
  *
  * What does NOT apply off the full page is the layout and whatever lives only
  * on it: page-only blocks and related lists, page-declared tabs and sections,
  * and `record_section` actions, which the standard page does not draw (an
- * author who wants an action there too adds `record_more`).
+ * author who wants an action there too adds `record_page`).
  *
  * There is no switch an author can set to keep a page on the phone or in the
  * drawer. Two exceptions are the host's, named here and nowhere else:

@@ -1,6 +1,6 @@
 {
   "name": "@objectstack/example-starter",
-  "version": "0.1.1-next.1",
+  "version": "0.1.1-next.2",
   "description": "Starter app: companies and their contacts, with the platform's tasks and notes in the menu",
   "license": "Apache-2.0",
   "private": true,

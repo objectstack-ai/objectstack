@@ -36,7 +36,7 @@
  *
  *   - `app-shell/src/views/ObjectView.tsx:1968` DERIVES the grid's
  *     `rowActionDefs` from `objectDef.actions` filtered by
- *     `locations: ['list_item']`, while passing `bulkActionDefs` straight
+ *     `locations: ['record_row']`, while passing `bulkActionDefs` straight
  *     through from the view author twenty lines below. Asymmetric by
  *     construction — one is computed, the other authored.
  *   - The spec's `ObjectGridPropsSchema` is a `strictObject` that accepts
@@ -46,7 +46,7 @@
  *     `rowActionDefs` — which is why the read is a cast at all.
  *
  * So the authored way to put an action on a row stays what it already was: the
- * object's own action with `locations: ['list_item']`, plus the declared legacy
+ * object's own action with `locations: ['record_row']`, plus the declared legacy
  * `rowActions` name list. `bulkActionDefs` keeps its job here as the DECLARED
  * CONTROL below — the one key of the pair that IS authoring surface, which is
  * what makes every "not published" assertion mean something.
@@ -178,7 +178,7 @@ const NON_AUTHOR_KEYS = [
     // key into the manifest as `bulkActionDefs`'s symmetric partner.
     ruled: '2026-08-19 (reversing 2026-08-18)',
     producer:
-      "app-shell ObjectView: the list schema's `rowActionDefs` — DERIVED from objectDef.actions filtered by locations:['list_item'], "
+      "app-shell ObjectView: the list schema's `rowActionDefs` — DERIVED from objectDef.actions filtered by locations:['record_row'], "
       + 'whereas bulkActionDefs beside it is passed through from the author',
     sample: [{ name: 'approve', label: 'Approve' }],
   },

@@ -136,7 +136,7 @@ describe('sys_approval_request detail page — the page body', () => {
     // whole, and the rail of progress, attachments and activity, the activity
     // last (maintainer 2026-11-17). The header reads the object's placed
     // header actions live: a bare `page:header` drew none, so an action
-    // another package places on the object at `record_header` was dropped
+    // another package places on the object at `record_page` was dropped
     // (#29951).
     expect(COMPONENTS.map((c) => c.type)).toEqual(['page:header', 'record:highlights', 'record:approval_decision']);
     expect(DECISION_AT).toBe(COMPONENTS.length - 1);

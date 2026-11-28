@@ -38,7 +38,7 @@ const object = (actions: Action[]) => ({
   actions,
 });
 
-const base: Action = { name: 'invoice_send', label: 'Send', objectName: 'invoice', locations: ['record_more'] };
+const base: Action = { name: 'invoice_send', label: 'Send', objectName: 'invoice', locations: ['record_page'], component: 'action:menu' };
 const DESCRIPTION = 'Send the invoice to its customer once it has been approved by finance.';
 
 describe('actionHeldInput — an action waiting for an input is held (objectstack#26736)', () => {

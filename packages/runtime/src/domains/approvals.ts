@@ -68,7 +68,7 @@ import { INTERNAL_ERROR_MESSAGE } from '@objectstack/types';
 import type { IApprovalService } from '@objectstack/spec/contracts';
 import type { HttpProtocolContext, HttpDispatcherResult } from '../http-dispatcher.js';
 import type { DomainHandlerDeps, DomainRoute } from '../domain-handler-registry.js';
-import { catalogNotImplemented } from './own-door-bridge.js';
+import { catalogNotImplemented, readDoorSlot } from './own-door-bridge.js';
 
 /**
  * The one path this domain claims — exactly, with no sub-paths: the action
@@ -108,7 +108,8 @@ export async function handleApprovalsActRequest(
     method: string,
     context: HttpProtocolContext,
 ): Promise<HttpDispatcherResult> {
-    const service = await deps.resolveService(context, APPROVALS_SLOT, context.environmentId) as
+    // The request's own kernel serves the door, and only it (`readDoorSlot`).
+    const service = await readDoorSlot(deps, context, APPROVALS_SLOT) as
         Pick<IApprovalService, 'handleActionPage'> | undefined;
     // [#37662] The `501` is the operation-message catalog's, in the request's
     // top `Accept-Language` tag, as the own-door bridge answers its own.

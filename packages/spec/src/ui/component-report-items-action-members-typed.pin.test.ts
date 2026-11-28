@@ -178,8 +178,8 @@ describe('§1 each member accepts every shape a measured writer authors', () => 
     // objectui `components/src/__tests__/action-group.test.tsx:33`, `action-bodyShape-forward.test.tsx:120`.
     ['members placed by location', 'action:group', {
       actions: [
-        { name: 'here', label: 'Here', type: 'script', locations: ['list_toolbar'] },
-        { name: 'elsewhere', label: 'Elsewhere', type: 'script', locations: ['record_header'] },
+        { name: 'here', label: 'Here', type: 'script', locations: ['list'] },
+        { name: 'elsewhere', label: 'Elsewhere', type: 'script', locations: ['record_page'] },
       ],
     }],
     ['an api member with a body shape', 'action:group', {
@@ -220,7 +220,7 @@ describe('§1 each member accepts every shape a measured writer authors', () => 
         confirmText: { dialect: 'template', source: 'Close it?' },
         successMessage: { dialect: 'template', source: 'Closed' },
         errorMessage: { dialect: 'template', source: 'Could not close' },
-        refreshAfter: true, locations: ['record_header'], objectName: 'case',
+        refreshAfter: true, locations: ['record_page'], objectName: 'case',
       }],
     }],
     // #30017: an array `params` beside `confirmText` is refused (two dialogs for

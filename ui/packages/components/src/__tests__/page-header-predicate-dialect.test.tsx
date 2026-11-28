@@ -87,7 +87,7 @@ function renderHeader(action: Record<string, unknown>, record: any = RECORD) {
             schema={{
               type: 'page:header',
               title: 'Specimen',
-              actions: [{ locations: ['record_header'], label: 'Zoo Action', type: 'api', ...action }],
+              actions: [{ locations: ['record_page'], label: 'Zoo Action', type: 'api', ...action }],
             }}
           />
         </RecordContextProvider>
@@ -387,7 +387,7 @@ describe('page:header — a record still loading is its own state, not an empty 
               schema={{
                 type: 'page:header',
                 title: 'Specimen',
-                actions: [{ locations: ['record_header'], label: 'Zoo Action', type: 'api', ...action }],
+                actions: [{ locations: ['record_page'], label: 'Zoo Action', type: 'api', ...action }],
               }}
             />
           </RecordContextProvider>

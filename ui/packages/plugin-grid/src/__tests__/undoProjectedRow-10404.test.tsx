@@ -86,7 +86,7 @@ const CLOSE_TASK = {
   type: 'script',
   operation: 'update',
   undoable: true,
-  locations: ['list_item'],
+  locations: ['record_row'],
   patch: { status: 'closed' },
 };
 
