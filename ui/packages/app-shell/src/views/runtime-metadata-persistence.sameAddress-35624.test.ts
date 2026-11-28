@@ -72,7 +72,8 @@ describe('the edit, read, discard and publish of a view address its holder by na
     const ctx = {
       metadataClient,
       objectName: 'crm_account',
-      app: { packageId: 'com.example.crm', onSavedOutsideApp: vi.fn() },
+      // objectstack#38149: none of the four creates, so none asks for a package.
+      app: { packageId: 'com.example.crm', askPackage: vi.fn(async () => null) },
     };
 
     await persistRuntimeMetadata('view', 'crm_account.verified_domestic', { label: 'Edited' }, ctx);
@@ -89,6 +90,6 @@ describe('the edit, read, discard and publish of a view address its holder by na
     expect(requests.map((r) => r.url.searchParams.has('package'))).toEqual([false, false, false, false]);
     expect(draft).toMatchObject({ label: 'Verified domestic' });
     expect(globalThis.fetch).not.toHaveBeenCalled();
-    expect(ctx.app.onSavedOutsideApp).not.toHaveBeenCalled();
+    expect(ctx.app.askPackage).not.toHaveBeenCalled();
   });
 });
