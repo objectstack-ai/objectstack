@@ -1018,6 +1018,11 @@ pnpm --filter @objectstack/scenarios skill-evals --self-test    # the runner's o
 - **Login**: the scenario runner's guard, imported from `src/runner/driver.ts`. A round refuses to start while
   `ANTHROPIC_API_KEY` or `ANTHROPIC_AUTH_TOKEN` is set, or when `claude auth status` reports no login or an API-key
   login. Every turn is spawned without those two variables. Never an API-billed key.
+- **Isolated from project memory**: a round run inside a project container is isolated from that project's memory.
+  The container sets `CLAUDE_COWORK_MEMORY_PATH_OVERRIDE` and `CLAUDE_MEMORY_STORES` so its own sessions read the
+  project's memory store, and a turn that inherited them would answer from those notes in both arms, so the no-skill
+  arm could score as if it had the skill. Every turn is spawned without them, beside the billing variables and
+  `CLAUDE_CODE_EFFORT_LEVEL` (`CLAUDE_MEMORY_ENV` in `src/runner/driver.ts`).
 - **The arms**: each turn is one `claude -p` in a fresh temporary directory. The prompt goes on stdin. The two arms
   differ only in the bundle. The with-skill arm copies it into `.claude/skills/BUNDLE/` without its `evals/`, so the
   turn cannot read the assertions it is graded on. The no-skill arm's directory is empty. Both arms take the same

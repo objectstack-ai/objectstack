@@ -228,6 +228,16 @@ export class ApiBillingRefusedError extends Error {
  */
 export const CLAUDE_EFFORT_ENV = 'CLAUDE_CODE_EFFORT_LEVEL';
 
+/**
+ * The variables that point the `claude` CLI at the host's memory: a project
+ * container sets them so its own sessions read and write the project's memory
+ * store, and a child spawned with them reads that store too. A skill-eval turn
+ * that inherits them answers from the host's notes in both arms, so the
+ * no-skill arm can score as if it had the skill. Every skill-eval turn is
+ * spawned without them (`turnEnv` in `src/skill-evals/run.ts`).
+ */
+export const CLAUDE_MEMORY_ENV = ['CLAUDE_COWORK_MEMORY_PATH_OVERRIDE', 'CLAUDE_MEMORY_STORES'] as const;
+
 /** The child environment: the caller's, with every API-billing variable removed. */
 export function subscriptionOnlyEnv(env: NodeJS.ProcessEnv = process.env): NodeJS.ProcessEnv {
   const out = { ...env };
