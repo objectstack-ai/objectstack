@@ -147,8 +147,8 @@ throws and checks are a hook's (objectstack-data → Lifecycle Hooks → Declare
 sentence is answered as `userMessage`, translated at
 `objects.<object>._actions.<action>.refusals.<CODE>.message` (objectstack-i18n); the console's
 failure toast shows it unless the action sets `errorMessage`. For several reasons throw
-`reasons: [{ reason, params? }, …]`, not `reason`: `userMessage` is one line per reason, closed
-by the code's `message` (rules there).
+`reasons: [{ reason, params? }, …]`, not `reason`: `userMessage` is one line per reason, then
+the code's `message` (Declared refusals).
 
 ### Writing in the organization's language (`texts`)
 
