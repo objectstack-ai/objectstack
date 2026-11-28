@@ -23,7 +23,8 @@
 
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { SqlDriver } from './index.js';
-import { SQLITE_MAX_INSERT_ROWS, SQLITE_MAX_INSERT_VARIABLES, sqliteInsertStatements } from './sql-driver-bulk-operations.js';
+import knexFactory from 'knex';
+import { SQLITE_MAX_INSERT_ROWS, SQLITE_MAX_INSERT_VARIABLES, compilesSqliteInsert, sqliteInsertStatements } from './sql-driver-bulk-operations.js';
 
 const SEQUENCES_TABLE = '_objectstack_sequences';
 
@@ -209,5 +210,26 @@ describe('[#38236] sqliteInsertStatements', () => {
     const rows = rowsOf(469, 69);
     (rows[468] as any).c69 = 1;
     expect(sqliteInsertStatements(rows).length).toBeGreaterThan(1);
+  });
+});
+
+describe('[#38236] compilesSqliteInsert: only knex\'s SQLite compiler is split', () => {
+  it('answers true for the SQLite family and false for every other dialect this driver speaks', async () => {
+    const answers: Record<string, boolean> = {};
+    for (const client of ['better-sqlite3', 'pg', 'mysql2', 'mssql', 'oracledb']) {
+      // No connection is opened: knex resolves the dialect when the instance is built.
+      const k = knexFactory({ client, connection: client === 'better-sqlite3' ? { filename: ':memory:' } : {}, useNullAsDefault: true });
+      answers[client] = compilesSqliteInsert(k);
+      await k.destroy();
+    }
+    expect(answers).toEqual({ 'better-sqlite3': true, pg: false, mysql2: false, mssql: false, oracledb: false });
+  });
+
+  it('answers true for a client class that extends knex\'s SQLite client, the shape the sql.js driver passes', async () => {
+    const Base = (knexFactory({ client: 'better-sqlite3', connection: { filename: ':memory:' }, useNullAsDefault: true }) as any).client.constructor;
+    class Client_Custom extends Base {}
+    const k = knexFactory({ client: Client_Custom as any, connection: { filename: ':memory:' }, useNullAsDefault: true });
+    expect(compilesSqliteInsert(k)).toBe(true);
+    await k.destroy();
   });
 });

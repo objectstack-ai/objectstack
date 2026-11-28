@@ -61,7 +61,6 @@ export interface BulkOperationsHost {
   readonly insertReturnsStoredRows: SqlDriver['insertReturnsStoredRows'];
   readonly isMssql: SqlDriver['isMssql'];
   readonly isOracle: SqlDriver['isOracle'];
-  readonly isSqlite: SqlDriver['isSqlite'];
   keepSuppliedUpdatedAt: SqlDriver['keepSuppliedUpdatedAt'];
   readonly knex: SqlDriver['knex'];
   oracleUuidBinding: SqlDriver['oracleUuidBinding'];
@@ -129,10 +128,26 @@ export function sqliteInsertStatements<T>(rows: T[]): T[][] {
   return statements;
 }
 
+/**
+ * [#38236] Whether `knex` compiles an INSERT with its SQLite compiler: the
+ * `insert … select … union all select …` form both bounds above apply to.
+ *
+ * Asked of knex's client rather than of the driver's `isSqlite`, because the
+ * compiler is what emits the bounded form: every client of the family reports
+ * the `sqlite3` dialect (`better-sqlite3` does, and the sql.js client of
+ * `driver-sqlite-wasm` extends knex's SQLite client without renaming it), and
+ * no other dialect does (`postgresql`, `mysql`, `mssql`, `oracle`). It also
+ * keeps the question inside this module: `sql-driver.ts` is a facade held to a
+ * line ceiling, and a host member would be a line there.
+ */
+export function compilesSqliteInsert(knex: Knex): boolean {
+  return (knex as { client?: { dialect?: unknown } } | undefined)?.client?.dialect === 'sqlite3';
+}
+
 /** The bodies of the "Bulk & Batch Operations" section of `SqlDriver`: a stateless facet, called by the class's stubs. */
 export class BulkOperationsFacet {
   /** The body of `SqlDriver#bulkCreate`; the method's docblock there is its contract. */
-  static async bulkCreate(this: Pick<BulkOperationsHost, 'applyWriteColumnMap' | 'auditMissingTenant' | 'autoNumberCounterKey' | 'collidingAutoNumberReservations' | 'fillAutoNumberFields' | 'formatInput' | 'formatOutput' | 'getBuilder' | 'injectTenantOnInsert' | 'insertReturnsStoredRows' | 'isMssql' | 'isOracle' | 'isSqlite' | 'knex' | 'primeOracleRawUuidColumns' | 'readBackInsertedRows' | 'resyncSequenceToDataMax' | 'rotationWriteTarget' | 'stampInsertTimestamps'>, object: string, data: any[], options?: DriverOptions): Promise<Record<string, unknown>[]> {
+  static async bulkCreate(this: Pick<BulkOperationsHost, 'applyWriteColumnMap' | 'auditMissingTenant' | 'autoNumberCounterKey' | 'collidingAutoNumberReservations' | 'fillAutoNumberFields' | 'formatInput' | 'formatOutput' | 'getBuilder' | 'injectTenantOnInsert' | 'insertReturnsStoredRows' | 'isMssql' | 'isOracle' | 'knex' | 'primeOracleRawUuidColumns' | 'readBackInsertedRows' | 'resyncSequenceToDataMax' | 'rotationWriteTarget' | 'stampInsertTimestamps'>, object: string, data: any[], options?: DriverOptions): Promise<Record<string, unknown>[]> {
     // [#31390] On Oracle a federated object's RAW(16) uuid columns are read from
     // the remote catalog before a comparand or a written value is bound.
     if (this.isOracle) await this.primeOracleRawUuidColumns(object);
@@ -269,7 +284,7 @@ export class BulkOperationsFacet {
       };
       // [#38236] The statements this batch needs: one, except a SQLite batch
       // past one statement's bounds (see the section above).
-      const statements = this.isSqlite ? sqliteInsertStatements(formattedRows) : [formattedRows];
+      const statements = compilesSqliteInsert(this.knex) ? sqliteInsertStatements(formattedRows) : [formattedRows];
 
       try {
         let result: unknown;
