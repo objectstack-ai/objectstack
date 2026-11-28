@@ -42,21 +42,25 @@ const EDGES = [{ id: 'e1', source: 'start', target: 'end' }];
 
 const server = vi.hoisted(() => ({
   active: new Map<string, Record<string, unknown>>(),
+  // When set, `layered` waits on it: the label load answers late on demand.
+  gate: null as Promise<void> | null,
 }));
 
 const mockClient = vi.hoisted(() => {
   const k = (type: string, name: string) => `${type}/${name}`;
   return {
-    list: vi.fn(async (type: string) =>
-      [...server.active.entries()]
+    list: vi.fn(async (type: string) => {
+      if (server.gate) await server.gate;
+      return [...server.active.entries()]
         .filter(([key]) => key.startsWith(`${type}/`))
-        .map(([, row]) => ({ name: row.name, label: row.label ?? row.name })),
-    ),
+        .map(([, row]) => ({ name: row.name, label: row.label ?? row.name }));
+    }),
     listDrafts: vi.fn(async () => []),
     listTypes: vi.fn(async () => ({ entries: [] })),
     get: vi.fn(async () => null),
     references: vi.fn(async () => []),
     layered: vi.fn(async (type: string, name: string) => {
+      if (server.gate) await server.gate;
       const eff = server.active.get(k(type, name)) ?? null;
       return { code: null, overlay: eff, overlayScope: eff ? 'env' : null, effective: eff, editable: true, deletable: true, resettable: false, lock: 'none' };
     }),
@@ -114,6 +118,7 @@ registerMetadataInspector('flow', FlowInspector);
 
 beforeEach(() => {
   server.active.clear();
+  server.gate = null;
   for (const fn of Object.values(mockClient)) (fn as unknown as { mockClear: () => void }).mockClear();
 });
 
@@ -161,13 +166,15 @@ describe('the automation canvas header names the open flow by its label (objectu
     renderPillar('zh');
     const { chip, header } = await caption();
 
-    expect(chip).toHaveTextContent(/^每日摘要$/);
+    // The chip first prints the API name (the flow is not loaded yet), so the
+    // label is awaited, not read at once.
+    await waitFor(() => expect(chip).toHaveTextContent(/^每日摘要$/));
     // `designer.field.apiName` lives in the lazily fetched `studio` namespace,
     // which answers from `en` until its zh catalogue lands and then re-renders
     // the pillar (`useStudioCatalogue`): the zh title is the answer after that.
     await waitFor(() => expect(chip).toHaveAttribute('title', `API 名称: ${API_NAME}`));
     // The neighbouring chip is the real zh `canvasHint`, so the header read is the whole strip.
-    expect(header).toHaveTextContent('点选画布上的节点即可配置');
+    await waitFor(() => expect(header).toHaveTextContent('点选画布上的节点即可配置'));
     expect(chip.textContent ?? '').not.toMatch(TYPE_WORD);
     expect(chip.getAttribute('title') ?? '').not.toMatch(TYPE_WORD);
   });
@@ -177,21 +184,42 @@ describe('the automation canvas header names the open flow by its label (objectu
     renderPillar('en');
     const { chip, header } = await caption();
 
-    expect(chip).toHaveTextContent(/^Nightly digest$/);
-    expect(chip).toHaveAttribute('title', `API name: ${API_NAME}`);
-    expect(header).toHaveTextContent('Visual orchestration');
+    await waitFor(() => expect(chip).toHaveTextContent(/^Nightly digest$/));
+    await waitFor(() => expect(chip).toHaveAttribute('title', `API name: ${API_NAME}`));
+    await waitFor(() => expect(header).toHaveTextContent('Visual orchestration'));
     expect(chip.textContent ?? '').not.toMatch(TYPE_WORD);
     expect(chip.getAttribute('title') ?? '').not.toMatch(TYPE_WORD);
   });
 
   it('a label that resolves to nothing falls back to the API name rather than an empty chip', async () => {
     serve('');
+    // Hold the flow load, release it, and let it settle first: before the load
+    // the chip already prints the API name, so reading it earlier would pass
+    // on the placeholder rather than on the fallback.
+    let release!: () => void;
+    server.gate = new Promise<void>((r) => { release = r; });
     renderPillar('zh');
     const { chip, header } = await caption();
+    release();
+    await waitFor(() => expect(screen.getByTestId('auto-flow-meta')).toBeInTheDocument());
 
     expect(chip).toHaveTextContent(new RegExp(`^${API_NAME}$`));
     expect(chip.textContent ?? '').not.toMatch(TYPE_WORD);
     expect(header).toBeInTheDocument();
+  });
+
+  it('the label replaces the API name placeholder once a late load lands', async () => {
+    serve('每日摘要');
+    let release!: () => void;
+    server.gate = new Promise<void>((r) => { release = r; });
+    renderPillar('zh');
+    const { chip } = await caption();
+
+    // Load held: the chip is the placeholder, so a synchronous label read here fails.
+    expect(chip).toHaveTextContent(new RegExp(`^${API_NAME}$`));
+    expect(chip).not.toHaveTextContent('每日摘要');
+    release();
+    await waitFor(() => expect(chip).toHaveTextContent(/^每日摘要$/));
   });
 
   it('the type-word pattern sees what it is meant to catch (positive control)', () => {
