@@ -59,6 +59,7 @@ import { withDisabledExtensionsFolded } from './metadata-diagnostics.js';
 import { unresolvedConnectorSteps, type ProbeAutomation } from './build-probes.js';
 import type { PackagedRuleCopyRefusal, RuntimeAuthoringIssue, RuntimeAuthoringVerdict, RuntimePendingDeclarations } from './runtime-authoring-gate.js';
 import { savedItemNameRefusal } from '@objectstack/metadata/view-container-name';
+import { isMissingTableError } from '@objectstack/metadata/errors';
 import { PLURAL_TO_SINGULAR, SINGULAR_TO_PLURAL } from '@objectstack/spec/shared';
 import type { IObjectQLEngine } from '@objectstack/spec/contracts';
 import type { StoredObjectExtension } from '@objectstack/lint/runtime';
@@ -110,6 +111,18 @@ export interface AuthoringGateHost {
     formRestoreRefusal: (type: string, item: unknown, name: string, binding: string | null) => Promise<Error | undefined>;
     /** [#34776] The automation engine's sealed node-type vocabulary ({@link sealedFlowNodeTypeVocabulary}). */
     sealedFlowNodeTypeVocabulary: () => readonly string[] | undefined;
+    /**
+     * The names of every flow the automation engine holds
+     * ({@link automationFlowNames}). Optional: a host that does not state it
+     * gets no `subflow` / `map` target judgement at the publish gate.
+     */
+    automationFlowNames?: () => Promise<readonly string[] | undefined>;
+    /**
+     * The environment's `sys_metadata` rows, read as the stored-collection
+     * fold reads them. Optional for the same reason; read by
+     * {@link deploymentFlowNamesOf} for the stored flows of every state.
+     */
+    findEnvironmentRows?: ObjectStackProtocolImplementation['findEnvironmentRows'];
 }
 
 /** The body of `ObjectStackProtocolImplementation#restoredBodyDerivation`; the method's docblock there is its contract. */
@@ -341,7 +354,7 @@ export function withTargetFoldedWithout(
  * The members {@link judgeRuntimeAuthoringRules} reads: the host facts and
  * collections every judgement of the shared rules is made against.
  */
-type RuntimeRulesHost = Pick<AuthoringGateHost, 'authoringChannel' | 'engine' | 'foldStoredCollection' | 'hierarchyResolverMounted' | 'orgWallEnforced' | 'resolveSduiManifest' | 'resolveWritePackageScope' | 'rlsMembershipResolverKeys' | 'sealedFlowNodeTypeVocabulary' | 'tenancyPostureInForce'>;
+type RuntimeRulesHost = Pick<AuthoringGateHost, 'authoringChannel' | 'automationFlowNames' | 'engine' | 'findEnvironmentRows' | 'foldStoredCollection' | 'hierarchyResolverMounted' | 'orgWallEnforced' | 'resolveSduiManifest' | 'resolveWritePackageScope' | 'rlsMembershipResolverKeys' | 'sealedFlowNodeTypeVocabulary' | 'tenancyPostureInForce'>;
 
 /** The body of `ObjectStackProtocolImplementation#assertRuntimeAuthoringRules`; the method's docblock there is its contract. */
 export async function assertRuntimeAuthoringRules(
@@ -634,6 +647,14 @@ export async function judgeRuntimeAuthoringRules(
     // flow write only, and passed in so the gate stays pure.
     const flowNodeTypeVocabulary = singular === 'flow' ? this.sealedFlowNodeTypeVocabulary() : undefined;
 
+    // [#35143] Every flow the deployment holds, by name, on a flow write only:
+    // the universe a `subflow` / `map` call is judged against, since the gate's
+    // own snapshot holds just the written flow. `undefined` when one source
+    // could not be read, and then no call is judged.
+    const deploymentFlowNames = singular === 'flow'
+        ? await deploymentFlowNamesOf.call(this, listRegisteredCollection('flow', 'flows'))
+        : undefined;
+
     // [#26188] Is a hierarchy resolver mounted — a host fact of the same kind,
     // read here per publish and passed in so the gate stays pure.
     const hierarchyResolverMounted = this.hierarchyResolverMounted();
@@ -685,6 +706,8 @@ export async function judgeRuntimeAuthoringRules(
         ...(rlsMembershipResolverKeys !== undefined ? { rlsMembershipResolverKeys } : {}),
         // With it the gate refuses a flow node no executor of this deployment runs.
         ...(flowNodeTypeVocabulary !== undefined ? { flowNodeTypeVocabulary } : {}),
+        // [#35143] With it the gate refuses a subflow / map call to a flow the deployment does not hold.
+        ...(deploymentFlowNames !== undefined ? { deploymentFlowNames } : {}),
         // [#26188] With it the gate refuses a hierarchy scope no resolver enforces.
         ...(hierarchyResolverMounted !== undefined ? { hierarchyResolverMounted } : {}),
         // [#28448] With it the gate refuses a rule copy that changes what the package owns.
@@ -693,6 +716,59 @@ export async function judgeRuntimeAuthoringRules(
         ...(storedObjectExtensions !== undefined ? { storedObjectExtensions } : {}),
     });
     return verdict;
+}
+
+/**
+ * [#35143] The names of every flow this deployment holds, the universe the
+ * publish gate judges a `subflow` / `map` node's `config.flowName` against
+ * (`validateFlowSubflowTargets`): the registry's flows (`registered`, every
+ * installed package's, a disabled package's included), the stored flow rows
+ * of EVERY state (a draft counts, so two new flows that call each other can be
+ * published one at a time), and every flow the automation engine holds (a flow
+ * registered straight into the engine has no metadata row). The batch's own
+ * flow drafts are added by the gate ({@link evaluateRuntimeAuthoringGate}).
+ *
+ * Union only: every source can only make more names resolvable, never fewer.
+ * `undefined`, and so no judgement, when the host cannot state one of the
+ * sources: no stored-row reader or engine reader, or a read that fails (said
+ * once, at `warn`). Judging against a partial universe would refuse a call to
+ * a flow the missing source holds.
+ */
+async function deploymentFlowNamesOf(
+    this: Pick<AuthoringGateHost, 'automationFlowNames' | 'findEnvironmentRows'>,
+    registered: readonly unknown[],
+): Promise<readonly string[] | undefined> {
+    if (typeof this.findEnvironmentRows !== 'function' || typeof this.automationFlowNames !== 'function') return undefined;
+    const engineNames = await this.automationFlowNames();
+    if (engineNames === undefined) return undefined;
+    const names = new Set<string>(engineNames);
+    for (const item of registered) {
+        const name = (item as { name?: unknown } | null)?.name;
+        if (typeof name === 'string' && name !== '') names.add(name);
+    }
+    try {
+        for (const type of ['flow', 'flows']) {
+            // [ADR-0131 D6] The environment's rows, every state, as the
+            // stored-collection fold reads them (that fold reads `active` only).
+            const rows = await this.findEnvironmentRows('sys_metadata', {
+                where: { type },
+                context: { isSystem: true },
+            });
+            for (const row of (rows ?? []) as Array<{ name?: unknown }>) {
+                if (typeof row?.name === 'string' && row.name !== '') names.add(row.name);
+            }
+        }
+    } catch (error) {
+        if (!isMissingTableError(error, 'sys_metadata')) {
+            console.warn(
+                `[Protocol] the runtime authoring gate could not read the stored flows: `
+                + `${(error as { message?: string } | null)?.message ?? String(error)}. `
+                + `This write is NOT blocked; a subflow or map step's called flow is not judged for it.`,
+            );
+            return undefined;
+        }
+    }
+    return [...names];
 }
 
 /**
@@ -982,6 +1058,37 @@ function draftConnectorAdvisories(
  * a type, so "no executor" is not a verdict anyone may act on (AGENTS.md
  * "Startup registry reads").
  */
+/**
+ * [#35143] The names of every flow the automation engine holds
+ * (`IAutomationService.listFlows`), read per publish and recorded nowhere.
+ * `undefined` when no automation service is registered (no flow runs here at
+ * all) or its read fails; then no `subflow` / `map` call is judged.
+ */
+export async function automationFlowNames(
+    this: { readonly getServicesRegistry?: () => Map<string, any> },
+): Promise<readonly string[] | undefined> {
+    let automation: unknown;
+    try {
+        automation = this.getServicesRegistry?.().get('automation');
+    } catch {
+        return undefined;
+    }
+    const list = (automation as { listFlows?: () => unknown } | undefined)?.listFlows;
+    if (typeof list !== 'function') return undefined;
+    let names: unknown;
+    try {
+        names = await list.call(automation);
+    } catch (error) {
+        console.warn(
+            `[Protocol] the runtime authoring gate could not list the automation engine's flows: `
+            + `${(error as { message?: string } | null)?.message ?? String(error)}. `
+            + `This write is NOT blocked; a subflow or map step's called flow is not judged for it.`,
+        );
+        return undefined;
+    }
+    return Array.isArray(names) ? names.filter((n): n is string => typeof n === 'string') : undefined;
+}
+
 export function sealedFlowNodeTypeVocabulary(
     this: { readonly getServicesRegistry?: () => Map<string, any> },
 ): readonly string[] | undefined {

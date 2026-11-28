@@ -522,6 +522,18 @@ export interface AuthoringRuleContext {
    * contradict (AGENTS.md "Startup registry reads").
    */
   flowNodeTypeVocabulary?: ReadonlySet<string>;
+  /**
+   * The names of every flow the deployment holds: every installed package's
+   * flows, the stored flow rows in every state (drafts included), the flows
+   * the written item's publish batch carries, and every flow the automation
+   * engine holds. Set only by the runtime publish gate, and only when its host
+   * could read all of them; ABSENT on the three CLI commands, whose stack is
+   * one app. Read by `validateFlowSubflowTargets` only: present and non-empty,
+   * a `subflow` / `map` call naming none of them is refused; absent or empty
+   * at the runtime gate, that rule judges nothing there (the written flow
+   * alone is no universe).
+   */
+  deploymentFlowNames?: ReadonlySet<string>;
 }
 
 export interface AuthoringRule {
@@ -1728,20 +1740,27 @@ export const AUTHORING_RULES: readonly AuthoringRule[] = [
   // GET → edit → PUT passes, and a secretless `api` flow is refused at `/meta`
   // with this id instead of being stored for the engine to refuse at
   // registration.
-  // #35143 — a `subflow` / `map` node calling a flow this stack does not
-  // define. CLI only: the runtime gate's flow snapshot holds just the written
-  // flow, so every call to another stored flow would read as unknown there.
-  // Advisory, with the sibling unknown-object hedge: another installed package
-  // may ship the called flow.
+  // #35143 — a `subflow` / `map` node calling a flow that does not exist.
+  // One verdict per door (the rule's docblock): on the CLI a `warning`, since
+  // another installed package may ship the called flow; at the runtime publish
+  // gate an `error`, judged against the deployment's flow names the host
+  // states (`deploymentFlowNames`), because the gate's own flow snapshot holds
+  // just the written flow. With no stated names, or none, the runtime gate's
+  // pass judges nothing: a call to another stored flow cannot be told from a
+  // call to a missing one there.
   {
     name: 'validateFlowSubflowTargets',
-    tier: 'advisory',
+    tier: 'gating',
     input: 'normalized',
     commands: ALL,
     source: 'packages/lint/src/validate-flow-trigger-readiness.ts',
-    surfaces: CLI_ONLY,
-    surfaceReason: RUNTIME_NEEDS_FULL_SNAPSHOT,
-    run: (stack) => validateFlowSubflowTargets(stack),
+    surfaces: CLI_AND_RUNTIME,
+    runtimeTypes: ['flow'],
+    run: (stack, ctx) => {
+      if (ctx.runtimeWriteType === undefined) return validateFlowSubflowTargets(stack);
+      if (ctx.deploymentFlowNames === undefined || ctx.deploymentFlowNames.size === 0) return [];
+      return validateFlowSubflowTargets(stack, { deploymentFlowNames: ctx.deploymentFlowNames });
+    },
   },
   {
     name: 'validateFlowApiTriggerSecret',

@@ -780,7 +780,8 @@ export const CLOSURE_CONTEXT_KEY_BY_TYPE = {
     // same batch is judged against the flows the batch leaves live: a live flow
     // the batch redrafts is the draft's own write to answer for, against this
     // batch's objects ({@link objectWriteFlowSubjects}). They are not folded in
-    // as subjects themselves, and no other write type reads them.
+    // as subjects themselves. A FLOW write reads only their names, so a flow
+    // the batch publishes resolves as a subflow target ({@link withPendingFlowNames}).
     flow: 'flows',
     // [#33152] A batch's extension drafts, folded onto their targets in
     // `objects` ({@link foldPendingObjectExtensions}), never a context
@@ -989,6 +990,19 @@ export function objectWriteFlowSubjects(
         if (isRec(entry) && typeof entry.name === 'string' && entry.name !== '') redrafted.add(entry.name);
     }
     return liveFlows.filter((entry) => !(isRec(entry) && typeof entry.name === 'string' && redrafted.has(entry.name)));
+}
+
+/**
+ * The deployment's flow names with this batch's own flow drafts added: a flow
+ * published in the same batch as the flow that calls it is held once the batch
+ * lands. Additive only, as {@link mergePendingDeclarations} is.
+ */
+function withPendingFlowNames(names: readonly string[], pending: readonly unknown[] | undefined): string[] {
+    const out = new Set(names);
+    for (const entry of pending ?? []) {
+        if (isRec(entry) && typeof entry.name === 'string' && entry.name !== '') out.add(entry.name);
+    }
+    return [...out];
 }
 
 /** [#32666] `pending` without the entries named `name` — the written item's own draft. */
@@ -1469,6 +1483,18 @@ export function evaluateRuntimeAuthoringGate(args: {
      * judged.
      */
     flowNodeTypeVocabulary?: readonly string[];
+    /**
+     * On a `flow` write: the names of every flow the deployment holds, as the
+     * impure caller read them (every installed package's flows, the stored
+     * flow rows in every state, the automation engine's flows). A fact only
+     * the host holds, of the #6285 kind. The batch's own flow drafts
+     * (`pending.flows`) are added here, so a flow published in the same batch
+     * as its caller resolves. Handed to the shared rules, where
+     * `validateFlowSubflowTargets` refuses a `subflow` / `map` call naming none
+     * of them. Absent (the host could not read one of the sources), a call to
+     * another flow is not judged.
+     */
+    deploymentFlowNames?: readonly string[];
 }): RuntimeAuthoringVerdict {
     const toIssue = issueOf(args.userTextLocales ?? []);
     // [#26188] The one finding a draft hears: a hierarchy scope this runtime
@@ -1547,6 +1573,9 @@ export function evaluateRuntimeAuthoringGate(args: {
             : {}),
         ...(args.flowNodeTypeVocabulary !== undefined
             ? { flowNodeTypeVocabulary: args.flowNodeTypeVocabulary }
+            : {}),
+        ...(args.type === 'flow' && args.deploymentFlowNames !== undefined
+            ? { deploymentFlowNames: withPendingFlowNames(args.deploymentFlowNames, args.pending?.flows) }
             : {}),
     });
 
