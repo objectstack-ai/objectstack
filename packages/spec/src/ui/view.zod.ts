@@ -2389,8 +2389,11 @@ export const EmptyStateSchema = lazySchema(() => strictObject({
  * objectstack#36871: the list view hands a board whose lanes it cannot know
  * before the query (lanes over a lookup field) the page of records it fetched
  * AND the query of that page, so that board asks the same read and its four
- * aggregates cover every record of each lane too. Its `count` counts the
- * page it was handed, as its lane header does. Only a board handed its cards
+ * aggregates cover every record of each lane too. objectstack#37327: the same
+ * read answers each lane's record count, so its `count` counts the whole lane,
+ * as its lane header does, not the page it was handed; only a read that cannot
+ * answer (no grouped door, a refusal, a cut answer) leaves the page's count,
+ * marked `+`. Only a board handed its cards
  * without their query (records handed in whole) adds up a `sum` over those
  * cards, and draws none of the other three.
  */
@@ -2518,10 +2521,11 @@ export const KanbanConfigSchema = lazySchema(() => strictObject({
     + '`{ type: \'sum\', field: \'amount\' }` totals a number field over all of the lane records, '
     + '`avg` averages it, and `min` / `max` show its smallest / largest value, each computed by the query '
     + '(a field the reader may not read shows no figure); `{ type: \'none\' }` shows nothing. '
-    + 'A list view board whose lanes come from a lookup field draws one page of records: its `sum`, '
-    + '`avg`, `min` and `max` still cover every record of each lane, and its `count` counts that page. '
+    + 'A list view board whose lanes come from a lookup field draws one page of records: its `count`, '
+    + '`sum`, `avg`, `min` and `max` still cover every record of each lane (where the source cannot answer '
+    + 'that read, `count` counts the page, marked `+`). '
     + 'Only on a board handed its records whole, '
-    + 'without their query, does `sum` total the records handed in and the other three show nothing. '
+    + 'without their query, does `sum` total the records handed in and `avg`, `min` and `max` show nothing. '
     + 'Takes precedence over summarizeField. Omit to keep summarizeField\'s sum, or no statistic without it.',
   ),
   /**
