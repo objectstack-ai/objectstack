@@ -1123,9 +1123,11 @@ for (const kind of ['memory', 'file'] as StoreKind[]) {
     });
 
     it('a database that refuses the one-bit vectors or the index DDL keeps the exact scan, and the build completes', async () => {
-      // A host whose libSQL lacks the one-bit type: every statement naming it is refused.
       for (const [name, refused] of [
-        ['ann_no_1bit', /vector1bit\(|F1BIT_BLOB/],
+        // A host whose libSQL lacks the one-bit vectors: like SQLite, it creates a column of any type and a
+        // trigger naming an unknown function, and refuses each statement that computes `vector1bit`.
+        ['ann_no_1bit', /^(?!\s*CREATE\s)[\s\S]*vector1bit\(/i],
+        // A host that refuses the side table's column type.
         ['ann_no_ddl', /F1BIT_BLOB/],
       ] as const) {
         const s = source(name);
