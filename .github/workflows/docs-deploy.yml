@@ -201,8 +201,12 @@ jobs:
       # broken measurement must never stop the docs from publishing (the header's
       # failure direction is about the PUBLISH going quietly stale; this step
       # publishes nothing). A failure still shows as a warning annotation.
+      # `timeout-minutes` because `continue-on-error` does not absorb a hang:
+      # without it only the job's clock would end the step, with no deploy. The
+      # script is synchronous local reads (seconds); 5 minutes is the ceiling.
       - name: Measure what this deploy uploads
         continue-on-error: true
+        timeout-minutes: 5
         run: |
           set -euo pipefail
           if ! node apps/docs/scripts/measure-deploy-output.mjs > "$RUNNER_TEMP/deploy-output-reading.txt"; then
