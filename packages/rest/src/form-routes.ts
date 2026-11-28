@@ -306,57 +306,52 @@ export function registerFormEndpoints(this: FormRouteHost, basePath: string): vo
                 ? result
                 : []);
         const formsRequest: TransportScopedMetaRequest<GetMetaItemsRequest> = { ...viewsRequest, type: 'form' };
+        // [ADR-0159 D5, D6] The five readings below are ONE request's reading
+        // where the protocol serves one (`readFormRequest`, a server-only
+        // extension, feature-detected): the request reads the `view` list
+        // once and each type's stored rows once, and each call answers what it
+        // answers on its own. Without it, the five calls read as they always did.
+        const inOneReading = <T>(read: () => Promise<T>): Promise<T> => (typeof (p as any).readFormRequest === 'function'
+            ? (p as any).readFormRequest(read)
+            : read());
+        const { forms, views, layer } = await inOneReading(async () => {
+            const views = listOf(await p.getMetaItems(viewsRequest));
+            // [ADR-0159 D5, D6 rules 1 and 3] The candidates are the effective
+            // `form` read, which projects the old shapes itself: ONE read, and no
+            // second candidate source inside the door. A protocol that serves no
+            // `form` item serves no candidate.
+            const forms = listOf(await p.getMetaItems(formsRequest));
+            // [#28409] The per-package layers, where the protocol serves them: a
+            // server-only extension, feature-detected like the other extensions
+            // the doors read. A protocol without it serves no narrower list than
+            // the one it lists, which is then the whole layer.
+            const perPackage = async (request: TransportScopedMetaRequest<GetMetaItemsRequest>): Promise<any[]> =>
+                (typeof (p as any).getMetaItemsPerPackage === 'function'
+                    ? listOf(await (p as any).getMetaItemsPerPackage(request))
+                    : []);
+            // [ADR-0159 D6 rule 7] …and the stored bodies the projection cannot read.
+            const unreadable: UnreadableFormBody[] = typeof (p as any).getUnreadableFormBodies === 'function'
+                ? await (p as any).getUnreadableFormBodies()
+                : [];
+            const layer = formIntakeLayer({
+                forms: [...forms, ...(await perPackage(formsRequest))],
+                views: [...views, ...(await perPackage(viewsRequest))],
+                unreadable,
+            });
+            return { forms, views, layer };
+        });
+        const match = findPublicForm(forms, views, layer, slug);
+        if (!match) return null;
         // [#21476] A form that cannot take intake on this posture is not
         // offered: `null` here IS the withdrawn form's answer on both
         // doors, so an anonymous caller learns nothing about the tenancy.
-        const intakeUnavailable = async (match: { object: string }) => anonymousFormIntakeUnavailability(
+        const unavailable = await anonymousFormIntakeUnavailability(
             match.object,
             anonymousFormIntakePosture(tenancy),
             async () => (await this.readFormObjectDefinitions(p, environmentId))
                 .find((o: any) => o?.name === match.object),
         );
-        // [ADR-0159 D6] The five readings below, read by the protocol over ONE
-        // request scope where it serves them so (`getFormIntakeReading`, a
-        // server-only extension, feature-detected): each answers what its call
-        // below answers, and the request reads the `view` list once and each
-        // type's stored rows once. Without it, the five calls.
-        if (typeof (p as any).getFormIntakeReading === 'function') {
-            const reading = await (p as any).getFormIntakeReading();
-            const layer = formIntakeLayer({
-                forms: [...reading.forms, ...reading.perPackageForms],
-                views: [...reading.views, ...reading.perPackageViews],
-                unreadable: reading.unreadable,
-            });
-            const match = findPublicForm(reading.forms, reading.views, layer, slug);
-            if (!match) return null;
-            return (await intakeUnavailable(match)) ? null : match;
-        }
-        const views = listOf(await p.getMetaItems(viewsRequest));
-        // [ADR-0159 D5, D6 rules 1 and 3] The candidates are the effective
-        // `form` read, which projects the old shapes itself: ONE read, and no
-        // second candidate source inside the door. A protocol that serves no
-        // `form` item serves no candidate.
-        const forms = listOf(await p.getMetaItems(formsRequest));
-        // [#28409] The per-package layers, where the protocol serves them: a
-        // server-only extension, feature-detected like the other extensions
-        // the doors read. A protocol without it serves no narrower list than
-        // the one it lists, which is then the whole layer.
-        const perPackage = async (request: TransportScopedMetaRequest<GetMetaItemsRequest>): Promise<any[]> =>
-            (typeof (p as any).getMetaItemsPerPackage === 'function'
-                ? listOf(await (p as any).getMetaItemsPerPackage(request))
-                : []);
-        // [ADR-0159 D6 rule 7] …and the stored bodies the projection cannot read.
-        const unreadable: UnreadableFormBody[] = typeof (p as any).getUnreadableFormBodies === 'function'
-            ? await (p as any).getUnreadableFormBodies()
-            : [];
-        const layer = formIntakeLayer({
-            forms: [...forms, ...(await perPackage(formsRequest))],
-            views: [...views, ...(await perPackage(viewsRequest))],
-            unreadable,
-        });
-        const match = findPublicForm(forms, views, layer, slug);
-        if (!match) return null;
-        return (await intakeUnavailable(match)) ? null : match;
+        return unavailable ? null : match;
     };
 
     // GET /forms/:slug — resolve and return the public form spec

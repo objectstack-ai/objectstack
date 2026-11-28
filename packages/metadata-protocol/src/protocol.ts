@@ -1,7 +1,7 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
 import { formTypeWriteRefusal } from './protocol-form-writes.js';
-import { readFormIntakeReading, readUnreadableFormBodies, type FormIntakeReading } from './protocol-form-reads.js';
+import { readInFormRequest, readUnreadableFormBodies } from './protocol-form-reads.js';
 import type {
     DataProtocol,
     FlowRegistration,
@@ -3541,15 +3541,15 @@ export class ObjectStackProtocolImplementation implements
     }
 
     /**
-     * Contract: {@link readFormIntakeReading} [ADR-0159 D6]; a server-only
-     * extension the anonymous form doors feature-detect. One request's five
-     * readings ({@link getMetaItems} of `view` and `form`,
-     * {@link getUnreadableFormBodies}, {@link getMetaItemsPerPackage} of
-     * `form` and `view`), each answering what that call answers, read over one
-     * request scope: the `view` list once and each type's stored rows once.
+     * Contract: {@link readInFormRequest} [ADR-0159 D5, D6]; a server-only
+     * extension the anonymous form doors feature-detect. Runs `read` as one
+     * request's reading: the {@link getMetaItems}, {@link getMetaItemsPerPackage}
+     * and {@link getUnreadableFormBodies} calls inside it read the `view` list
+     * once and each type's stored rows once, each answering what it answers on
+     * its own. Nothing is kept once `read` settles.
      */
-    async getFormIntakeReading(): Promise<FormIntakeReading> {
-        return readFormIntakeReading(protocolHost(this));
+    async readFormRequest<T>(read: () => Promise<T>): Promise<T> {
+        return readInFormRequest(read);
     }
 
     /**

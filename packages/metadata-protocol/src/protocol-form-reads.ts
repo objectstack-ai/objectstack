@@ -42,6 +42,7 @@
  * Pure over what the host reads: no write, no registry mutation.
  */
 
+import { AsyncLocalStorage } from 'node:async_hooks';
 import { pairsOf, type InstalledManifestLookup } from '@objectstack/metadata-core';
 import { PROJECTED_FORM_SOURCE_KEY, isAggregatedViewContainer, projectViewForms, type UnreadableFormBody } from '@objectstack/spec/ui';
 import { installedManifestsOfEngine } from './installed-manifests.js';
@@ -75,34 +76,73 @@ const keyOf = (pkg: unknown, name: unknown): string => `${typeof pkg === 'string
 const REQUEST_SCOPES = new WeakSet<object>();
 
 /**
+ * One request's reading ({@link readInFormRequest}): the scope it built over
+ * each host, and whether the request is still reading. Once the request has
+ * answered, a scope it built memoizes nothing: a continuation that outlives
+ * the request reads the store as any read does.
+ */
+interface FormRequestReading {
+    open: boolean;
+    readonly scopes: WeakMap<object, object>;
+}
+
+const FORM_REQUEST = new AsyncLocalStorage<FormRequestReading>();
+
+/** The two host members a {@link formRequestScope} replaces. */
+type ScopableHost = Pick<FormReadHost, 'readActiveOverlayRows' | 'readFlattenedMetaItems'>;
+
+/**
+ * [ADR-0159 D5, D6] Run `read` as ONE request's reading of the two types:
+ * every list read and stored-row read inside it, through any of the protocol
+ * reads below, shares one {@link formRequestScope} per host. The anonymous
+ * form doors read the `view` list, the `form` list, the unreadable bodies and
+ * both per-package layers as five protocol calls; inside one reading they read
+ * the `view` list once and each type's stored rows once, and each call answers
+ * what it answers on its own. The reading ends when `read` settles.
+ */
+export async function readInFormRequest<T>(read: () => Promise<T>): Promise<T> {
+    const reading: FormRequestReading = { open: true, scopes: new WeakMap() };
+    try {
+        return await FORM_REQUEST.run(reading, read);
+    } finally {
+        reading.open = false;
+    }
+}
+
+/**
  * [ADR-0159 D5] ONE request's reading of the two types: the host the `form`
- * read and the form doors read through, over which each stored row set
- * (`sys_metadata`, per type and package binding) and each flattened list
- * (per request, audience and layer) is read once, however many of the
- * readings below ask for it.
+ * read reads through, over which each stored row set (`sys_metadata`, per type
+ * and package binding) and each flattened list (per request, audience and
+ * layer) is read once, however many of the readings below ask for it.
  *
  * The effective `form` read asks for the same rows more than once by
  * construction: the generic `form` list and step 3 both read the stored `form`
- * rows, the `view` list and step 3 both read the stored `view` rows, and a
+ * rows, and the `view` list and step 3 both read the stored `view` rows. A
  * form door asks the `view` list, the `form` list (which reads the `view` list
- * again), both per-package layers and the unreadable bodies, each of them over
- * the same stored rows. Read through one scope, the request reads each row set
- * and each list once (measured and pinned in
- * `public-form-reads-once-37709.test.ts`, `@objectstack/rest`). A list read in
- * the scope reads its stored rows through the scope too
- * (`readFlattenedMetaItems`' row reader), so the generic lists and step 3
- * share one reading of each type's rows.
+ * again), both per-package layers and the unreadable bodies, each over the
+ * same stored rows. Read through one scope, the request reads each row set and
+ * each list once (measured and pinned in `public-form-reads-once-37709.test.ts`,
+ * `@objectstack/rest`). A list read in the scope reads its stored rows through
+ * the scope too (`readFlattenedMetaItems`' row reader), so the generic lists
+ * and step 3 share one reading of each type's rows.
  *
- * Request-scoped only: the scope lives as long as the request that built it
- * holds it, and ⛔ it is never kept across requests (the cross-request row
- * cache is `meta-overlay-cache.ts`, under its own invalidation). Every member
- * the scope does not replace is the host's own, read at call time.
+ * Inside {@link readInFormRequest} the scope is the request's own, shared by
+ * every read of that request over the same host; outside one, it is the scope
+ * of the one call that built it. ⛔ Never kept across requests (the
+ * cross-request row cache is `meta-overlay-cache.ts`, under its own
+ * invalidation). Every member the scope does not replace is the host's own,
+ * read at call time.
  */
-export function formRequestScope<H extends FormReadHost>(host: H): H {
+export function formRequestScope<H extends ScopableHost>(host: H): H {
     if (REQUEST_SCOPES.has(host)) return host;
+    const reading = FORM_REQUEST.getStore();
+    const shared = reading?.scopes.get(host) as H | undefined;
+    if (shared !== undefined) return shared;
+    const live = (): boolean => reading === undefined || reading.open;
     const rows = new Map<string, Promise<any[]>>();
     const lists = new Map<string, ReturnType<FormReadHost['readFlattenedMetaItems']>>();
     const readActiveOverlayRows: FormReadHost['readActiveOverlayRows'] = (request) => {
+        if (!live()) return host.readActiveOverlayRows(request);
         const key = `${request.type}\u0000${request.packageId ?? ''}`;
         let read = rows.get(key);
         if (read === undefined) {
@@ -112,6 +152,7 @@ export function formRequestScope<H extends FormReadHost>(host: H): H {
         return read;
     };
     const readFlattenedMetaItems: FormReadHost['readFlattenedMetaItems'] = (request, audience, layer = 'effective') => {
+        if (!live()) return host.readFlattenedMetaItems(request, audience, layer);
         const key = JSON.stringify([request.type, request.packageId ?? null, request.names ?? null, request.previewDrafts === true, audience, layer]);
         let read = lists.get(key);
         if (read === undefined) {
@@ -125,7 +166,13 @@ export function formRequestScope<H extends FormReadHost>(host: H): H {
         readFlattenedMetaItems: { value: readFlattenedMetaItems },
     }) as H;
     REQUEST_SCOPES.add(scope);
+    reading?.scopes.set(host, scope);
     return scope;
+}
+
+/** The scope of the request reading in progress ({@link readInFormRequest}) over `host`, or `host` outside one. */
+export function inFormRequestScope<H extends ScopableHost>(host: H): H {
+    return FORM_REQUEST.getStore()?.open === true ? formRequestScope(host) : host;
 }
 
 /** A listed item's package, as its envelope states it. */
@@ -463,7 +510,7 @@ export async function readUnreadableFormBodies(
     report: (line: string) => void = (line) => console.error(line),
 ): Promise<UnreadableFormBody[]> {
     const out: UnreadableFormBody[] = [];
-    for (const entry of await storedEntries(host as FormReadHost, 'view')) {
+    for (const entry of await storedEntries(inFormRequestScope(host as FormReadHost), 'view')) {
         const projection = projectViewForms(entry.data);
         if (projection.unreadable === undefined) continue;
         const body: UnreadableFormBody = {
@@ -486,37 +533,4 @@ export async function readUnreadableFormBodies(
         );
     }
     return out;
-}
-
-/** What one anonymous form-door request reads ({@link readFormIntakeReading}). */
-export interface FormIntakeReading {
-    /** The effective `view` list (`getMetaItems({ type: 'view' })`). */
-    readonly views: unknown[];
-    /** The effective `form` list (`getMetaItems({ type: 'form' })`, {@link readEffectiveFormList}). */
-    readonly forms: unknown[];
-    /** The stored `view` bodies the projection cannot read ({@link readUnreadableFormBodies}). */
-    readonly unreadable: UnreadableFormBody[];
-    /** The per-package `form` layer (`getMetaItemsPerPackage({ type: 'form' })`). */
-    readonly perPackageForms: unknown[];
-    /** The per-package `view` layer (`getMetaItemsPerPackage({ type: 'view' })`). */
-    readonly perPackageViews: unknown[];
-}
-
-/**
- * [ADR-0159 D6] Everything one anonymous form-door request reads, through ONE
- * request scope ({@link formRequestScope}): the same five readings the doors
- * made as five protocol calls, in the same order, each answering what its call
- * answered, so the `view` list is read once (the `form` list's step 2 reads it
- * from the scope) and each type's stored rows once (the lists, step 3 and the
- * unreadable bodies share them). ⛔ Nothing is kept past the request.
- */
-export async function readFormIntakeReading(host: FormReadHost): Promise<FormIntakeReading> {
-    const scoped = formRequestScope(host);
-    const itemsOf = (list: unknown): unknown[] => (list as { items: unknown[] }).items;
-    const views = itemsOf(await scoped.readFlattenedMetaItems({ type: 'view' }, 'served'));
-    const forms = (await readEffectiveFormList(scoped, { type: 'form' }, 'served')).items;
-    const unreadable = await readUnreadableFormBodies(scoped);
-    const perPackageForms = itemsOf(await scoped.readFlattenedMetaItems({ type: 'form' }, 'served', 'per-package'));
-    const perPackageViews = itemsOf(await scoped.readFlattenedMetaItems({ type: 'view' }, 'served', 'per-package'));
-    return { views, forms, unreadable, perPackageForms, perPackageViews };
 }

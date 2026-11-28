@@ -34,7 +34,7 @@ import {
 } from './protocol-authoring-refusals.js';
 import { shippingPackageIds } from './protocol-environment-rows.js';
 import type { ProtocolHost } from './protocol-host.js';
-import { formRequestScope, readEffectiveFormList, type FormReadHost } from './protocol-form-reads.js';
+import { formRequestScope, inFormRequestScope, readEffectiveFormList, type FormReadHost } from './protocol-form-reads.js';
 import { canonicalizeMetaRequestType } from './protocol-meta-type-schema.js';
 import { mergePackageAwareOverlay, servedViewExpansion, withoutServedRowName } from './protocol-overlay-merge.js';
 import {
@@ -94,7 +94,8 @@ export async function getMetaItems(host: FormReadHost, request: { type: string; 
     // [ADR-0159 D5] The `form` list is resolved over both types, in one
     // generic read where the list names no package (`readEffectiveFormList`).
     if (canonical.type === 'form') return effectiveFormList(host, canonical, 'served');
-    return host.readFlattenedMetaItems(canonical, 'served');
+    // Inside a form request's reading (`readInFormRequest`), through its scope.
+    return inFormRequestScope(host).readFlattenedMetaItems(canonical, 'served');
 }
 
 /** The body of `ObjectStackProtocolImplementation#getMetaItemsForExecution`; the method's docblock there is its contract. */
@@ -106,9 +107,10 @@ export async function getMetaItemsForExecution(host: FormReadHost, request: { ty
 }
 
 /** The body of `ObjectStackProtocolImplementation#getMetaItemsPerPackage`; the method's docblock there is its contract. */
-export async function getMetaItemsPerPackage(host: Pick<ProtocolHost, 'readFlattenedMetaItems'>, request: { type: string; packageId?: string; previewDrafts?: boolean }) {
+export async function getMetaItemsPerPackage(host: Pick<ProtocolHost, 'readActiveOverlayRows' | 'readFlattenedMetaItems'>, request: { type: string; packageId?: string; previewDrafts?: boolean }) {
     // The same #4432 fold {@link getMetaItems} applies, for the same reason.
-    return host.readFlattenedMetaItems(canonicalizeMetaRequestType(request), 'served', 'per-package');
+    // Inside a form request's reading (`readInFormRequest`), through its scope.
+    return inFormRequestScope(host).readFlattenedMetaItems(canonicalizeMetaRequestType(request), 'served', 'per-package');
 }
 
 /**

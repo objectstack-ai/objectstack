@@ -9,8 +9,10 @@
  * stored rows of both types (`readEffectiveFormList`, `@objectstack/metadata-protocol`).
  * Each of those readings, and each of the five an anonymous form door makes
  * (the `view` list, the `form` list, the unreadable bodies, both per-package
- * layers), asks for the same stored rows; read through one request scope
- * (`formRequestScope`), the request reads each row set once.
+ * layers), asks for the same stored rows. The effective `form` read reads
+ * through one request scope (`formRequestScope`), and the doors make their
+ * five calls inside one request reading (`readFormRequest`), so the request
+ * reads each row set once.
  *
  * Measured on the merged tree before the scope (`OS_METADATA_OVERLAY_CACHE_TTL_MS=0`,
  * an authored `form` item): a by-name `form` read read the `form` rows twice
@@ -26,10 +28,11 @@
  * under the plural (`readActiveOverlayRows`); each spelling is counted.
  *
  * CONTROL: two requests read twice (the scope never spans requests), and the
- * doors' five-call path (a protocol without the extension) still reads the
- * rows once per call, so the counter sees a repeated read when there is one.
- * Ablation (recorded on the PR): drop the scope from the effective `form`
- * read, or from the door reading, and the counts go red.
+ * five door calls outside one reading (a protocol without `readFormRequest`)
+ * still read the rows once per call, so the counter sees a repeated read when
+ * there is one. Ablation (recorded on the PR): drop the scope from the
+ * effective `form` read, from the door's reading, or the scope's row reader
+ * from its list reads, and the counts go red.
  */
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { ObjectQL } from '@objectstack/objectql';
@@ -192,9 +195,9 @@ describe('[ADR-0159 D5, D6] one form request reads the `view` list once and each
       expect(reads.lists['view:effective']).toBe(2);
     });
 
-    it('CONTROL: the doors\' five-call path (a protocol without the extension) reads the rows once per call', async () => {
+    it('CONTROL: the five door calls outside one reading (a protocol without `readFormRequest`) read the rows once per call', async () => {
       const b = await booted(ships);
-      b.protocol.getFormIntakeReading = undefined;
+      b.protocol.readFormRequest = undefined;
       let answer: any;
       const reads = await b.counted(async () => { answer = await b.door(); });
       expect(answer.status, JSON.stringify(answer.body)).toBe(200);
