@@ -390,7 +390,7 @@ describe('Setup → Authentication reads every declared auth key as it runs', ()
       session_idle_timeout_minutes: floor.sessionIdleTimeoutMinutes,
       session_absolute_max_hours: floor.sessionAbsoluteMaxHours,
       max_concurrent_sessions_per_user: floor.maxConcurrentSessions,
-      allowed_ip_ranges: floor.allowedIpRanges.join('\n'),
+      allowed_ip_ranges: (floor.allowedIpRanges ?? []).join('\n'),
       lockout_threshold: config.lockoutThreshold,
       lockout_duration_minutes: config.lockoutDurationMinutes,
       audience_posture: audience.posture,
