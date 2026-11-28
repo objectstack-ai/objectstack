@@ -1,7 +1,7 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
 import { formTypeWriteRefusal } from './protocol-form-writes.js';
-import { readUnreadableFormBodies } from './protocol-form-reads.js';
+import { readFormIntakeReading, readUnreadableFormBodies, type FormIntakeReading } from './protocol-form-reads.js';
 import type {
     DataProtocol,
     FlowRegistration,
@@ -3541,6 +3541,18 @@ export class ObjectStackProtocolImplementation implements
     }
 
     /**
+     * Contract: {@link readFormIntakeReading} [ADR-0159 D6]; a server-only
+     * extension the anonymous form doors feature-detect. One request's five
+     * readings ({@link getMetaItems} of `view` and `form`,
+     * {@link getUnreadableFormBodies}, {@link getMetaItemsPerPackage} of
+     * `form` and `view`), each answering what that call answers, read over one
+     * request scope: the `view` list once and each type's stored rows once.
+     */
+    async getFormIntakeReading(): Promise<FormIntakeReading> {
+        return readFormIntakeReading(protocolHost(this));
+    }
+
+    /**
      * [#28411, ADR-0146 D8 item 4] The served overrides of a base package's
      * items: each ACTIVE row of its paired `<base>.custom` package that
      * {@link isServedOverrideRowOf} admits and no read declines, as
@@ -3649,9 +3661,11 @@ export class ObjectStackProtocolImplementation implements
         request: { type: string; packageId?: string; names?: readonly string[]; previewDrafts?: boolean },
         audience: 'served' | 'execution',
         layer: 'effective' | 'per-package' = 'effective',
+        /** [ADR-0159 D5] The stored-row reader of one request's scope (`formRequestScope`); omitted, {@link readActiveOverlayRows}. */
+        rows?: (request: { type: string; packageId?: string }) => Promise<any[]>,
     ) {
         // [#25467 E1] The body moved to `protocol-meta-list-reads.ts`; it reaches this class through `protocol-host.ts`.
-        return readFlattenedMetaItems(protocolHost(this), request, audience, layer);
+        return readFlattenedMetaItems(protocolHost(this), request, audience, layer, rows);
     }
 
     /**

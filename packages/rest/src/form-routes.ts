@@ -306,6 +306,31 @@ export function registerFormEndpoints(this: FormRouteHost, basePath: string): vo
                 ? result
                 : []);
         const formsRequest: TransportScopedMetaRequest<GetMetaItemsRequest> = { ...viewsRequest, type: 'form' };
+        // [#21476] A form that cannot take intake on this posture is not
+        // offered: `null` here IS the withdrawn form's answer on both
+        // doors, so an anonymous caller learns nothing about the tenancy.
+        const intakeUnavailable = async (match: { object: string }) => anonymousFormIntakeUnavailability(
+            match.object,
+            anonymousFormIntakePosture(tenancy),
+            async () => (await this.readFormObjectDefinitions(p, environmentId))
+                .find((o: any) => o?.name === match.object),
+        );
+        // [ADR-0159 D6] The five readings below, read by the protocol over ONE
+        // request scope where it serves them so (`getFormIntakeReading`, a
+        // server-only extension, feature-detected): each answers what its call
+        // below answers, and the request reads the `view` list once and each
+        // type's stored rows once. Without it, the five calls.
+        if (typeof (p as any).getFormIntakeReading === 'function') {
+            const reading = await (p as any).getFormIntakeReading();
+            const layer = formIntakeLayer({
+                forms: [...reading.forms, ...reading.perPackageForms],
+                views: [...reading.views, ...reading.perPackageViews],
+                unreadable: reading.unreadable,
+            });
+            const match = findPublicForm(reading.forms, reading.views, layer, slug);
+            if (!match) return null;
+            return (await intakeUnavailable(match)) ? null : match;
+        }
         const views = listOf(await p.getMetaItems(viewsRequest));
         // [ADR-0159 D5, D6 rules 1 and 3] The candidates are the effective
         // `form` read, which projects the old shapes itself: ONE read, and no
@@ -331,16 +356,7 @@ export function registerFormEndpoints(this: FormRouteHost, basePath: string): vo
         });
         const match = findPublicForm(forms, views, layer, slug);
         if (!match) return null;
-        // [#21476] A form that cannot take intake on this posture is not
-        // offered: `null` here IS the withdrawn form's answer on both
-        // doors, so an anonymous caller learns nothing about the tenancy.
-        const unavailable = await anonymousFormIntakeUnavailability(
-            match.object,
-            anonymousFormIntakePosture(tenancy),
-            async () => (await this.readFormObjectDefinitions(p, environmentId))
-                .find((o: any) => o?.name === match.object),
-        );
-        return unavailable ? null : match;
+        return (await intakeUnavailable(match)) ? null : match;
     };
 
     // GET /forms/:slug — resolve and return the public form spec
