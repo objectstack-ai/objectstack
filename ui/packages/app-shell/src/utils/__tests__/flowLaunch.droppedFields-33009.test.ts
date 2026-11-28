@@ -24,7 +24,7 @@ import { UNRECOGNIZED_DROP_REASON } from '@object-ui/data-objectstack';
 const toasts = vi.hoisted(() => ({ error: vi.fn(), success: vi.fn(), warning: vi.fn(), info: vi.fn() }));
 vi.mock('sonner', () => ({ toast: toasts }));
 
-import { announceFlowDroppedFields, flowAnswerDroppedFields, launchConsoleFlow } from '../flowLaunch';
+import { announceFlowDroppedFields, flowAnswerDroppedFields, launchConsoleFlow, withAnnouncedUpdateDroppedFields } from '../flowLaunch';
 
 const SCHEMAS: Record<string, { fields: Record<string, { label: string }> }> = {
   expense_report: { fields: { status: { label: 'Approval status' } } },
@@ -133,5 +133,56 @@ describe('launchConsoleFlow — a failed run says only that it failed', () => {
     expect(launch.judged.result.success).toBe(false);
     await new Promise((r) => setTimeout(r, 0));
     expect(toasts.warning).not.toHaveBeenCalled();
+  });
+});
+
+describe('withAnnouncedUpdateDroppedFields — a declarative update action\'s stripped fields (objectstack#38103)', () => {
+  const UPDATE = { type: 'script', name: 'submit', objectName: 'expense_report', operation: 'update', patch: { status: 'submitted' } } as never;
+  const STRIPPED = [{ object: 'expense_report', fields: ['status'], reason: 'readonly' }];
+  /** A server-action handler answering `data`, with the member core's factory sets. */
+  function handlerAnswering(result: unknown) {
+    const refuseBeforeInput = vi.fn(() => undefined);
+    return Object.assign(vi.fn(async () => result as never), { refuseBeforeInput });
+  }
+  /** The announcement is not awaited by the wrapper: let its label lookup settle. */
+  const settle = () => new Promise((r) => setTimeout(r, 0));
+
+  it('warns with the record save\'s own stripped-fields toast, labelled, and hands the result back unchanged', async () => {
+    const result = { success: true, data: { operation: 'update', object: 'expense_report', id: 'r1', record: {}, droppedFields: STRIPPED } };
+    const s = sink();
+    const wrapped = withAnnouncedUpdateDroppedFields(handlerAnswering(result), () => ctx, s);
+
+    expect(await wrapped(UPDATE)).toBe(result);
+    await settle();
+    expect(s.warning).toHaveBeenCalledTimes(1);
+    expect(s.warning.mock.calls[0][0]).toBe('Saved — but some fields did not take effect');
+    expect(s.warning.mock.calls[0][1].description).toBe('Read-only, so it did not take effect: Approval status');
+  });
+
+  it('keeps the handler\'s `refuseBeforeInput` member', () => {
+    const inner = handlerAnswering({ success: true });
+    expect(withAnnouncedUpdateDroppedFields(inner, () => ctx, sink()).refuseBeforeInput).toBe(inner.refuseBeforeInput);
+  });
+
+  it('control: an update answer without the member warns about nothing', async () => {
+    const s = sink();
+    await withAnnouncedUpdateDroppedFields(handlerAnswering({ success: true, data: { operation: 'update', record: {} } }), () => ctx, s)(UPDATE);
+    await settle();
+    expect(s.warning).not.toHaveBeenCalled();
+  });
+
+  it('a failed dispatch is not told "saved, but"', async () => {
+    const s = sink();
+    await withAnnouncedUpdateDroppedFields(handlerAnswering({ success: false, error: 'Refused', data: { droppedFields: STRIPPED } }), () => ctx, s)(UPDATE);
+    await settle();
+    expect(s.warning).not.toHaveBeenCalled();
+  });
+
+  it('reverse pin: an action WITHOUT `operation: \'update\'` never has its answer\'s `droppedFields` key read', async () => {
+    const s = sink();
+    const script = { type: 'script', name: 'recalc', objectName: 'expense_report', target: 'recalc' } as never;
+    await withAnnouncedUpdateDroppedFields(handlerAnswering({ success: true, data: { droppedFields: STRIPPED } }), () => ctx, s)(script);
+    await settle();
+    expect(s.warning).not.toHaveBeenCalled();
   });
 });

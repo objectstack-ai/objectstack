@@ -344,3 +344,32 @@ describe('record page — an update whose write raised warnings warns, on one to
     await waitFor(() => expect(dataSource.update).toHaveBeenLastCalledWith(OBJECT_NAME, RECORD_ID, { account: 'a1' }));
   });
 });
+
+describe('record page — an update\'s notice and stripped fields reach the person (objectstack#38103)', () => {
+  it('the success toast carries the hook\'s notice and Undo; the stripped field gets the record save\'s own toast', async () => {
+    const NOTICE = 'Reassigning this deal notified the new account owner.';
+    route.answerData = {
+      operation: 'update',
+      object: OBJECT_NAME,
+      id: RECORD_ID,
+      record: { id: RECORD_ID, account: 'a2' },
+      notice: NOTICE,
+      droppedFields: [{ object: OBJECT_NAME, fields: ['config'], reason: 'readonly' }],
+    };
+    const { dataSource, description, undo } = await runOnRecordPage(
+      EXPANDED_RECORD,
+      (loaded) => operationUpdate({ account: 'a2', config: { mode: 'loose' } }, loaded),
+    );
+
+    expect(description).toBe(NOTICE);
+    // The stripped field: one warning toast, the record save's own title.
+    await waitFor(() => expect(toast.warning).toHaveBeenCalledTimes(1));
+    const [title, stripped] = vi.mocked(toast.warning).mock.calls[0] as [string, { description?: string }];
+    expect(title).toBe('Saved — but some fields did not take effect');
+    expect(stripped.description).toMatch(/config/i);
+
+    // The kept Undo is the page's real one.
+    await undo();
+    await waitFor(() => expect(dataSource.update).toHaveBeenLastCalledWith(OBJECT_NAME, RECORD_ID, expect.objectContaining({ account: 'a1' })));
+  });
+});

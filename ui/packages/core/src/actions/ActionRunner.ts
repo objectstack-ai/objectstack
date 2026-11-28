@@ -638,9 +638,11 @@ export type ConfirmationHandler = (message: string, options?: {
 export type ToastHandler = (message: string, options?: {
   type?: 'success' | 'error' | 'info' | 'warning';
   duration?: number;
-  /** A second line under `message`, one entry per line (`\n`-joined). Set on
-   *  a `warning` toast to carry the warnings of the write the action made
-   *  (objectstack#37867), as a record save's toast carries them. */
+  /** A second line under `message`, one entry per line (`\n`-joined). Carries
+   *  what the write the action made told the person beyond "done": the
+   *  `notice` a hook set (objectstack#38103), then the write's warnings
+   *  (objectstack#37867), as a record save's toast carries them. A toast with
+   *  warnings is a `warning` one; a notice alone keeps it a `success`. */
   description?: string;
   /** When set, the toast offers an "Undo" affordance (the runner has already
    *  pushed the operation onto the global UndoManager). */
@@ -1310,6 +1312,24 @@ function updateAnswerWarningLines(action: ActionDef, result: ActionResult): stri
     if (typeof message === 'string' && message.trim() !== '' && !lines.includes(message)) lines.push(message);
   }
   return lines;
+}
+
+/**
+ * The message a hook on an `operation: 'update'` action's write set for the
+ * person who clicked (`ctx.notice` on the server, objectstack#38103), or
+ * `undefined` when it set none.
+ *
+ * The route's declarative-update answer carries it as `notice` exactly as the
+ * data door answers a record save, and a record save's one toast leads with it
+ * (`@object-ui/react`'s `toastRecordSave`, which this package sits below and
+ * cannot import): it reports an outcome, never a problem. Asked of an update
+ * action only, for the same reason as {@link updateAnswerWarningLines}.
+ */
+function updateAnswerNotice(action: ActionDef, result: ActionResult): string | undefined {
+  if (!isUpdateOperationAction(action)) return undefined;
+  const payload = readActionPayload(result.data);
+  const notice = payload && typeof payload === 'object' ? (payload as { notice?: unknown }).notice : undefined;
+  return typeof notice === 'string' && notice.trim() !== '' ? notice : undefined;
 }
 
 /**
@@ -2259,6 +2279,12 @@ export class ActionRunner {
       // success toast, which then takes the warning variant: one toast, as a
       // record save raises one.
       const warnings = result.success ? updateAnswerWarningLines(action, result) : [];
+      // objectstack#38103 — the notice a hook on the write set leads the same
+      // toast's lines; alone it keeps the toast a success (`toastRecordSave`'s
+      // rule). The write's stripped fields are not this toast's: the host
+      // raises the record save's own stripped-fields toast beside it.
+      const notice = result.success ? updateAnswerNotice(action, result) : undefined;
+      const lines = notice !== undefined ? [notice, ...warnings] : warnings;
 
       if (result.success && !hasResultDialog && !result.silent && showToast.showOnSuccess !== false) {
         // The server returns FACTS and the console writes the sentence
@@ -2275,17 +2301,19 @@ export class ActionRunner {
         this.toastHandler(message, {
           type: warnings.length > 0 ? 'warning' : 'success',
           duration,
-          ...(warnings.length > 0 ? { description: warnings.join('\n') } : {}),
+          ...(lines.length > 0 ? { description: lines.join('\n') } : {}),
           undo: result.undo ? { label: this.runnerText(RUNNER_TEXT.undo) } : undefined,
         });
-      } else if (warnings.length > 0 && !result.silent) {
+      } else if (lines.length > 0 && !result.silent) {
         // The success toast is not shown (the author turned it off, or a
-        // result dialog replaces it), but a warning is not a success message:
-        // the rule's author asked for the person to be told. The rule's own
-        // words are the whole toast, so no runner text is needed for it.
-        const [first, ...rest] = warnings;
+        // result dialog replaces it), but a warning or a hook's notice is not
+        // a success message: the rule's or the hook's author asked for the
+        // person to be told. Their own words are the whole toast, so no runner
+        // text is needed for it — a notice alone is an `info` toast, as a
+        // record save's unclaimed notice is.
+        const [first, ...rest] = lines;
         this.toastHandler(first, {
-          type: 'warning',
+          type: warnings.length > 0 ? 'warning' : 'info',
           duration,
           ...(rest.length > 0 ? { description: rest.join('\n') } : {}),
         });

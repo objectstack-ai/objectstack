@@ -347,3 +347,83 @@ describe('grid row — an update whose write raised warnings warns, on one toast
     await waitFor(() => expect(dataSource.update).toHaveBeenLastCalledWith(OBJECT, 'o1', { account: 'a1' }));
   });
 });
+
+describe('grid row — an update\'s notice and stripped fields reach the person (objectstack#38103)', () => {
+  const NOTICE = 'Reassigning this deal notified the new account owner.';
+  const STRIPPED_TITLE = 'Saved — but some fields did not take effect';
+
+  async function runSetAccount() {
+    const dataSource = makeDataSource();
+    render(
+      <I18nProvider config={EN} persistLanguage={false}>
+        <MemoryRouter>
+          <ConsoleActionRuntimeProvider dataSource={dataSource} objects={[OBJECT_DEF]} objectName={OBJECT}>
+            <SchemaRendererProvider dataSource={dataSource as never}>
+              <ObjectGrid
+                schema={{
+                  type: 'object-grid',
+                  objectName: OBJECT,
+                  columns: ['name', 'account'],
+                  rowActionDefs: [{
+                    locations: ['list_item'], successMessage: MESSAGE, name: 'set_account', label: 'Set account',
+                    type: 'script', operation: 'update', undoable: true, patch: { account: 'a2', config: { mode: 'loose' } },
+                  }],
+                } as never}
+                dataSource={dataSource as never}
+              />
+            </SchemaRendererProvider>
+          </ConsoleActionRuntimeProvider>
+        </MemoryRouter>
+      </I18nProvider>,
+    );
+    await waitFor(() => expect(screen.getByText('Deal')).toBeInTheDocument());
+    await userEvent.click(await screen.findByTestId('row-action-trigger'));
+    await userEvent.click(await screen.findByTestId('row-action-set_account'));
+    return dataSource;
+  }
+
+  it('the success toast carries the hook\'s notice and Undo; the stripped field gets the record save\'s own toast, labelled', async () => {
+    routeAnswerData = {
+      operation: 'update',
+      object: OBJECT,
+      id: 'o1',
+      record: { ...STORED, account: 'a2' },
+      notice: NOTICE,
+      droppedFields: [{ object: OBJECT, fields: ['config'], reason: 'readonly' }],
+    };
+    const dataSource = await runSetAccount();
+
+    const call = await waitFor(() => {
+      const found = vi.mocked(toast.success).mock.calls.find(([m]) => m === MESSAGE);
+      expect(found).toBeTruthy();
+      return found!;
+    });
+    const options = call[1] as { description?: string; action?: { onClick: () => void } };
+    expect(options.description).toBe(NOTICE);
+    expect(options.action).toBeDefined();
+
+    // The stripped field: one warning toast, the record save's title, the field by its label.
+    await waitFor(() => expect(toast.warning).toHaveBeenCalledTimes(1));
+    const [title, stripped] = vi.mocked(toast.warning).mock.calls[0] as [string, { description?: string }];
+    expect(title).toBe(STRIPPED_TITLE);
+    expect(stripped.description).toContain('Config');
+    expect(dataSource.getObjectSchema).toHaveBeenCalledWith(OBJECT);
+
+    // The kept Undo is the runtime's real one.
+    await act(async () => { options.action!.onClick(); });
+    await waitFor(() => expect(dataSource.update).toHaveBeenLastCalledWith(OBJECT, 'o1', expect.objectContaining({ account: 'a1' })));
+  });
+
+  it('control: an answer with neither raises the plain success toast and no stripped-fields toast', async () => {
+    routeAnswerData = { operation: 'update', object: OBJECT, id: 'o1', record: { ...STORED, account: 'a2' } };
+    await runSetAccount();
+
+    const call = await waitFor(() => {
+      const found = vi.mocked(toast.success).mock.calls.find(([m]) => m === MESSAGE);
+      expect(found).toBeTruthy();
+      return found!;
+    });
+    expect((call[1] as { description?: string }).description).toBeUndefined();
+    expect(toast.warning).not.toHaveBeenCalled();
+  });
+});

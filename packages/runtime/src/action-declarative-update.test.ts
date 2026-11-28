@@ -37,7 +37,7 @@
  * collapse or the not-found envelope is mocked away.
  */
 
-import { describe, it, expect, vi } from 'vitest';
+import { describe, it, expect, vi, afterEach } from 'vitest';
 // Paid at collection, not inside a case's clock (check:test-source-alias).
 import '@objectstack/metadata';
 
@@ -46,7 +46,12 @@ import { assertEngineUpdateDispatch } from '@objectstack/metadata-core';
 // loads it lazily (check:test-source-alias).
 import '@objectstack/metadata';
 
+import { ObjectQL } from '@objectstack/objectql';
+import { SqlDriver } from '@objectstack/driver-sql';
+import { ObjectStackProtocolImplementation } from '@objectstack/metadata-protocol';
+
 import { HttpDispatcher } from './http-dispatcher.js';
+import { installDefaultOrganization } from './default-organization.testkit.js';
 import {
     callData,
     invokeBusinessAction,
@@ -900,5 +905,167 @@ describe('#37867 — a declarative update answers the `warnings` its data-plane 
         expect(res.status).toBe(200);
         expect(protocol.updateData).toHaveBeenCalledTimes(1);
         expect('warnings' in res.body.data).toBe(false);
+    });
+});
+
+// ───────────────────────────────────────────────────────────────────────────
+// [#38103] The write's `notice` and `droppedFields` ride the action's answer
+// ───────────────────────────────────────────────────────────────────────────
+
+/**
+ * A hook on the write tells the person what it set in motion (`ctx.notice`),
+ * and the engine reports every field it did not store (`droppedFields`); the
+ * data door answers both (`protocol.updateData`). A button that performs the
+ * same write answers the same, at both doors — or the hook's message reaches
+ * only people who edit the form, and a field the engine stripped from the
+ * action's `patch` is answered as a plain success.
+ *
+ * Unlike the blocks above, nothing here is a double: a REAL `ObjectQL` engine
+ * on the REAL `SqlDriver` (better-sqlite3, `:memory:`), the REAL `ObjectStackProtocolImplementation`
+ * as the `protocol` service, and an object whose `closed_reason` is
+ * `readonly: true` — the strip, the hook's message and the data door's answer
+ * are the producers' own. Each case compares the action's answer with the
+ * data door's answer to the SAME write on a fresh engine.
+ */
+describe('#38103 — a declarative update answers the `notice` and `droppedFields` of its data-plane write', () => {
+    const FB_OBJECT = 'fb_case';
+    const FB_RECORD = 'fbc_1';
+    const NOTICE = 'Closing this case notified the customer.';
+    const CLOSE_WITH_REASON = {
+        name: 'close_with_reason',
+        label: 'Close',
+        operation: 'update',
+        // `closed_reason` is `readonly: true`: the engine strips it from the caller's write.
+        patch: { status: 'closed', closed_reason: 'resolved' },
+        ai: { exposed: true, description: 'Close this support case and record why it was closed.' },
+    };
+    const SET_PRIORITY = {
+        name: 'set_priority',
+        label: 'Set priority',
+        operation: 'update',
+        patch: { priority: 'high' },
+        ai: { exposed: true, description: 'Raise the priority of this support case to high.' },
+    };
+    const FB_OBJECT_DEF: any = {
+        name: FB_OBJECT,
+        fields: {
+            status: { type: 'text' },
+            priority: { type: 'text' },
+            closed_reason: { type: 'text', readonly: true },
+        },
+        actions: [CLOSE_WITH_REASON, SET_PRIORITY],
+    };
+    const quiet = { info() {}, debug() {}, warn() {}, error() {} };
+    const booted: ObjectQL[] = [];
+    afterEach(async () => {
+        for (const engine of booted.splice(0)) {
+            try { await engine.destroy(); } catch { /* noop */ }
+        }
+    });
+
+    async function boot() {
+        const engine = new ObjectQL({ logger: quiet } as any);
+        booted.push(engine);
+        engine.registerDriver(new SqlDriver({ client: 'better-sqlite3', connection: { filename: ':memory:' }, useNullAsDefault: true }) as any, true);
+        await engine.init();
+        engine.registry.registerObject(FB_OBJECT_DEF as never, 'com.objectstack.test.38103');
+        await engine.syncSchemas();
+        await installDefaultOrganization(engine);
+        // The hook says what closing did, from the write it is handed.
+        engine.registerHook('beforeUpdate', async (ctx: any) => {
+            if (ctx.input?.data?.status === 'closed') ctx.notice(NOTICE);
+        }, { object: FB_OBJECT });
+        await engine.insert(FB_OBJECT, { id: FB_RECORD, status: 'open', priority: 'low' }, { context: { isSystem: true } });
+        const protocol = new ObjectStackProtocolImplementation(engine as never);
+        return { engine, protocol };
+    }
+
+    /** The data door's own answer to the write the action makes, on a fresh engine. */
+    async function dataDoorAnswer(patch: Record<string, unknown>) {
+        const { protocol } = await boot();
+        return await protocol.updateData({ object: FB_OBJECT, id: FB_RECORD, data: patch, context: ec(OWNER) } as any) as any;
+    }
+
+    async function restOn(path: string) {
+        const { engine, protocol } = await boot();
+        const metadata: any = {
+            load: vi.fn(async () => null),
+            loadDiagnosed: vi.fn(async () => ({ data: null, degraded: false, errors: [] })),
+            listObjects: vi.fn(async () => [FB_OBJECT_DEF]),
+            getObject: vi.fn(async (n: string) => (n === FB_OBJECT ? FB_OBJECT_DEF : undefined)),
+        };
+        const kernel: any = {
+            context: {
+                getService: (n: string) =>
+                    n === 'objectql' || n === 'data' ? engine
+                        : n === 'metadata' ? metadata
+                            : n === 'protocol' ? protocol
+                                : null,
+            },
+        };
+        const context: any = { request: {}, environmentId: 'platform', executionContext: ec(OWNER) };
+        const res: any = await (new HttpDispatcher(kernel) as any).handleActions(path, 'POST', {}, context);
+        const stored: any = await engine.findOne(FB_OBJECT, { where: { id: FB_RECORD }, context: { isSystem: true } });
+        return { response: res.response, stored };
+    }
+
+    async function mcpOn(name: string) {
+        const { engine, protocol } = await boot();
+        const deps: any = {
+            resolveService: async (_ctx: unknown, n: string) => (n === 'protocol' ? protocol : undefined),
+            getObjectQL: async () => engine,
+        };
+        const requestContext: any = { request: {}, environmentId: 'platform' };
+        return await invokeBusinessAction(deps, requestContext, name, { recordId: FB_RECORD } as any, {
+            driver: undefined,
+            envId: 'platform',
+            ec: ec(OWNER),
+            getMeta: () => ({ listObjects: async () => [FB_OBJECT_DEF] }),
+            callData: (action, params, dataDriver, scopeId, execCtx) =>
+                callData(deps, requestContext, action, params, dataDriver, scopeId, execCtx),
+        }) as any;
+    }
+
+    it('control: the data door answers the hook\'s notice and the stripped field for this write', async () => {
+        const answer = await dataDoorAnswer(CLOSE_WITH_REASON.patch);
+        expect(answer.notice).toBe(NOTICE);
+        expect(answer.droppedFields).toEqual([{ object: FB_OBJECT, fields: ['closed_reason'], reason: 'readonly' }]);
+    });
+
+    it('REST: the 200 answer carries the same `notice` and `droppedFields` as the data door', async () => {
+        const door = await dataDoorAnswer(CLOSE_WITH_REASON.patch);
+        const { response, stored } = await restOn(`/${FB_OBJECT}/close_with_reason/${FB_RECORD}`);
+
+        expect(response.status).toBe(200);
+        expect(response.body.success).toBe(true);
+        expect(response.body.data).toMatchObject({ operation: DECLARATIVE_UPDATE_OPERATION, object: FB_OBJECT, id: FB_RECORD });
+        expect(response.body.data.notice).toBe(door.notice);
+        expect(response.body.data.droppedFields).toEqual(door.droppedFields);
+        // The strip is real: the row took `status` and not `closed_reason`.
+        expect(stored.status).toBe('closed');
+        expect(stored.closed_reason ?? null).toBeNull();
+    });
+
+    it('MCP `run_action`: the same write answers the same `notice` and `droppedFields`', async () => {
+        const door = await dataDoorAnswer(CLOSE_WITH_REASON.patch);
+        const out = await mcpOn('close_with_reason');
+
+        expect(out.ok).toBe(true);
+        expect(out.result.notice).toBe(door.notice);
+        expect(out.result.droppedFields).toEqual(door.droppedFields);
+    });
+
+    it('a write no hook spoke on and nothing was stripped from carries neither key', async () => {
+        // ABSENT, never `''` or `[]` — the data door's own shape; the firing
+        // positive control is the REST case above, same engine and object.
+        const door = await dataDoorAnswer(SET_PRIORITY.patch);
+        expect('notice' in door).toBe(false);
+        expect('droppedFields' in door).toBe(false);
+
+        const { response, stored } = await restOn(`/${FB_OBJECT}/set_priority/${FB_RECORD}`);
+        expect(response.status).toBe(200);
+        expect(stored.priority).toBe('high');
+        expect('notice' in response.body.data).toBe(false);
+        expect('droppedFields' in response.body.data).toBe(false);
     });
 });
