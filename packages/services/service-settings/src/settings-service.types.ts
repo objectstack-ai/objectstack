@@ -551,6 +551,28 @@ export type SettingsLiveStatusProvider = (input: {
   locale?: string;
 }) => Promise<SettingsLiveStatus | undefined> | SettingsLiveStatus | undefined;
 
+/**
+ * What the running deployment itself declares for one manifest key: the value
+ * the key takes in the running system while nothing is stored for it and no
+ * `OS_*` override is in force. A manifest `default` is the console's default;
+ * a package whose runtime takes a key from its own configuration when nothing
+ * is stored (plugin options, a host declaration) states that value here, so
+ * the bottom rung of the cascade answers what runs, not a default nothing
+ * applies (ADR-0007 §Resolution, rung 4, as amended).
+ *
+ * Answered with `undefined` (or `null`) when the deployment declares nothing
+ * for the key: the manifest `default` then stands, unchanged. Asked at the
+ * moment it is used, never recorded: on every read that reaches the bottom
+ * rung (`get`, `getMany`, `getNamespace`, and through them a write's change
+ * test), when a patch clears the key, and as the type an `OS_*` value is read
+ * as. A provider that throws is reported once and the manifest `default`
+ * answers in its place.
+ *
+ * The answer still reports `source: 'default'`: the value is the deployment's
+ * default, nothing is stored, and a clear returns to it.
+ */
+export type SettingsDeclaredDefault = () => unknown;
+
 /** One option a {@link SettingsOptionSource} serves: the stored value and its name. */
 export interface SettingsServedOption {
   value: string;
