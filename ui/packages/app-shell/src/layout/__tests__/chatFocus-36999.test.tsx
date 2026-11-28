@@ -56,7 +56,7 @@ const state = {
   /** While set, a create waits on it before the server answers. */
   holdCreate: null as Promise<void> | null,
   /** A row's read waits on its entry before the server answers. */
-  holdRead: {} as Record<string, Promise<void>>,
+  holdRead: {} as Record<string, Promise<void> | undefined>,
 };
 
 /** A gate a stub waits on, and the call that opens it. */
