@@ -2678,12 +2678,8 @@ const ar = {
       suggestionsLabel: 'أسئلة مقترحة',
       discussing: "قيد العرض: {{target}}",
       focus: {
-        pin: "مواصلة السؤال عن هذا السجل",
         pinned: "السؤال عن: {{target}}",
         remove: "التوقف عن السؤال عن هذا السجل",
-        switchPrompt: "هل تريد السؤال عن «{{target}}» بدلاً من ذلك؟",
-        switchAccept: "تبديل",
-        switchDecline: "إبقاء",
       },
       // objectui#3546 slice four — the AI console surfaces: the /ai chat page's app switcher,
       // connection banner and plan/publish cards, the ChatDock chrome, and the

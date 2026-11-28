@@ -2709,12 +2709,8 @@ const zhHant = {
       showChats: '顯示對話列表',
       discussing: '正在看：{{target}}',
       focus: {
-        pin: '釘住這條記錄，換頁後仍問它',
         pinned: '正在問：{{target}}',
         remove: '不再問這條記錄',
-        switchPrompt: '改為問《{{target}}》？',
-        switchAccept: '改為問它',
-        switchDecline: '不用',
       },
       justNow: '剛剛',
       minutesAgo: '{{count}} 分鐘前',

@@ -2471,12 +2471,8 @@ const pt = {
       suggestionsLabel: 'Perguntas sugeridas',
       discussing: "Vendo: {{target}}",
       focus: {
-        pin: "Continuar perguntando sobre este registro",
         pinned: "Perguntando sobre: {{target}}",
         remove: "Parar de perguntar sobre este registro",
-        switchPrompt: "Perguntar sobre \"{{target}}\" em vez disso?",
-        switchAccept: "Trocar",
-        switchDecline: "Manter",
       },
       // objectui#3546 slice four — the AI console surfaces: the /ai chat page's app switcher,
       // connection banner and plan/publish cards, the ChatDock chrome, and the

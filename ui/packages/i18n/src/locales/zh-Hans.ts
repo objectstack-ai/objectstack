@@ -2709,12 +2709,8 @@ const zh = {
       showChats: '显示对话列表',
       discussing: '正在看：{{target}}',
       focus: {
-        pin: '钉住这条记录，换页后仍问它',
         pinned: '正在问：{{target}}',
         remove: '不再问这条记录',
-        switchPrompt: '改为问《{{target}}》？',
-        switchAccept: '改为问它',
-        switchDecline: '不用',
       },
       justNow: '刚刚',
       minutesAgo: '{{count}} 分钟前',

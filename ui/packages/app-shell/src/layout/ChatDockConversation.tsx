@@ -27,7 +27,7 @@ import { chatConversationScope, chatProductOfAgent } from '../hooks/chatScope.js
 import { resolveSurfaceAgent } from '../hooks/surfaceAgent.js';
 import { isAiStudioEnabled } from '../runtime-config.js';
 import type { ChatSurfaceContext } from './chatSurfaceContext.js';
-import { useConversationFocus } from './chatFocus.js';
+import { surfaceRecord, useConversationFocus } from './chatFocus.js';
 import {
   sameDockTarget,
   type ChatDockConversationActions,
@@ -186,6 +186,8 @@ export function ChatDockConversation({
     initialMessages,
     ensureConversation,
     createError,
+    conversationMetadata,
+    createdConversationId,
   } = useChatConversation({
     userId: conversationUserId,
     scope,
@@ -227,13 +229,26 @@ export function ChatDockConversation({
   // ADR-0028 — the composer's picked model, held here so it outlives the keyed
   // pane's remount when the first send mints the conversation.
   const [selectedModelId, setSelectedModelId] = React.useState<string | undefined>(undefined);
-  // objectstack#36999 — the thread's focus (the record the user pinned it to),
-  // held here for the same reason. It rides on the thread the scope resolved
-  // and never re-keys it: a focus does not change which conversation the
-  // drawer shows (ADR-0057 as amended for objectui#10926).
-  const conversationFocus = useConversationFocus(paneConversationId, createError);
-  // A first send creates the conversation: the id it mints takes the focus
-  // pinned before it (and no other arriving id does).
+  // objectstack#36999 — the thread's focus (the record it is about), held here
+  // for the same reason. It rides on the thread the scope resolved and never
+  // re-keys it: a focus does not change which conversation the drawer shows
+  // (ADR-0057 as amended for objectui#10926).
+  // objectstack#37861 (ADR-0160 D6, seventh amendment) — until the first send
+  // the focus is the page's record; a thread opened again restores its own
+  // from this tab or from its row's metadata. Another target while unsent is
+  // another conversation, so × on the last one does not carry over.
+  const pageRecord = React.useMemo(() => surfaceRecord(surfaceContext), [surfaceContext]);
+  const focusOrigin = React.useMemo(() => (target ? JSON.stringify(target) : undefined), [target]);
+  const conversationFocus = useConversationFocus(
+    paneConversationId,
+    createError,
+    pageRecord,
+    scopeMatched ? conversationMetadata : undefined,
+    focusOrigin,
+    createdConversationId,
+  );
+  // A first send creates the conversation: the id its create mints takes the
+  // focus the conversation had at that send (and no other arriving id does).
   const { markSending: markFocusSending } = conversationFocus;
   const ensureConversationForSend = React.useCallback(() => {
     // With no user there is nothing to create: no mark, so no id that
