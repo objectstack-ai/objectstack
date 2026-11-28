@@ -146,5 +146,11 @@ describe('action-type-ask-ai-removed (ADR-0160 D7)', () => {
     // Over sources and at rest alike, the group is not left at a word protocol 19 draws nowhere.
     expect(componentOf(applyMetaMigrations(group(), 18, 19).stack)).toEqual(expected);
     expect(componentOf(applyConversions(group(), { includeRetired: true }))).toEqual(expected);
+    // And no hand-rewrite TODO is left for a group the table converted.
+    for (const includeRetired of [false, true]) {
+      const todos: string[] = [];
+      applyConversions(group(), { includeRetired, onTodo: (t) => todos.push(t.conversionId) });
+      expect(todos).not.toContain('action-locations-acted-on');
+    }
   });
 });
